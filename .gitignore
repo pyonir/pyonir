@@ -1,0 +1,69 @@
+# Byte-compiled Python files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+.env/
+.venv/
+env/
+pip-wheel-metadata/
+
+# IntelliJ / PyCharm project files
+.idea/
+*.iml
+
+# VSCode workspace settings
+.vscode/
+
+# Python packaging artifacts
+build/
+dist/
+*.egg-info/
+*.eggs/
+
+# Setuptools distribution
+*.manifest
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Tests and coverage reports
+htmlcov/
+.tox/
+.nox/
+.pytest_cache/
+coverage.xml
+*.cover
+.hypothesis/
+
+# Jupyter notebooks checkpoints
+.ipynb_checkpoints/
+
+# System-specific files
+.DS_Store
+Thumbs.db
+
+# Python lock files
+poetry.lock
+Pipfile.lock
+
+# Documentation
+docs/_build/
+
+# Logs and temp files
+*.log
+*.tmp
+*.bak
+*.swp
+
+# Wheel distributions
+*.whl
+
+# Compiled C extensions
+*.so
+*.dll
+*.dylib
+
+# Python project build files
+.mypy_cache/

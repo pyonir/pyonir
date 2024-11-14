@@ -1,0 +1,3 @@
+graft pyonir
+include setup.py
+global-exclude *.py[cod]

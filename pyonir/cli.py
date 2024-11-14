@@ -1,5 +1,6 @@
 import os, inquirer
 
+
 class PyonirSetup:
     create_app_msg = "Create a new Pyonir app"
     deploy_app_msg = "Deploy Pyonir app"

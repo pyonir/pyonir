@@ -3,7 +3,6 @@ import os, inquirer
 
 class PyonirSetup:
     create_app_msg = "Create a new Pyonir app"
-    deploy_app_msg = "Deploy Pyonir app"
     exit_cli_msg = "Exiting Pyonir cli"
 
     def __init__(self):
@@ -23,15 +22,14 @@ class PyonirSetup:
         self.action = inquirer.prompt([
             inquirer.List('action',
                           message="What would you like to do?",
-                          choices=[self.create_app_msg, self.deploy_app_msg, self.exit_cli_msg],
+                          choices=[self.create_app_msg, self.exit_cli_msg],
                           ),
         ])['action']
 
         # Process user selection
         if self.action == self.create_app_msg:
-            self.scaffold_new_app()
-        elif self.action == self.deploy_app_msg:
-            self.perform_task_2()
+            self.decide_project_name()
+            self.decide_use_frontend()
         elif self.action == self.exit_cli_msg:
             print(self.summary)
             exit(0)
@@ -43,14 +41,20 @@ class PyonirSetup:
                           choices=['Go back to main menu', 'Exit'],
                           ),
         ])['action_step']
-
+        self.summary = f'''
+Project {self.app_name} created!
+- path: {self.app_path}
+- use frontend: {self.app_use_frontend}
+    - install frontend: {self.frontend_tool}
+        '''
         if self.action_step == 'Go back to main menu':
             self.intro()
         else:
+            print(self.summary)
             print("Exiting the app.")
             exit(0)
 
-    def scaffold_new_app(self):
+    def decide_project_name(self):
         # print("You chose Task 1!")
         # Additional options or tasks for Task 1
         # Choose an App Name
@@ -62,6 +66,7 @@ class PyonirSetup:
 
         self.app_path = os.path.join(self.user_dir, self.app_name)
 
+    def decide_use_frontend(self):
         # Choose optional Frontend
         self.app_use_frontend = inquirer.prompt([
             inquirer.Text('app_use_frontend',
@@ -71,12 +76,6 @@ class PyonirSetup:
         if self.app_use_frontend:
             self.decide_frontend_tool()
 
-        self.summary = f'''
-Project {self.app_name} created!
-- path: {self.app_path}
-- use frontend: {self.app_use_frontend}
-    - install frontend: {self.frontend_tool}
-        '''
         self.outro()
 
     def decide_frontend_tool(self):
@@ -87,10 +86,6 @@ Project {self.app_name} created!
                           ),
         ])['use_frontend_tool']
 
-    def perform_task_2(self):
-        print("You chose Task 2!")
-        # Additional options or tasks for Task 2
-        self.outro()
 
 
 PyonirSetup()

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>0.0.0.0</loc><priority>1.0</priority></url> <url><loc>http://0.0.0.0/ws-game</loc><priority>1.0</priority></url>
+<url><loc>http://0.0.0.0/sample</loc><priority>1.0</priority></url>
+<url><loc>http://0.0.0.0/uploader-demo</loc><priority>1.0</priority></url>
+<url><loc>http://0.0.0.0/sse-demo</loc><priority>1.0</priority></url>
+<url><loc>http://0.0.0.0/</loc><priority>1.0</priority></url>
+<url><loc>http://0.0.0.0/ws-chat</loc><priority>1.0</priority></url>
+<url><loc>http://0.0.0.0/blogs/digital-artists</loc><priority>1.0</priority></url>
+<url><loc>http://0.0.0.0/blogs</loc><priority>1.0</priority></url>
+ </urlset>

@@ -1,0 +1,47 @@
+{% extends 'base.html' %}
+{% block content %}
+
+{% set pagenum, limit, paginate = page.pagenum, page.limit, page.paginate %}
+{% set start = (pagenum*limit) - limit %}
+{% set end = limit*pagenum %}
+<h1>
+    {{page.title}}
+</h1>
+{{page.content|safe}}
+
+
+{% if page.form %}
+{{ system.formbuilder( data=page) }}
+{% endif %}
+
+{% if page.gallery %}
+<div class="gallery">
+    {% for image in page.gallery.files if image.is_thumb %}
+    <figure>
+        <img
+            src="{{image.url}}"
+            alt="{{image.name}}"
+        />
+        <figcaption>
+            {{image.data.group}}
+            <a href="{{image.data.full_url}}" target="_blank">{{image.name}}</a>
+            <button type="submit">Delete</button>
+        </figcaption>
+    </figure>
+    {% endfor %}
+</div>
+{% endif %}
+
+{% if page.entries %}
+<ul>
+    {% for entry in page.entries.collection %}
+    <li><a href="{{entry.url}}">{{entry.title}}</a></li>
+    {% endfor %}
+</ul>
+{% endif %}
+{% endblock %}
+
+{% block js %}
+    {{super()}}
+    {{ page.js.script }}
+{% endblock %}

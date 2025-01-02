@@ -1,0 +1,63 @@
+{% import 'system_macros.html' as system %} 
+<!doctype html>
+{% minify %}
+<html lang="en">
+     <head>
+        {% block head %}{{system.head(data=page)}}{% endblock %}
+        <!--  CSS -->
+        <link rel="stylesheet" href="{{url_for('public')}}/css/pencil.css">
+
+        {# {% assets "css/hyper.css", filters='cssmin', output='css/compact.min.css'%} 
+            <link rel="stylesheet" href="{{ ASSET_URL }}"> 
+        {% endassets %} #}
+        <!--  js -->
+    </head> 
+
+
+    <body class="{% block bodyclass %}home {% endblock %}">
+
+        <header id="header" class="row">
+            <nav id="navigation" class="header-menu piped">
+                <ul class="menu center">
+                    {% set active_page = request.path %}
+                    {% for page in navigation.primary %}
+                        <li class="{{'active' if active_page == page.url else ''}}">
+                            <a href="{{page.url}}">{{page.name}}{{page.menu_icon}}</a>
+                        <!-- {% if page.sub_menu %}
+                            <ul class="sub-menu">
+                                {% for subpage in page.sub_menu %}
+                                    <li><a href="{{subpage.url}}">{{subpage.name}}</a></li>
+                                {% endfor %}  
+                            </ul>
+                        {% endif %} -->
+                        </li>
+                    {% endfor %}
+                </ul>
+            </nav>
+        </header>
+
+        <div id="content" class="row"> 
+            <div class="content-body">
+            {% block content %}
+<h1 style="text-align: center;">
+    {{page.title}}
+</h1>
+{{page.content|safe}}
+{% if page.form %}
+{{ system.formbuilder( data=page) }}
+{% endif %}
+            {% endblock %} 
+            </div>
+        </div>
+
+
+        <footer>
+            <div class="credits text-center">Pencil Theme Powered by Pycasso CMS</div>
+        </footer>
+    </body>
+{% block js %}
+<script src="{{url_for('pyonir_assets')}}/js/pycassojs.umd.js"></script>
+{% yield 'js' %}
+{% endblock %}
+</html>
+{% endminify %}

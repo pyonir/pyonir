@@ -1,0 +1,23 @@
+{% if data.audio %}
+	<audio controls>
+	  <source src="horse.ogg" type="audio/ogg">
+	  <source src="{{data.audiofile}}" type="audio/mpeg">
+	Your browser does not support the audio element.
+	</audio>
+{% elif data.audiourl %}
+	<audio controls>
+	  <source src="{{data.audiourl}}" type="audio/mpeg">
+	Your browser does not support the audio element.
+	</audio>
+{% elif data.video_file%}
+	<video controls preload="auto" muted="true">
+	  <source src="foo.ogg" type="video/ogg">
+	  <source src="{{data.video_file}}" type="video/mp4">
+	  Your browser does not support the <code>video</code> element.
+	</video>
+{% elif data.video_youtube %}
+<div class="center">
+	<iframe width="560" height="315" src="https://www.youtube.com/embed/{{ data.video_youtube }}" frameborder="0" allowfullscreen></iframe>
+</div>
+{% else %}
+{% endif %}

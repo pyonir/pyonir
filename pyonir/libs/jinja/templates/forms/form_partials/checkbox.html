@@ -1,0 +1,15 @@
+{% set choice = choice if choice else input %}
+{% set name = input.props.name if input.props.name else input.label_for %}
+<label for="{{choice.label_for}}"
+       class="form-label {{input.type}}{% if input.required and not grouped %} required{% endif %}">
+<input
+    type="{{input.type}}"
+    tabindex="0"
+    value="{{choice.label}}"
+    id="{{choice.label_for}}"
+    name="{{ name }}"
+    class="{% if input.required  %}required {% endif %}form-{{choice.type}}"
+    {% if form.type =="product" and choice.price %}data-variation-price="{{choice.price}}"{% endif %}
+    >
+    <i class="form-icon" for="{{choice.label_for}}"></i>{{ choice.label }}
+</label>

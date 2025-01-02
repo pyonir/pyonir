@@ -1,0 +1,13 @@
+{% if data.gallery %}
+<div class="row">
+    <div class="gallery-title">{{data.gallery.name}}</div>
+    <ul class="gallery menu inline">
+        {% for image in data.gallery.files %}
+            <li class="{% if loop.index % 4 == 0 %}last{% endif %}">
+                <a href="/uploads{{image.url}}" class="cropped torch" data-torch-group="{{image.album}}">
+                    <img src="/uploads/{{image.generate_thumb(90, 90)}}" alt="{{image.name}}" title="{{image.name}}"></a>
+            </li>
+        {% endfor %}
+    </ul>
+</div>
+{% endif %}

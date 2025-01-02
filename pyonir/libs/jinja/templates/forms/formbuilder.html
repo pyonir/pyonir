@@ -1,0 +1,38 @@
+{% if data.form %}
+{% set form = data.form %}
+{% set user = form.auth.user if form.auth else False %}
+{% set formname = form.file_name or 'hyper' %}
+{%- set formId = form.id or formname|replace('-','_')|replace(' ','_')+"_form" -%}
+<div id="pycasso_form" class="row {{form.type}} {{form.class}}">
+	<form id="{{ formId }}"
+	action="{{ form.action or 'api/v1/forms/'+formname }}"
+	method="{{ form.method or 'POST' }}" {% if form.multisteps %} data-step="step-1"{% endif %} type="{{ form.type }}" {% if form.type == 'media' %} enctype="multipart/form-data"{% endif %}>
+		<div class="form-messages row">
+			{% if form_msgs %}
+			<div class="alert">
+				{% for msg in form_msgs %}
+					<li>{{msg|safe}}</li>
+				{% endfor %}
+			</div>
+			{% endif %}
+		</div>
+		{% if form.redirect %}
+		<input type="hidden" name="redirect" value="{{form.redirect}}">
+		{% endif %}
+		<input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+		<!-- <input type="hidden" name="form_name" value="{{ form.form_name }}"> -->
+		{% if form.inputs %}	
+			{% for input in form.inputs %}
+				{% set groupindex = loop.index %}
+				{% include('forms/formelements.html') %}
+			{% endfor %}
+		{% endif %}
+		{% if form.type == 'product' %}
+			{# #}{% include('product-btn.html') %}
+		{% endif %}
+	</form>
+</div>
+
+{% endif %}
+
+

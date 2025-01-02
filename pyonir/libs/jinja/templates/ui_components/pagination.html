@@ -1,0 +1,13 @@
+<ul>
+    {% if pagenum > 1 %}
+    <li><a href="?pg={{pagenum-1}}">Previous</a></li>
+    {% endif %}
+    {% for num in range( 0,(paginate+1) ) %}
+        <li>
+        <a {% if num+1 == pagenum %}class="active"{% endif %} href="?pg={{num+1}}">{{num+1}}</a>
+        </li>
+    {% endfor %}
+    {% if pagenum < paginate+1 %}
+    <li><a href="?pg={{pagenum+1}}"> Next </a></li>
+    {% endif %}
+ </ul>

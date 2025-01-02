@@ -1,0 +1,44 @@
+<style type="text/css">
+.share-buttons ul.basic {
+    list-style: none;
+}
+.share-buttons ul li {display:inline}
+.share-buttons ul li a{
+    display:inline-block;
+    padding:1rem;
+}
+</style>
+{% if data %}
+<div class="share-buttons row ">
+<p>{{configs.share_message or 'Share this page!'}}</p>
+    <ul class="basic">
+<!-- Facebook -->
+    <li class="facebook">
+<a href="http://www.facebook.com/sharer.php?u={{configs.SITE.domain}}{{data.url}}" target="_blank" class="icon-facebook">
+	{# <img src="{{ url_for('pycasso_assets') }}/images/facebook.png" alt="Facebook" /> #}
+</a>
+    </li>
+ 
+<!-- Twitter -->
+<li class="twitter">
+<a href="http://twitter.com/share?url={{configs.SITE.domain}}{{data.url}}&text={{configs.SITE.name}} {{data.description}}" target="_blank" class="icon-twitter">
+	{# <img src="{{ url_for('pycasso_assets') }}/images/twitter.png" alt="Twitter" /> #}
+</a>
+</li>
+
+<!-- Google -->
+        {## }
+<li class="google">
+<a href="https://plus.google.com/share?url={{configs.SITE.domain}}{{data.url}}" class="icon-google"></a>
+</li>
+        {##}
+ 
+<!-- Pinterest -->
+<li class="pinterest">
+<a href="javascript:void((function()%7Bvar%20e=document.createElement('script');e.setAttribute('type','text/javascript');e.setAttribute('charset','UTF-8');e.setAttribute('src','http://assets.pinterest.com/js/pinmarklet.js?r='+Math.random()*99999999);document.body.appendChild(e)%7D)());" class="icon-pinterest">
+	{# <img src="{{ url_for('pycasso_assets') }}/images/pinterest.png" alt="Pinterest" /> #}
+</a>
+</li>
+
+</ul></div>
+{% endif %}

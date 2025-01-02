@@ -1,0 +1,2 @@
+User-agent: *
+Sitemap: {{request.host}}/sitemap.xml

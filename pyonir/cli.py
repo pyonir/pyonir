@@ -1,9 +1,17 @@
 import os, inquirer
+from . import PYONIR_SETUPS_DIRPATH, utilities
 
 
 class PyonirSetup:
     create_app_msg = "Create a new Pyonir app"
     exit_cli_msg = "Exiting Pyonir cli"
+
+    def create_new_app(self):
+        """Creates new pyonir application directories"""
+        self.decide_clear_dir()
+        if not os.path.exists(self.app_path):
+            utilities.copy_assets(PYONIR_SETUPS_DIRPATH, self.app_path, False)
+            pass
 
     def __init__(self):
         self.app_path = None
@@ -51,6 +59,7 @@ Project {self.app_name} created!
             self.intro()
         else:
             print(self.summary)
+            self.create_new_app()
             print("Exiting the app.")
             exit(0)
 
@@ -66,14 +75,24 @@ Project {self.app_name} created!
 
         self.app_path = os.path.join(self.user_dir, self.app_name)
 
+    def decide_clear_dir(self):
+        if os.path.exists(self.app_path):
+            override = inquirer.prompt([
+                        inquirer.Text('override',
+                      message="Pyonir app already exists. Would you like to start with a clean directory?"
+                      ),
+                    ])['override']
+            if override:
+                print('delete this directory', self.app_path)
+
     def decide_use_frontend(self):
         # Choose optional Frontend
         self.app_use_frontend = inquirer.prompt([
             inquirer.Text('app_use_frontend',
-                          message="Would you like to use a frontend? (Yes or No)"
+                          message="Would you like to use a frontend? (y=Yes or n=No)"
                           ),
         ])['app_use_frontend']
-        if self.app_use_frontend:
+        if self.app_use_frontend == 'y':
             self.decide_frontend_tool()
 
         self.outro()
@@ -85,7 +104,6 @@ Project {self.app_name} created!
                           choices=["Deno", "Bun", "Vite"],
                           ),
         ])['use_frontend_tool']
-
 
 
 PyonirSetup()

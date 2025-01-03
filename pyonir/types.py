@@ -2,7 +2,7 @@ import dataclasses
 import typing
 
 from starlette.applications import Starlette
-from starlette.requests import Request
+from starlette.requests import Request as StarletteRequest
 
 
 @dataclasses.dataclass
@@ -30,7 +30,7 @@ class PyonirRequest:
     auth: any
     use_endpoints: bool
     server_response = ""
-    server_request: Request
+    server_request: StarletteRequest
 
 
 # RoutePath: str = ''

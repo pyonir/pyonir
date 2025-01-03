@@ -1,6 +1,6 @@
 # Pyonir Web Framework
 
-A flat file web framework written in Python.
+A static website generator and flat file web framework written in Python.
 
 # Install
 

@@ -225,8 +225,7 @@ def init_endpoints(endpoints: 'Endpoints'):
 
 
 def init_parsely_endpoints(app: IApp):
-    for r, static_abspath in ((ASSETS_ROUTE, app.theme_static_dirpath), (UPLOADS_ROUTE, app.uploads_dirpath),
-                              (PYONIR_STATIC_ROUTE, PYONIR_STATIC_DIRPATH)):
+    for r, static_abspath in ((ASSETS_ROUTE, app.theme_static_dirpath), (UPLOADS_ROUTE, app.uploads_dirpath)):
         add_route(r, None, static_path=static_abspath)
     add_route("/sysws", pyonir_ws_handler, ws=True)
     add_route("/", pyonir_index, methods='*')

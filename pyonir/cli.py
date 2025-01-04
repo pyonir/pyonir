@@ -9,8 +9,14 @@ class PyonirSetup:
     def create_new_app(self):
         """Creates new pyonir application directories"""
         self.decide_clear_dir()
+        backend_dirpath = os.path.join(PYONIR_SETUPS_DIRPATH, 'backend')
+        frontend_dirpath = os.path.join(PYONIR_SETUPS_DIRPATH, 'frontend')
+        entry_filepath = os.path.join(PYONIR_SETUPS_DIRPATH, 'main.py')
         if not os.path.exists(self.app_path):
-            utilities.copy_assets(PYONIR_SETUPS_DIRPATH, self.app_path, False)
+            utilities.copy_assets(backend_dirpath, os.path.join(self.app_path, 'backend'), False)
+            utilities.copy_assets(entry_filepath, os.path.join(self.app_path, 'main.py'), False)
+        if self.app_use_frontend:
+            utilities.copy_assets(frontend_dirpath, os.path.join(self.app_path, 'frontend'), False)
             pass
 
     def __init__(self):
@@ -45,8 +51,8 @@ class PyonirSetup:
     def outro(self):
         self.action_step = inquirer.prompt([
             inquirer.List('action_step',
-                          message="What would you like to do next?",
-                          choices=['Go back to main menu', 'Exit'],
+                          message="What would you like to configure next?",
+                          choices=['Go back to main menu', 'Run setup'],
                           ),
         ])['action_step']
         self.summary = f'''
@@ -87,12 +93,13 @@ Project {self.app_name} created!
 
     def decide_use_frontend(self):
         # Choose optional Frontend
-        self.app_use_frontend = inquirer.prompt([
+        app_use_frontend = inquirer.prompt([
             inquirer.Text('app_use_frontend',
                           message="Would you like to use a frontend? (y=Yes or n=No)"
                           ),
         ])['app_use_frontend']
-        if self.app_use_frontend == 'y':
+        self.app_use_frontend = True if app_use_frontend.lower() == 'y' else False
+        if self.app_use_frontend:
             self.decide_frontend_tool()
 
         self.outro()

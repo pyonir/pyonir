@@ -226,6 +226,7 @@ def init_endpoints(endpoints: 'Endpoints'):
 
 def init_parsely_endpoints(app: IApp):
     for r, static_abspath in ((ASSETS_ROUTE, app.theme_static_dirpath), (UPLOADS_ROUTE, app.uploads_dirpath)):
+        if not os.path.exists(static_abspath): continue
         add_route(r, None, static_path=static_abspath)
     add_route("/sysws", pyonir_ws_handler, ws=True)
     add_route("/", pyonir_index, methods='*')
@@ -317,6 +318,8 @@ def add_route(path: str,
         app_ctx, req_filepath = resolve_path_to_file(star_req.url.path)
         pyonir_request = build_request(star_req)
         await process_request_data(pyonir_request)
+        if pyonir_request.type == TEXT_RES and not os.path.exists(app_ctx.frontend_dirpath):
+            pyonir_request.type = JSON_RES
         redirect = pyonir_request.form.get('redirect')
         req_name = list_of_args[0] if list_of_args else ''
         kwargs = {k: get_attr(pyonir_request.path_params, k, None) for k in list_of_args[1:]} if list_of_args else {}

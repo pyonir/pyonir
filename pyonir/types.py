@@ -59,6 +59,7 @@ class PyonirServer(Starlette):
 
 class IApp:
     def __init__(self):
+        self.frontend_dirpath = None
         self.files_ctx = None
         self.theme_static_dirpath = None
         self.server: PyonirServer = None

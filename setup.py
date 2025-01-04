@@ -11,12 +11,12 @@ setup(
     url='https://pyonir.dev',
     author='Derry Spann',
     author_email='pyonir@derryspann.com',
-    version='0.0.4',
+    version='0.0.5',
     packages=find_packages(),
     package_data={
         'pyonir': ['libs/*']
     },
-    install_requires=['starlette==0.39.2', 'inquirer==3.4.0'],
+    install_requires=['starlette==0.40.0', 'inquirer==3.4.0'],
     include_package_data=True,
     entry_points={
         "console_scripts": [

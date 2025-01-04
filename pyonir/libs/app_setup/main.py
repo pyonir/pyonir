@@ -1,6 +1,6 @@
 import os
 import pyonir
-
+from backend.controllers import endpoints
 # Instantiate pycasso application
 demo_app = pyonir.init(os.path.dirname(__file__))
 
@@ -11,4 +11,4 @@ demo_app = pyonir.init(os.path.dirname(__file__))
 # demo_app.generate_static_website()
 
 # Run server
-demo_app.run()
+demo_app.run(endpoints=endpoints)

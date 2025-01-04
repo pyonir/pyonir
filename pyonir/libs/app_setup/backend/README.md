@@ -1,5 +1,11 @@
 # Contents
-Flat file contents written to resolve general web pages based on file system routing
+This directory stores a variety of data types used by the application.
+
+**pages**
+This directory is used primarily for handling file base routing.
+
+**configs**
+This directory is used to store configuration used for managing the application
 
 # Controllers
 Install custom routing controllers for applications.

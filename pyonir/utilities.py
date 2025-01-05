@@ -130,7 +130,7 @@ def allFiles(abs_dirpath: str,
             if ispg else ParselyMedia(filepath, app_ctx)
         if apply_schema:
             p.set_file_schema(apply_schema)
-            return p.schema.map_to_schema(p)
+            return p.schema.map_to_schema(p) if p.schema else p.data
         return Collection.get_attr(p, rtn_attr, None)
 
     def is_public(parentdir, entry=None):
@@ -607,10 +607,10 @@ class DB:
         # site navigation
         get_nav(app)
         # Collect any plugins navigation
-        if hasattr(app, 'Resolvers'):
-            for iplg_id, iplg in app.Resolvers.__dict__.items():
-                if not hasattr(iplg, 'app_extension') or not iplg.is_enabled: continue
-                get_nav(iplg)
+        # if hasattr(app, 'Resolvers'):
+        #     for iplg_id, iplg in app.Resolvers.__dict__.items():
+        #         if not hasattr(iplg, 'app_extension') or not iplg.is_enabled: continue
+        #         get_nav(iplg)
 
         return Collection(pages.values(), sortBy='order').groupedBy('menu')
 

@@ -11,7 +11,7 @@ setup(
     url='https://pyonir.dev',
     author='Derry Spann',
     author_email='pyonir@derryspann.com',
-    version='0.0.6',
+    version='0.0.7',
     packages=find_packages(),
     package_data={
         'pyonir': ['libs/*']

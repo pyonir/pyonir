@@ -24,7 +24,7 @@
 		{% if form.inputs %}	
 			{% for input in form.inputs %}
 				{% set groupindex = loop.index %}
-				{% include('forms/formelements.html') %}
+				{% include('formelements.html') %}
 			{% endfor %}
 		{% endif %}
 		{% if form.type == 'product' %}

@@ -8,7 +8,7 @@ from starlette.websockets import WebSocket, WebSocketState, WebSocketDisconnect
 from pyonir import ASSETS_ROUTE, UPLOADS_ROUTE, PYONIR_STATIC_ROUTE, PYONIR_STATIC_DIRPATH, \
     PAGINATE_LIMIT
 from pyonir.parser import ParselyPage
-from pyonir.types import IApp, PyonirRequest, PyonirServer
+from pyonir.types import IApp, PyonirRequest, PyonirServer, PyonirHooks
 from pyonir.utilities import Collection, create_file, get_attr
 
 TEXT_RES = 'text/html'
@@ -330,7 +330,8 @@ def add_route(path: str,
 
         # Resolve page from request
         req_file = ParselyPage(req_filepath, app_ctx.files_ctx)
-
+        pyonir_request.file = req_file
+        await app_ctx.run_plugins(PyonirHooks.ON_REQUEST, pyonir_request)
         res = await req_file.process_response(pyonir_request)
         # Resolve route decorator methods
         pyonir_request.server_response = await dec_func(**args) if is_coroutine else dec_func(**args)
@@ -344,8 +345,7 @@ def add_route(path: str,
         return build_response(res, pyonir_request)
 
     dec_wrapper.__name__ = dec_func.__name__
-    # if ws:
-    #     return Site.server.add_websocket_route(path, dec_func, dec_func.__name__)
+
     Site.server.add_route(path, dec_wrapper, methods=methods)
 
     # return dec_wrapper
@@ -381,7 +381,7 @@ def build_request(TRequest, code: int = 444) -> PyonirRequest:
     return PyonirRequest(raw_path, method, path, path_params, url, slug, query_params, parts, limit, model, is_home,
                          form, files, ip, host, protocol, headers, browser, res_type, status_code, auth,
                          use_endpoints=use_endpoints,
-                         server_request=TRequest)
+                         server_request=TRequest, file=None)
 
 
 def build_response(res_value, request: PyonirRequest):

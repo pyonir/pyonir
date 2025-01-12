@@ -1,7 +1,7 @@
 import os
 import pyonir
 from backend.controllers import endpoints
-# Instantiate pycasso application
+# Instantiate pyonir application
 demo_app = pyonir.init(os.path.dirname(__file__))
 
 # Install plugins

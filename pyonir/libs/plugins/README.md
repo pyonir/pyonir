@@ -7,7 +7,7 @@ Plugins have two categories: File extensions and App extensions.
 
 # File extensions
 
-this type of plugins parse and modify file data
+this type of plugin parses and modify file data
 
 # App extensions
 

@@ -13,7 +13,7 @@
 
 {# ------------ TEXT INPUT ------------ #}
 {% if input.type in ('text','password','number','tel','url','color','email','date','hidden' ) %}
-	{% include('/forms/form_partials/text.html') %}
+	{% include('/form_partials/text.html') %}
 
 {# ------------- CHECKBOX FIELDS --------------- #}
 {% elif input.type in ('checkbox','radio') %}
@@ -22,36 +22,36 @@
         {% set grouped = True %}
 		<label class="form-label{% if input.required %} required{% endif %}">{{input.label}}</label>
 		{% for choice in input.inputs %}
-			{% include('/forms/form_partials/checkbox.html') %}
+			{% include('/form_partials/checkbox.html') %}
 		{% endfor %}
 	{% else %}
-		{% include('/forms/form_partials/checkbox.html') %}
+		{% include('/form_partials/checkbox.html') %}
 	{% endif %}
 {% if input.required %}
 <small class="input_error_msg {{input.label_for}}">{{input.label|title or 'This field'}} is required</small>
 {% endif %}
 {# ------------- SELECT FIELDS --------------- #}
 {% elif input.type == 'select' %}
-	{% include('/forms/form_partials/select.html') %}
+	{% include('/form_partials/select.html') %}
 
 {# ------------- HTML FIELDS --------------- #}
 {% elif input.type == 'html' %}
-	{% include('/forms/form_partials/html.html') %}
+	{% include('/form_partials/html.html') %}
 
 
 {# ------------- TEXTAREA FIELDS --------------- #}
 {% elif input.type == 'textarea' %}
-	{% include('/forms/form_partials/textarea.html') %}
+	{% include('/form_partials/textarea.html') %}
 
 {# ------------- FILE FIELDS --------------- #}
 {% elif input.type == 'file' %}
-	{% include('/forms/form_partials/file-input.html') %}
+	{% include('/form_partials/file-input.html') %}
 
 {# ------------- SUBMIT BUTTON --------------- #}
 {% elif input.type in ('submit','button') %}
-	{% include('/forms/form_partials/button.html') %}
+	{% include('/form_partials/button.html') %}
 {% else %}
-	{% include('/forms/form_partials/text.html') %}
+	{% include('/form_partials/text.html') %}
 {% endif %}
 
 {% if (input.content and input.type != 'html') or caption %}

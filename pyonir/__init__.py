@@ -3,6 +3,8 @@ import os, sys
 from pyonir import utilities
 from pyonir.parser import Parsely
 from pyonir.libs.plugins.Forms import Forms
+from pyonir.libs.plugins.Navigation import Navigation
+from pyonir.types import PyonirHooks
 
 SYS_USER = os.path.basename(os.environ.get('HOME'))
 # Pycasso settings
@@ -100,7 +102,7 @@ Site: 'IApp' = None
 
 
 def init(site_path: str):
-    """Initializes existing Pycasso application"""
+    """Initializes existing Pyonir application"""
     global Site
     # Set Global Site instance
     Site = IApp(site_path)
@@ -267,16 +269,10 @@ class IApp:
         ppth = [appth]
         return ppth
 
-    @property
-    def files_ctx(self):
-        """Describes context when a file needs its parent scope"""
-        return (self.plugin_dirname, self.endpoint, self.contents_dirpath, self.ssg_dirpath) \
-            if hasattr(self, 'plugin_dirname') else ('', '', self.contents_dirpath, self.ssg_dirpath)
-
     def __init__(self, app_rootpth: str = None) -> None:
         self.server = None
         Parsely.Filters['jinja'] = self.parse_jinja
-        Parsely.Extensions['form'] = Forms
+        # Parsely.Extensions['form'] = Forms
         self.name = os.path.basename(app_rootpth)
         self.app_dirpath = app_rootpth
         self.app_entrypoint = os.path.join(self.app_dirpath, 'main.py')
@@ -292,23 +288,31 @@ class IApp:
         self.datastore_dirpath = os.path.join(self.contents_dirpath, DATASTORE_DIRNAME)
         self.frontend_dirpath = os.path.join(app_rootpth, FRONTEND_DIRNAME)
         self.themes_dirpath = os.path.join(self.frontend_dirpath, THEMES_DIRNAME)
-        self.available_plugins = {}
+        self.files_ctx = ('', '', self.contents_dirpath, self.ssg_dirpath)
         self.messages = {}
+        # self.available_plugins = {Forms(self), Navigation(self)}
         self.TemplateParser = None
-        self.configs = self.process_contents(os.path.join(self.contents_dirpath, CONFIGS_DIRNAME), self)
+        self.configs = self.process_contents(os.path.join(self.contents_dirpath, CONFIGS_DIRNAME), self.files_ctx)
         self.jinja_template_dirpaths = (self.theme_templates_dirpath, PYONIR_JINJA_TEMPLATES_DIRPATH,)
         self.setup_jinja()
-        self.schemas = self.process_contents(os.path.join(self.contents_dirpath, SCHEMAS_DIRNAME), self)
-        self.forms = self.process_contents(os.path.join(self.contents_dirpath, FORMS_DIRNAME), self, 1)
+        self.schemas = self.process_contents(os.path.join(self.contents_dirpath, SCHEMAS_DIRNAME), self.files_ctx)
 
         # Setups
         self.setup_system_msgs()
+        self.available_plugins = {Forms(self), Navigation(self)}
+
+    async def run_plugins(self, hook: PyonirHooks, data_value=None):
+        if not hook or not self.available_plugins: return
+        hook = hook.name.lower()
+        for plg in self.available_plugins:
+            if not hasattr(plg, hook): continue
+            hook_method = getattr(plg, hook)
+            await hook_method(data_value, self)
 
     def parse_jinja(self, string, context={}) -> str:
         try:
-            # string = "{% import 'system_macros.html' as system %}\n"+string
             return self.TemplateParser.from_string(string).render(configs=self.configs, **context)
-        except:
+        except Exception as e:
             raise
 
     def setup_system_msgs(self):
@@ -457,7 +461,7 @@ class IApp:
         key = os.path.basename(path)
         etype = Parsely  # ParselySchema if 'schemas' in path else Parsely
         ismappable = key in (CONFIGS_DIRNAME, SCHEMAS_DIRNAME)
-        pgs = utilities.allFiles(path, entry_type=etype, app_ctx=app_ctx.files_ctx)
+        pgs = utilities.allFiles(path, entry_type=etype, app_ctx=app_ctx)
         if astuple or ismappable:
             res = {}
             for pgobj in pgs:

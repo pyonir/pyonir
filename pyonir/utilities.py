@@ -3,6 +3,47 @@ import typing
 from typing import Generator
 
 
+def parse_all(path, app_ctx=None, file_type=None) -> object:
+    from pyonir.parser import Parsely
+    """Deserializes all files within the contents directory"""
+    key = os.path.basename(path)
+    etype = file_type or Parsely
+    all_files_in_dir = allFiles(path, entry_type=etype, app_ctx=app_ctx)
+    # Dynamically create a new class
+    cls = type(key, (object,), {})
+
+    # Create an instance of the class
+    fileMap = cls()
+    for pfile in all_files_in_dir:
+        configname = getattr(pfile, 'file_name', getattr(pfile, 'name', None))
+        setattr(fileMap, configname, pfile)
+        pass
+    return fileMap
+
+def dict_to_class(data: dict, name: str):
+    """
+    Converts a dictionary into a class object with the given name.
+
+    Args:
+        data (dict): The dictionary to convert.
+        name (str): The name of the class.
+
+    Returns:
+        object: An instance of the dynamically created class with attributes from the dictionary.
+    """
+    # Dynamically create a new class
+    cls = type(name, (object,), {})
+
+    # Create an instance of the class
+    instance = cls()
+
+    # Assign dictionary keys as attributes of the instance
+    for key, value in data.items():
+        setattr(instance, key, value)
+
+    return instance
+
+
 def get_attr(rowObj, attrPath=None, default=None, rtn_none=True):
     """
         @default returns a default obj when the target attr value is None

@@ -1,7 +1,7 @@
 @filter.md:- content
 title: Pyonir App
 menu: primary
-form: $file/../forms/subscribe.md#data.form
+form: subscribe
 excerpt: tailwind themed layout
 template: homepage.html
 ===

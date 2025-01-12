@@ -1,5 +1,6 @@
 from pyonir.parser import Parsely
-from pyonir.utilities import tupleconverter
+from pyonir.types import IPlugin, IApp, os
+from pyonir.utilities import dict_to_class
 
 INPUT_ATTRIBUTES = tuple("accept,accept-charset,accesskey,action,align,allow,alt,async,autocapitalize,autocomplete,autofocus,autoplay,\
 page.file_namebackground,bgcolor,border,buffered,capture,challenge,charset,checked,cite,class,code,codebase,color,cols,colspan,content,\
@@ -66,7 +67,7 @@ class ProductPrice:
         return price_value if not upprice else base_price + price_value
 
     def __init__(self, form) -> None:
-        self.base_price = float(form._ctrl_form.get('price', 0))
+        self.base_price = float(form.data.get('price', 0))
         self.prices = []
         try:
             for x in form.inputs:
@@ -80,55 +81,43 @@ class ProductPrice:
         pass
 
 
-class Forms:
+class Form(Parsely):
     parsely_extension = "form"
 
     @property
     def method(self):
-        return self._ctrl_form.get('method', 'GET')
+        return self.data['form'].get('method', 'GET')
 
     @property
     def action(self):
-        return self._ctrl_form.get('action') or f"/api/v1/forms/{self.file_name}"
+        return self.data['form'].get('action') or f"/api/v1/forms/{self.file_name}"
 
     @property
     def name(self):
-        return self._ctrl_form.get('title', self.file_name)
+        return self.data['form'].get('title', self.file_name)
 
     @property
     def type(self):
-        return self._ctrl_form.get('type') or 'pyonir_form'
+        return self.data['form'].get('type') or 'pyonir_form'
 
     @property
     def redirect(self):
-        return self._ctrl_form.get('redirect')
+        return self.data['form'].get('redirect')
 
     @property
     def js(self):
-        return self._ctrl_form.get('js')
+        return self.data['form'].get('js')
 
     @property
     def inputs(self):
-        inputs = self._ctrl_form.get('inputs', [])
+        inputs = self.data['form'].get('inputs', [])
         return [FormCtrl(x, self) for x in inputs] if inputs else None
 
-    def __init__(self, page: Parsely, app_ctx: 'IApp' = None):
-        try:
-            from pyonir import Site
-            if not app_ctx: app_ctx = Site
-            self._ctrl_form = page.data.get('form')
-            if isinstance(self._ctrl_form, str):
-                self._ctrl_form = getattr(app_ctx.forms, self._ctrl_form)
-                page.data['form'] = self._ctrl_form
-                return
-            self.file_name = self._ctrl_form.get('name', page.file_name)
-            if self._ctrl_form and self._ctrl_form.get('type') == 'product':
-                self.price = ProductPrice(self)
-                self.currency = "USD"  # TODO: check site configs for store value
-        except Exception as e:
-            print(str(e))
-            print(page.file_name, page.data.get('form'))
-            raise
+    def __init__(self, filepath: str, app_ctx: list):
+        super().__init__(abspth=filepath, app_ctx=app_ctx)
+        if self.type == 'product':
+            self.price = ProductPrice(self)
+            self.currency = "USD"
 
 
 class FormCtrl:
@@ -216,10 +205,28 @@ class FormCtrl:
                 self._ctrl_data = {"label": k, "value": v, "type": child_type}
             except Exception as e:
                 print(__name__, str(e))
-        self.ctrl_parent = tupleconverter('CtrlParent', {
-            "is_form": isinstance(ctrl_parent, Forms),
+        self.ctrl_parent = dict_to_class({
+            "is_form": isinstance(ctrl_parent, Form),
             "label_for": cpl,
             "type": getattr(ctrl_parent, "type", None),
             "price_options": getattr(ctrl_parent, "price_options", None)
-        })
+        }, 'CtrlParent')
+
         self.label_for = self.get_label_for()
+
+
+class Forms(IPlugin):
+    name = "Forms plugin"
+
+    def __init__(self, app: IApp):
+        self.forms = self.collect_dir_files(os.path.join(app.contents_dirpath, 'forms'),
+                               app_ctx=app.files_ctx, file_type=Form)
+        self.form_templates_dirpath = {os.path.join(os.path.dirname(__file__), 'templates')}
+        self.register_templates(self.form_templates_dirpath, app)
+        pass
+
+    async def on_request(self, pyonir_req, app: IApp):
+        parsely_file = pyonir_req.file
+        if not isinstance(parsely_file.form, str): return
+        parsely_file.data['form'] = getattr(self.forms, parsely_file.form)
+        pass

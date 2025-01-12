@@ -2,7 +2,7 @@ import os, pytz, re, json
 from datetime import datetime
 from typing import Generator
 
-from .types import PyonirRequest
+from .types import PyonirRequest, PyonirHooks
 from .utilities import get_attr, allFiles, tupleconverter, deserialize_datestr, Collection, create_file, remove_html_tags
 
 ALLOWED_CONTENT_EXTENSIONS = ('prs', 'md', 'json', 'yaml')
@@ -277,15 +277,15 @@ class Parsely:
 
         return valuestr
 
-    def apply_extensions(self):
-        """Apply installed parsely extensions to corresponding data values based on key names"""
-        if self.file_type == 'schemas' or self.data == None: return
-        for ns, extCls in Parsely.Extensions.items():
-            extvalue = self.data.get(ns)
-            if not extvalue or isinstance(extvalue, extCls): continue
-            mod_val = extCls(self)
-            self.update_nested(ns, self.data, data_update=mod_val)
-            pass
+    def apply_plugins(self, hook: PyonirHooks):
+        """Applies installed active plugins to parsed file"""
+        from pyonir import Site
+        if Site:
+            hook = hook.name.lower()
+            for plg in Site.available_plugins:
+                if not hasattr(plg, hook): continue
+                fn = getattr(plg, hook)
+                fn(self, Site)
 
     def apply_filters(self):
         """Applies filter methods to data attributes"""
@@ -312,7 +312,7 @@ class Parsely:
 
         def pair_map(key, val, tabs):
             is_multiline = isinstance(val, str) and len(val.split("\n")) > 2
-            if is_multiline or key in filter_params.get('blob_keys', []):
+            if is_multiline or key in filter_params.get('_blob_keys', []):
                 multi_line_keys.append((f"==={key.replace('content', '')}{filter_params.get(key, '')}", val.strip()))
                 return
             if mode == 'INLINE':
@@ -505,24 +505,21 @@ class Parsely:
         self.absdir = ctx_dirpath
         self.contents_relpath = contents_relpath
         self.file_ctx = ctx_dir
-        self.file_dir = os.path.dirname(contents_relpath)  # os.path.basename(os.path.dirname(abspth)) if abspth else ''
-        self.file_type = contents_rootdir.split(os.path.sep)[
-            0]  # os.path.basename(os.path.join(self.absdir, ctx_dir).rstrip('/'))
+        self.file_dir = os.path.dirname(contents_relpath)
+        self.file_type = contents_rootdir.split(os.path.sep)[0]
         self.file_name = fname
         self.file_ext = fext.split('.').pop()
         self.file_relpath = contents_relpath
-        # f'{self.file_ctx + "/" if ctx_dir else ""}{self.file_dir}/{self.file_name}.{self.file_ext}'
         self.file_contents = ''
         self.file_lines = None
         self.file_line_count = None
 
         # file data processing
-        self.blob_keys = []
+        self._blob_keys = []
         self.data = {}
         self.schema = None
         self.deserializer()
         self.apply_filters()
-        self.apply_extensions()
         # page attributes
         is_pg = self.file_type != 'schemas'
         surl = re.sub(r'\bpages/\b|\bindex\b', '', contents_relpath.replace(f'.{self.file_ext}', '')) if is_pg else ''
@@ -534,6 +531,7 @@ class Parsely:
 
         self.file_ssg_api_dirpath = os.path.join(ctx_staticpath, 'api', self.slug)
         self.file_ssg_html_dirpath = os.path.join(ctx_staticpath, self.slug)
+        # self.apply_plugins(PyonirHooks.ON_PARSELY_COMPLETE)
         pass
 
     def throw_error(self, message: dict):
@@ -554,19 +552,13 @@ class Parsely:
         if os.path.exists(schema_fpath):
             schema_file = ParselySchema.from_path(schema_fpath, self.app_ctx)
         plugin_schema_file = None
-        # Perform lookup schema name against Site plugins schemas
-        if not schema_file and hasSite:
-            for n, plg in Site.available_plugins.items():
-                if plugin_schema_file or not hasattr(plg, 'plugin_dirname'): continue
-                plgSchemas = get_attr(plg, 'schemas')
-                plugin_schema_file = get_attr(plgSchemas, target_schema_name)
 
         self.schema = plugin_schema_file or schema_file
 
     def refresh_data(self):
         """Parses file and update data values"""
         self.data = {}
-        self.blob_keys.clear()
+        self._blob_keys.clear()
         self.deserializer()
 
     def output_json(self, as_str: bool = None, flat: bool = None):
@@ -580,24 +572,9 @@ class Parsely:
     def output_html(self, req: PyonirRequest):
         """Renders and html output"""
         from pyonir import Site
-        from .utilities import DB
-
-        def set_ctx_navigation(req):
-            curr_nav = Site.TemplateParser.globals.get('navigation')
-            refresh_nav = bool(req.query_params.get('rnav')) if req else None
-            # Get ctx navigation from plugins
-            if refresh_nav or not curr_nav:
-                curr_nav = DB.get_menus(active_page=self.url)
-
-            Site.TemplateParser.globals['navigation'] = curr_nav
-
-        # if hasattr(req.query_params, 'show_revisions'): self.set_revisions()
-
-        # Site.reload_TemplatePaths(req.req_ctx)
         # if not self.is_api and self.file_exists:
         #     Site.TemplateParser.globals['prevNext'] = self.prev_next()
         Site.TemplateParser.globals['page'] = self
-        set_ctx_navigation(req)
         html = Site.TemplateParser.get_template(self.template).render()
 
         Site.TemplateParser.block_pull_cache.clear()

@@ -1,0 +1,16 @@
+title: string
+date: date
+name: string
+subtitle: string
+description: string
+url: string
+icon: string
+sub_menu: string
+menu_parent: string
+menu_img: string
+class: string
+slug: string
+menu: string
+order: int
+type: string
+status: string

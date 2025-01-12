@@ -1,4 +1,7 @@
-{% import 'system_macros.html' as system %} 
+{% import 'system_macros.html' as system %}
+{# PLUGIN IMPORTS #}
+{% import 'Forms.html' as formsPlugin %}
+
 <!doctype html>
 {% minify %}
 <html lang="en">
@@ -44,7 +47,7 @@
 </h1>
 {{page.content|safe}}
 {% if page.form %}
-{{ system.formbuilder( data=page) }}
+{{ formsPlugin.buildForm(data=page) }}
 {% endif %}
             {% endblock %} 
             </div>

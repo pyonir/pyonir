@@ -5,8 +5,11 @@ from jinja2 import Environment
 from starlette.applications import Starlette
 from starlette.requests import Request as StarletteRequest
 
-from pyonir.utilities import parse_all
+from pyonir.utilities import parse_all, get_attr
 
+TEXT_RES = 'text/html'
+JSON_RES = 'application/json'
+EVENT_RES = 'text/event-stream'
 
 class Parsely:
     app_ctx: tuple
@@ -45,6 +48,7 @@ class PyonirRequest:
     host: str
     protocol: str
     headers: dict
+    args: dict
     browser: str
     type: str
     status_code: int
@@ -54,11 +58,53 @@ class PyonirRequest:
     server_request: StarletteRequest
     file: Parsely | None
 
+    @property
+    def redirect(self):
+        return self.form.get('redirect')
 
-# RoutePath: str = ''
-# Route = List[RoutePath, Callable, List[str]]
-# Endpoint = Tuple[RoutePath, List[Route]]
-# Endpoints = Tuple[Endpoint]
+    @staticmethod
+    def process_header(headers):
+        nheaders = dict(headers)
+        nheaders['accept'] = nheaders.get('accept', TEXT_RES).split(',', 1)[0]
+        nheaders['user-agent'] = nheaders['user-agent'].split(' ').pop().split('/', 1)[0]
+        return nheaders
+
+    def request_model(self, route_params: list[str], models: dict) -> dict:
+        """Maps route params into instances of param type"""
+        def init_request_model(req, param, models):
+            cls = get_attr(models, param, None)
+            return cls(**req.form) if cls else None
+
+        req_name = route_params[0] if route_params else ''
+        kwargs = {k: get_attr(self.path_params, k, init_request_model(self, k, models))
+                  for k in route_params[1:]} if route_params else {}
+        args = {f"{req_name}": self, **kwargs}
+        return args
+
+    def derive_status_code(self, is_system_control: bool):
+        """Create status code for web request based on a file's availability, status_code property"""
+        file_code = self.file.data.get('status_code', 200)
+        return file_code if self.file and self.file.file_exists or not is_system_control else 404
+
+    def render_error(self):
+        """Data output for an unknown file path for a web request"""
+        return {
+            "url": self.url,
+            "method": self.method,
+            "status": self.status_code,
+            "res": self.server_response,
+            "title": f"{self.path} was not found!",
+            "content": f"Perhaps this page once lived but has now been archived or permanently removed."
+        }
+
+
+# RoutePath: str
+# RouteFunction: callable
+# RouteMethods: [str]
+# RequestModel: any
+# PyonirRoutes: ['RoutePath', 'RouteFunction', 'RouteMethods', 'RequestModel']
+# PyonirEndpoints: [('RoutePath', ['PyonirRoutes'])]
+
 
 class PyonirHooks(Enum):
     ON_REQUEST = 'ON_REQUEST'
@@ -116,9 +162,11 @@ class IApp:
 class IPlugin:
     name: str
     hooks: PyonirHooks
+
     @staticmethod
     def collect_dir_files(dir_path: str, app_ctx: tuple, file_type: any) -> [Parsely]:
         return parse_all(dir_path, app_ctx, file_type)
+
     @staticmethod
     def uninstall(app):
         """Uninstall plugin from system. this method will destroy any traces of the plugin and its files"""
@@ -127,7 +175,7 @@ class IPlugin:
     @staticmethod
     def register_templates(dir_paths: [str], app: IApp):
         """Loads new jinja templates paths to application instance"""
-        if not hasattr(app.TemplateParser,'loader'): return None
+        if not hasattr(app.TemplateParser, 'loader'): return None
         for path in dir_paths:
             if path in app.TemplateParser.loader.searchpath: continue
             app.TemplateParser.loader.searchpath.append(path)
@@ -135,7 +183,7 @@ class IPlugin:
     @staticmethod
     def unregister_templates(dir_paths: [str], app: IApp):
         """Loads new jinja templates paths to application instance"""
-        if not hasattr(app.TemplateParser,'loader'): return None
+        if not hasattr(app.TemplateParser, 'loader'): return None
         for path in dir_paths:
             if path in app.TemplateParser.loader.searchpath: continue
             app.TemplateParser.loader.searchpath.remove(path)

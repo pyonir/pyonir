@@ -151,10 +151,10 @@ def allFiles(abs_dirpath: str,
              entry_type: any = None,
              rtn_attr: str = None,
              exclude_dirs: list[str] = None,
-             apply_schema: bool = 0,
-             force_all: bool = 0) -> Generator:
+             apply_schema: bool = False,
+             force_all: bool = True) -> Generator:
     """Returns a generator of files from a directory path"""
-    from .parser import Parsely, ParselyMedia, ParselyPage
+    from .parser import ParselyMedia, ParselyPage
     from .parser import ALLOWED_CONTENT_EXTENSIONS, IGNORE_FILES
     if abs_dirpath in (exclude_dirs or []): return []
     if not entry_type: entry_type = ParselyPage
@@ -163,7 +163,7 @@ def allFiles(abs_dirpath: str,
 
     def get_datatype(parentdir, rel_filepath, etype):
         filepath = os.path.normpath(os.path.join(parentdir, rel_filepath))
-        if not entry_type:
+        if entry_type == 'path':
             return filepath
         ispg = filepath.endswith(ALLOWED_CONTENT_EXTENSIONS)
         isschema = hasattr(etype, 'from_path')

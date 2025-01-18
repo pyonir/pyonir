@@ -85,6 +85,10 @@ class Form(Parsely):
     parsely_extension = "form"
 
     @property
+    def id(self):
+        return self.data['form'].get('id')
+
+    @property
     def method(self):
         return self.data['form'].get('method', 'GET')
 
@@ -228,5 +232,7 @@ class Forms(IPlugin):
     async def on_request(self, pyonir_req, app: IApp):
         parsely_file = pyonir_req.file
         if not isinstance(parsely_file.form, str): return
-        parsely_file.data['form'] = getattr(self.forms, parsely_file.form)
+        f = getattr(self.forms, parsely_file.form)
+        f.apply_filters()
+        parsely_file.data['form'] = f
         pass

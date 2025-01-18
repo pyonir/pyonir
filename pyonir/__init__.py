@@ -272,7 +272,6 @@ class IApp:
     def __init__(self, app_rootpth: str = None) -> None:
         self.server = None
         Parsely.Filters['jinja'] = self.parse_jinja
-        # Parsely.Extensions['form'] = Forms
         self.name = os.path.basename(app_rootpth)
         self.app_dirpath = app_rootpth
         self.app_entrypoint = os.path.join(self.app_dirpath, 'main.py')
@@ -414,10 +413,11 @@ class IApp:
     def run(self, endpoints: 'Endpoints'):
         """Runs the Uvicorn webserver"""
         from .server import (setup_starlette_server, start_uvicorn_server,
-                             pyonir_file_upload, pyonir_sse_handler)
+                             pyonir_file_upload,pyonir_file_delete, pyonir_sse_handler)
         # Initialize Server instance
         self.server = setup_starlette_server(self)
         self.server.resolvers[pyonir_file_upload.__name__] = pyonir_file_upload
+        self.server.resolvers[pyonir_file_delete.__name__] = pyonir_file_delete
         self.server.resolvers[pyonir_sse_handler.__name__] = pyonir_sse_handler
 
         # Run uvicorn server

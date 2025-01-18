@@ -1,12 +1,9 @@
 import asyncio
 import os, typing, json, inspect
-from datetime import datetime
 
-from starlette.endpoints import WebSocketEndpoint
 from starlette.websockets import WebSocket, WebSocketState, WebSocketDisconnect
 
-from pyonir import ASSETS_ROUTE, UPLOADS_ROUTE, PYONIR_STATIC_ROUTE, PYONIR_STATIC_DIRPATH, \
-    PAGINATE_LIMIT
+from pyonir import ASSETS_ROUTE, UPLOADS_ROUTE, PAGINATE_LIMIT
 from pyonir.parser import ParselyPage
 from pyonir.types import IApp, PyonirRequest, PyonirServer, PyonirHooks
 from pyonir.utilities import Collection, create_file, get_attr
@@ -70,14 +67,18 @@ async def pyonir_ws_handler(websocket: WebSocket):
 
 
 async def pyonir_sse_handler(request: PyonirRequest) -> typing.AsyncGenerator:
-    """SSE endpoint example call from the system or from application layer"""
+    """Handles sse web request by pyonir"""
     from pyonir.utilities import generate_id
     request.type = EVENT_RES  # assign the appropriate streaming headers
     # set sse client
     event = request.query_params.get('event')
     retry = request.query_params.get('retry', 1000)
-    interval = 1 # time between events
+    close_id = request.query_params.get('close')
+    interval = 1  # time between events
     client_id = request.query_params.get('id', request.headers.get('user-agent') + f"{generate_id()}")
+    if close_id and ConnClients.get(close_id):
+        del ConnClients[close_id]
+        return
     last_client = ConnClients.get(client_id, {
         "retry": retry,
         "event": event,
@@ -92,11 +93,27 @@ async def pyonir_sse_handler(request: PyonirRequest) -> typing.AsyncGenerator:
 
     while True:
         last_client["data"]["time"] = last_client["data"]["time"] + 1
+        is_disconnected = await request.server_request.is_disconnected()
+        if is_disconnected or close_id:
+            del ConnClients[client_id]
+            break
+        await asyncio.sleep(interval)  # Wait for 5 seconds before sending the next message
         res = process_sse(last_client)
         yield res
-        is_disconnected = await request.server_request.is_disconnected()
-        if is_disconnected: break
-        await asyncio.sleep(interval)  # Wait for 5 seconds before sending the next message
+
+
+def pyonir_file_delete(request: PyonirRequest):
+    """Deletes a file located in the uploads directory"""
+    from pyonir import Site
+    from pyonir.parser import ParselyMedia
+    redirect = request.query_params.get('redirect')+'?success=true'
+    doc = os.path.join(Site.contents_dirpath, request.query_params.get('file'))
+    img = ParselyMedia(doc, Site.files_ctx)
+    if img.file_exists:
+        os.remove(doc)
+        for _, timg in img.thumbnails.items():
+            os.remove(timg.abspath)
+    return {"redirect": redirect}
 
 
 async def pyonir_file_upload(request: PyonirRequest):
@@ -130,9 +147,9 @@ async def apply_plugin_resolvers(page: ParselyPage, request: PyonirRequest):
         module, resolver = utilities.get_module(pkg_path, meth_name)
 
     if not resolver: return
-    is_async = callable(resolver) and inspect.iscoroutinefunction(resolver)
-    rdata = await resolver(request) if is_async else resolver(request) if callable(resolver) else resolver
-    page.data = rdata
+    is_async = inspect.iscoroutinefunction(resolver)
+    rdata = await resolver(**request.args) if is_async else resolver(**request.args) if callable(resolver) else resolver
+    return rdata if inspect.iscoroutine(rdata) else page.output_json(rdata)
 
 
 async def process_request_data(request: PyonirRequest):
@@ -218,9 +235,14 @@ def url_for(name, attr='path'):
 
 def init_endpoints(endpoints: 'Endpoints'):
     for endpoint, routes in endpoints:
-        for path, func, methods, *args in routes:
-            type, static_path = args if args else (None, None)
-            r = add_route(f'{endpoint}{path}', func, methods)
+        for path, func, methods, *opts in routes:
+            args = opts[0] if opts else {}
+            kwargs = {'models': {}}
+            for k, v in args.items():
+                if k in ('ws', 'sse', 'static_path'):
+                    kwargs[k] = v
+                kwargs['models'].update({k: v})
+            r = add_route(f'{endpoint}{path}', func, methods, **kwargs)
             pass
 
 
@@ -228,6 +250,7 @@ def init_parsely_endpoints(app: IApp):
     for r, static_abspath in ((ASSETS_ROUTE, app.theme_static_dirpath), (UPLOADS_ROUTE, app.uploads_dirpath)):
         if not os.path.exists(static_abspath): continue
         add_route(r, None, static_path=static_abspath)
+    add_route("/syssse", pyonir_sse_handler, sse=True)
     add_route("/sysws", pyonir_ws_handler, ws=True)
     add_route("/", pyonir_index, methods='*')
     add_route("/{path:path}", pyonir_index, methods='*')
@@ -239,13 +262,6 @@ def get_params(url):
             url.split('&') if params != ''}
     if args.get('model'): del args['model']
     return args
-
-
-def process_header(headers):
-    nheaders = dict(headers)
-    nheaders['accept'] = nheaders.get('accept', TEXT_RES).split(',', 1)[0]
-    nheaders['user-agent'] = nheaders['user-agent'].split(' ').pop().split('/', 1)[0]
-    return nheaders
 
 
 def process_sse(data: dict) -> str:
@@ -262,17 +278,21 @@ def process_sse(data: dict) -> str:
 def add_route(path: str,
               dec_func: typing.Callable,
               methods=None,
+              models: dict = None,
               auth: bool = None,
               ws: bool = None,
               sse: bool = None,
               static_path: str = None) -> typing.Callable | None:
     """Route decorator"""
     from pyonir import Site
-    is_coroutine = inspect.iscoroutinefunction(dec_func)
-    list_of_args = list(inspect.signature(dec_func).parameters.keys()) if dec_func else None
+    def is_async(func):
+        return inspect.isasyncgenfunction(func) or inspect.iscoroutinefunction(func)
 
+    is_async = inspect.iscoroutinefunction(dec_func) if dec_func else False
+    is_asyncgen = inspect.isasyncgenfunction(dec_func) if dec_func else False
+    list_of_args = list(inspect.signature(dec_func).parameters.keys()) if dec_func else None
     if methods == '*':
-        methods = ['GET', 'POST']
+        methods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']
     if methods is None:
         methods = ['GET']
 
@@ -289,17 +309,28 @@ def add_route(path: str,
     route_path = path.split('/{')[0]
     name = route_name
     endpoint_route = path.split('/', 1)[0]
+    is_pyonir_default = dec_func.__name__ == 'pyonir_index'
+    req_models = Site.server.url_map.get(route_name, {}).get('models') or {}
+    if models:
+        for req_param, req_model in models.items():
+            req_models[req_param] = req_model.__name__
+            if hasattr(Site.server, 'models'):
+                Site.server.models.update({req_model.__name__, req_model})
+            else:
+                Site.server.models = {req_model.__name__, req_model}
     new_route = {
         "doc": docs,
         "endpoint": endpoint_route,
         "route": path,  # has regex pattern
         "path": route_path,
         "methods": methods,
+        "models": models or req_models,
         "name": name,
         "auth": auth,
         "sse": sse,
         "ws": ws,
-        "async": is_coroutine
+        "async": is_async,
+        "async_gen": is_asyncgen,
     }
     # Add route path into categories
     Site.server.endpoints.append(f"{endpoint_route}{route_path}")
@@ -320,10 +351,10 @@ def add_route(path: str,
         await process_request_data(pyonir_request)
         if pyonir_request.type == TEXT_RES and not os.path.exists(app_ctx.frontend_dirpath):
             pyonir_request.type = JSON_RES
-        redirect = pyonir_request.form.get('redirect')
-        req_name = list_of_args[0] if list_of_args else ''
-        kwargs = {k: get_attr(pyonir_request.path_params, k, None) for k in list_of_args[1:]} if list_of_args else {}
-        args = {f"{req_name}": pyonir_request, **kwargs}  # All routes must accept request arg
+        route_models = app_ctx.server.url_map.get(dec_func.__name__, {}).get('models')
+
+        args = pyonir_request.request_model(list_of_args, route_models)
+        pyonir_request.args = args
 
         # Update template global
         app_ctx.TemplateParser.globals['request'] = pyonir_request
@@ -331,24 +362,20 @@ def add_route(path: str,
         # Resolve page from request
         req_file = ParselyPage(req_filepath, app_ctx.files_ctx)
         pyonir_request.file = req_file
-        await app_ctx.run_plugins(PyonirHooks.ON_REQUEST, pyonir_request)
-        res = await req_file.process_response(pyonir_request)
         # Resolve route decorator methods
-        pyonir_request.server_response = await dec_func(**args) if is_coroutine else dec_func(**args)
+        pyonir_request.server_response = await dec_func(**args) if is_async else dec_func(**args)
+        await app_ctx.run_plugins(PyonirHooks.ON_REQUEST, pyonir_request)
+        # Finalize response output
+        pyonir_request.status_code = pyonir_request.derive_status_code(is_pyonir_default)
+        if pyonir_request.path not in app_ctx.server.sse_routes + app_ctx.server.ws_routes:
+            pyonir_request.server_response = await req_file.process_response(pyonir_request)
 
-        if redirect:
-            return Site.server.serve_redirect(redirect, 303)
+        if pyonir_request.redirect:
+            return Site.server.serve_redirect(pyonir_request.redirect, 303)
 
-        if pyonir_request.path in app_ctx.server.sse_routes or pyonir_request.path in app_ctx.server.ws_routes:
-            return pyonir_request.server_response
-
-        return build_response(res, pyonir_request)
-
-    dec_wrapper.__name__ = dec_func.__name__
+        return build_response(pyonir_request)
 
     Site.server.add_route(path, dec_wrapper, methods=methods)
-
-    # return dec_wrapper
 
 
 def build_request(TRequest, code: int = 444) -> PyonirRequest:
@@ -370,21 +397,21 @@ def build_request(TRequest, code: int = 444) -> PyonirRequest:
     ip = TRequest.client.host
     host = str(TRequest.base_url).rstrip('/')
     protocol = TRequest.scope.get('type') + "://"
-    headers = process_header(TRequest.headers)
+    headers = PyonirRequest.process_header(TRequest.headers)
     browser = headers.get('user-agent', '').split('/').pop(0) if headers else "UnknownAgent"
     if slug.startswith('api'): headers['accept'] = JSON_RES
     res_type = headers.get('accept')
     status_code = code
     auth = None
     use_endpoints = TRequest.url.path in Site.server.endpoints
-
+    args = {}
     return PyonirRequest(raw_path, method, path, path_params, url, slug, query_params, parts, limit, model, is_home,
-                         form, files, ip, host, protocol, headers, browser, res_type, status_code, auth,
+                         form, files, ip, host, protocol, headers, args, browser, res_type, status_code, auth,
                          use_endpoints=use_endpoints,
                          server_request=TRequest, file=None)
 
 
-def build_response(res_value, request: PyonirRequest):
+def build_response(request: PyonirRequest):
     """Create web response for web server"""
     from datetime import datetime, timedelta
     from pyonir import Site
@@ -392,7 +419,7 @@ def build_response(res_value, request: PyonirRequest):
         ishtml = request.type == TEXT_RES
         expires = datetime.utcnow() + timedelta(days=7)
         expires = expires.strftime("%a, %d %b %Y %H:%M:%S GMT")
-        response = Site.server.response_renderer(res_value, media_type=request.type)
+        response = Site.server.response_renderer(request.server_response, media_type=request.type)
         if ishtml: response.headers['Expires'] = expires
         response.headers['Cache-Control'] = "no-cache" if not ishtml else "public, max-age=0"
         response.headers['Server'] = "Pyonir Web Framework"

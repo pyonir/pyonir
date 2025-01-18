@@ -3,7 +3,8 @@ from datetime import datetime
 from typing import Generator
 
 from .types import PyonirRequest, PyonirHooks
-from .utilities import get_attr, allFiles, tupleconverter, deserialize_datestr, Collection, create_file, remove_html_tags
+from .utilities import get_attr, allFiles, tupleconverter, deserialize_datestr, Collection, create_file, \
+    remove_html_tags
 
 ALLOWED_CONTENT_EXTENSIONS = ('prs', 'md', 'json', 'yaml')
 IGNORE_FILES = ('.vscode', '.vs', '.DS_Store', '__pycache__', '.git', '.', '_', '<', '>', '(', ')', '$', '!', '._')
@@ -239,7 +240,8 @@ class Parsely:
                 # use proper app context for path reference outside of scope is always the root level
                 app_ctx = self.app_ctx  # if not use_root else ("", "", os.path.dirname(self.absdir))
                 if as_dir:
-                    return allFiles(filepath, force_all=1, entry_type=None, app_ctx=app_ctx, **query_params)
+                    return allFiles(filepath, force_all=return_all_files, entry_type=None, app_ctx=app_ctx,
+                                    **query_params)
                 isschema = 'schemas' == self.file_type
                 rtn_key = has_attr_path or 'data'
                 p = ParselySchema.from_path(filepath, app_ctx) if isschema else Parsely(filepath, app_ctx)
@@ -259,7 +261,8 @@ class Parsely:
                 .replace(f'#{has_attr_path}', '')
             query_params = dict(map(lambda x: x.split("="), query_params.split('&')) if query_params else '')
             use_root = valuestr.startswith('../')
-            valuestr = valuestr.replace('../', '')
+            return_all_files = valuestr.endswith('/*')
+            valuestr = valuestr.replace('../', '').replace('/*', '')
             dir_root = os.path.dirname(self.absdir) if self.file_ctx and use_root else self.absdir
             lookup_fpath = os.path.join(dir_root, *valuestr.split("/"))
             if '{{' in lookup_fpath:
@@ -519,7 +522,7 @@ class Parsely:
         self.data = {}
         self.schema = None
         self.deserializer()
-        self.apply_filters()
+
         # page attributes
         is_pg = self.file_type != 'schemas'
         surl = re.sub(r'\bpages/\b|\bindex\b', '', contents_relpath.replace(f'.{self.file_ext}', '')) if is_pg else ''
@@ -531,7 +534,7 @@ class Parsely:
 
         self.file_ssg_api_dirpath = os.path.join(ctx_staticpath, 'api', self.slug)
         self.file_ssg_html_dirpath = os.path.join(ctx_staticpath, self.slug)
-        # self.apply_plugins(PyonirHooks.ON_PARSELY_COMPLETE)
+        self.apply_filters()
         pass
 
     def throw_error(self, message: dict):
@@ -561,13 +564,10 @@ class Parsely:
         self._blob_keys.clear()
         self.deserializer()
 
-    def output_json(self, as_str: bool = None, flat: bool = None):
+    def output_json(self, data_value: any = None):
         """Outputs a json string"""
         from .utilities import json_serial
-        d = {"data": self}
-        if flat:
-            pass
-        return d if not as_str else json.dumps({"data": self}, default=json_serial)
+        return json.dumps({"data": data_value or self}, default=json_serial)
 
     def output_html(self, req: PyonirRequest):
         """Renders and html output"""
@@ -632,6 +632,7 @@ class Parsely:
 
 class ParselyPage(Parsely):
     """Page object discovered in the contents/pages directory used to resolve page web request"""
+
     @property
     def resolver(self):
         return self.data.get('@resolver', None)
@@ -654,29 +655,13 @@ class ParselyPage(Parsely):
         """process web request into response"""
         from pyonir.server import JSON_RES, TEXT_RES, EVENT_RES, apply_plugin_resolvers
         if not self.file_exists:
-            self.data = {
-                "url": req.url,
-                "slug": req.slug,
-                "title": f"{req.path} was not found!",
-                "res": req.server_response,
-                "content": f"Perhaps this page once lived but has now been archived or permananetly removed."
-            }
+            self.data = req.render_error()
         if self.is_resolver:
-            req.type = self.resolver.get('headers',{}).get('accept', req.type)
-            await apply_plugin_resolvers(self, req)
-        if not self.is_resolver and req.type == JSON_RES: self.set_paginated_entries(req)
-        req.status_code = 200 if self.file_exists else 404
-        return self.output_html(req) if req.type == TEXT_RES else self.output_json(True) \
+            req.type = self.resolver.get('headers', {}).get('accept', req.type)
+            return await apply_plugin_resolvers(self, req)
+        if req.type == JSON_RES: self.set_paginated_entries(req)
+        return self.output_html(req) if req.type in (TEXT_RES,'*/*') else self.output_json() \
             if req.type == JSON_RES else self.data
-
-    def error_page(self, req: PyonirRequest):
-        self.data = {
-                "url": req.url,
-                "slug": req.slug,
-                "title": f"{req.path} was not found!",
-                "res": req.server_response,
-                "content": f"Perhaps this page once lived but has now been archived or permananetly removed."
-            }
 
     def set_paginated_entries(self, request: PyonirRequest):
         """Paginated Files contained under a content type directory"""
@@ -743,7 +728,7 @@ class ParselyPage(Parsely):
     @property
     def canonical(self):
         from pyonir import Site
-        return f"{Site.SITE_CONFIGS.domain}{self.url}"
+        return f"{Site.configs.site.domain}{self.url}"
 
     @property
     def tags(self):
@@ -796,7 +781,7 @@ class ParselyPage(Parsely):
         jsdata = {"script": js_str}
         if isinstance(self.data.get('js'), dict):
             jsdata.update(**self.data.get('js'))
-        return jsdata  # tupleconverter('js',jsdata)
+        return jsdata
 
     @property
     def css(self):
@@ -861,16 +846,18 @@ class ParselyMedia(Parsely):
     @property
     def thumbnails(self):
         """Returns a map of thumbnail sizes available for media file"""
-        if not hasattr(self, 'sizes'): return None
-        thumbs = {}
-        for dimes in self.sizes:
-            w, h = dimes
-            tname = '{file_name}--{width}x{height}.{ext}'.format(file_name=self.file_name, width=w, height=h,
-                                                                ext=self.file_ext)
-            tpath = os.path.join(os.path.dirname(self.abspath), 'thumbnails', tname)
-            if not os.path.exists(tpath): continue
-            thumbs[f'{w}x{h}'] = f'{self.file_dir}/thumbnails/{tname}'
-        return thumbs
+        return self.data.get('thumbnails')
+
+    @property
+    def id(self):
+        from pyonir import UPLOADS_THUMBNAIL_DIRNAME, UPLOADS_DIRNAME
+        if not self.data: return None
+        if self.is_thumb:
+            return self.data.get('full_url')
+        group = self.data.get('group')
+        if group != UPLOADS_DIRNAME: group = f'{UPLOADS_DIRNAME}/{group}'
+        name = self.name.split(' ', 1)[0].lower()
+        return f"{group}/{name}.{self.file_ext}"
 
     def __init__(self, file_path: str = None, app_ctx=None):
         super().__init__(file_path, app_ctx)
@@ -889,25 +876,25 @@ class ParselyMedia(Parsely):
         from PIL import Image
         from pyonir import UPLOADS_DIRNAME, UPLOADS_THUMBNAIL_DIRNAME
         if not self.file_exists: return
-        image_name, *image_captions = self.file_name.replace('.'+self.file_ext,'')\
-                                       .split(IMG_FILENAME_DELIM)
+        image_name, *image_captions = self.file_name.replace('.' + self.file_ext, '') \
+            .split(IMG_FILENAME_DELIM)
 
         is_thumb = UPLOADS_THUMBNAIL_DIRNAME in self.file_dir
         formatted_name = re.sub(r'[^a-zA-Z0-9]+', ' ', image_name).title()
         formated_caption = "".join(image_captions or self.name).title()
-        full_img = self.url.replace(UPLOADS_THUMBNAIL_DIRNAME+'/','').split('--')[0]+f".{self.file_ext}"\
-        if is_thumb else self.url
+        full_img = self.slug.replace(UPLOADS_THUMBNAIL_DIRNAME + '/', '').split('--')[0] + f".{self.file_ext}" \
+            if is_thumb else self.url
         self.raw_img = Image.open(self.abspath)
         self.name = formatted_name
         self.is_thumb = is_thumb
         self.data = {
             "@schema": "media",
+            "file_name": image_name if not is_thumb else image_name.split('--')[0],
             "name": self.name,
             "url": self.url,
             "full_url": full_img,
             "slug": self.slug,
             "date": self.file_created_on,
-            "thumbnails": self.thumbnails,
             "type": self.file_ext,
             "group": self.file_dir.split(f'{UPLOADS_DIRNAME}{os.path.sep}', 1).pop(),
             "captions": formated_caption.title(),
@@ -915,6 +902,26 @@ class ParselyMedia(Parsely):
             "width": get_attr(self.raw_img, "width", None),
             "height": get_attr(self.raw_img, "height", None)
         }
+        self.data.update({"thumbnails": self.get_all_thumbnails()})
+
+    def get_all_thumbnails(self) -> dict | None:
+        """Collects thumbnails for the image"""
+        if self.is_thumb: return None
+        from pyonir import UPLOADS_DIRNAME, UPLOADS_THUMBNAIL_DIRNAME
+        group_dir = self.data.get('group')
+        if group_dir != UPLOADS_DIRNAME: group_dir = f'{UPLOADS_DIRNAME}/{group_dir}'
+        thumbs_dir = os.path.join(self.absdir, group_dir, UPLOADS_THUMBNAIL_DIRNAME)
+        files = allFiles(thumbs_dir, app_ctx=self.app_ctx)
+        target_name = self.data.get('file_name')
+        thumbs = {}
+        # filter files based on name
+        for file in files:
+            if file.data.get('file_name') != target_name: continue
+            w = file.data.get('width')
+            h = file.data.get('height')
+            thumbs[f'{w}x{h}'] = file
+            pass
+        return thumbs
 
     @staticmethod
     def createImagefolders(folderpath: str):
@@ -930,7 +937,7 @@ class ParselyMedia(Parsely):
         filename, filedata, rootpath = upload_doc
         file_name, file_ext = os.path.splitext(filename)
         ParselyMedia.createImagefolders(img_folder_abspath)
-        abspath = os.path.join(img_folder_abspath, file_name+file_ext)
+        abspath = os.path.join(img_folder_abspath, file_name + file_ext)
         file_contents = await filedata.read()
         with open(abspath, 'wb') as f:
             f.write(file_contents)
@@ -960,7 +967,7 @@ class ParselyMedia(Parsely):
                 file_name = f'{self.file_name}--{width}x{height}'
                 folderpath = os.path.dirname(self.abspath)
                 self.createImagefolders(folderpath)
-                filepath = os.path.join(folderpath,'thumbnails', file_name + '.' + self.file_ext)
+                filepath = os.path.join(folderpath, 'thumbnails', file_name + '.' + self.file_ext)
                 if not os.path.exists(filepath): img.save(filepath)
         except Exception as e:
             raise

@@ -285,6 +285,7 @@ def add_route(path: str,
               static_path: str = None) -> typing.Callable | None:
     """Route decorator"""
     from pyonir import Site
+
     def is_async(func):
         return inspect.isasyncgenfunction(func) or inspect.iscoroutinefunction(func)
 

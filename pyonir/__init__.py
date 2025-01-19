@@ -2,8 +2,8 @@
 import os, sys
 from pyonir import utilities
 from pyonir.parser import Parsely
-from pyonir.libs.plugins.Forms import Forms
-from pyonir.libs.plugins.Navigation import Navigation
+from pyonir.libs.plugins.forms import Forms
+from pyonir.libs.plugins.navigation import Navigation
 from pyonir.types import PyonirHooks
 
 SYS_USER = os.path.basename(os.environ.get('HOME'))

@@ -638,6 +638,7 @@ class ParselyPage(Parsely):
         return self.data.get('@resolver', None)
 
     def __init__(self, filepath: str, ctx: str = None):
+        self.entries = None
         from pyonir import PAGINATE_LIMIT
         super().__init__(filepath, app_ctx=ctx)
 
@@ -660,7 +661,7 @@ class ParselyPage(Parsely):
             req.type = self.resolver.get('headers', {}).get('accept', req.type)
             return await apply_plugin_resolvers(self, req)
         if req.type == JSON_RES: self.set_paginated_entries(req)
-        return self.output_html(req) if req.type in (TEXT_RES,'*/*') else self.output_json() \
+        return self.output_html(req) if req.type in (TEXT_RES, '*/*') else self.output_json() \
             if req.type == JSON_RES else self.data
 
     def set_paginated_entries(self, request: PyonirRequest):

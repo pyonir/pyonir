@@ -35,7 +35,7 @@ async def pyonir_ws_handler(websocket: WebSocket):
 
     async def broadcast(message: str, ws_id: str = None):
         for id, ws in ConnClients.items():
-            if active_id == id: continue
+            if active_id == id and hasattr(ws, 'send_text'): continue
             await ws.send_text(message)
 
     async def on_disconnect(websocket: WebSocket):
@@ -106,7 +106,7 @@ def pyonir_file_delete(request: PyonirRequest):
     """Deletes a file located in the uploads directory"""
     from pyonir import Site
     from pyonir.parser import ParselyMedia
-    redirect = request.query_params.get('redirect')+'?success=true'
+    redirect = request.query_params.get('redirect') + '?success=true'
     doc = os.path.join(Site.contents_dirpath, request.query_params.get('file'))
     img = ParselyMedia(doc, Site.files_ctx)
     if img.file_exists:
@@ -149,7 +149,7 @@ async def apply_plugin_resolvers(page: ParselyPage, request: PyonirRequest):
     if not resolver: return
     is_async = inspect.iscoroutinefunction(resolver)
     rdata = await resolver(**request.args) if is_async else resolver(**request.args) if callable(resolver) else resolver
-    return rdata if inspect.iscoroutine(rdata) else page.output_json(rdata)
+    return rdata if inspect.iscoroutine(rdata) or inspect.isasyncgen(rdata) else page.output_json(rdata)
 
 
 async def process_request_data(request: PyonirRequest):
@@ -275,6 +275,11 @@ def process_sse(data: dict) -> str:
     return sse_payload + "\n"
 
 
+def serve_favicon(app):
+    from starlette.responses import FileResponse
+    return FileResponse(os.path.join(app.theme_static_dirpath,'favicon.ico'), 200)
+
+
 def add_route(path: str,
               dec_func: typing.Callable,
               methods=None,
@@ -346,6 +351,7 @@ def add_route(path: str,
 
     async def dec_wrapper(star_req):
         from pyonir.parser import ParselyPage
+        if star_req.url.path == '/favicon.ico': return serve_favicon(Site)
         # Resolve page file route
         app_ctx, req_filepath = resolve_path_to_file(star_req.url.path)
         pyonir_request = build_request(star_req)

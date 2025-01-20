@@ -268,6 +268,8 @@ class IApp:
         return [(self.name, '/', _ppth, _prunes)]
 
     def __init__(self, app_rootpth: str = None) -> None:
+        from pyonir.libs.plugins.forms import Forms
+        from pyonir.libs.plugins.navigation import Navigation
         self.server = None
         Parsely.Filters['jinja'] = self.parse_jinja
         self.name = os.path.basename(app_rootpth)

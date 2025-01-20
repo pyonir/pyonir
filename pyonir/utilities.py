@@ -20,6 +20,7 @@ def parse_all(path, app_ctx=None, file_type=None) -> object:
         pass
     return fileMap
 
+
 def dict_to_class(data: dict, name: str):
     """
     Converts a dictionary into a class object with the given name.
@@ -47,7 +48,8 @@ def dict_to_class(data: dict, name: str):
 def get_attr(rowObj, attrPath=None, default=None, rtn_none=True):
     """
         @default returns a default obj when the target attr value is None
-        @rtn_none returns a None obj when target attr value is None
+        @rtn_none returns a None obj when target attr value is not discovered
+        otherwise the rowObj will be returned
         """
     if attrPath == None: return rowObj
     attrPath = attrPath if isinstance(attrPath, list) else attrPath.split('.')
@@ -151,7 +153,6 @@ def allFiles(abs_dirpath: str,
              entry_type: any = None,
              rtn_attr: str = None,
              exclude_dirs: list[str] = None,
-             apply_schema: bool = False,
              force_all: bool = True) -> Generator:
     """Returns a generator of files from a directory path"""
     from .parser import ParselyMedia, ParselyPage
@@ -169,9 +170,6 @@ def allFiles(abs_dirpath: str,
         isschema = hasattr(etype, 'from_path')
         p = etype.from_path(filepath, app_ctx) if isschema else etype(filepath, app_ctx) \
             if ispg else ParselyMedia(filepath, app_ctx)
-        if apply_schema:
-            p.set_file_schema(apply_schema)
-            return p.schema.map_to_schema(p) if p.schema else p.data
         return Collection.get_attr(p, rtn_attr, None)
 
     def is_public(parentdir, entry=None):
@@ -307,11 +305,8 @@ def json_serial(obj):
         return list(obj.collection)
     elif isinstance(obj, (ParselySchema, Parsely)):
         return obj.data
-    elif hasattr(obj, 'parsely_extenstion'):
-        schema_data = obj.schema.map_to_schema(obj) if not obj.data and obj.schema else None
-        return schema_data or obj.data
     else:
-        return None
+        return None if not hasattr(obj, '__dict__') else obj.__dict__
 
 
 def secure_upload_filename(filename):
@@ -455,9 +450,9 @@ class Collection:
         if begin > stop or begin == self.count or not isinstance(self.collection, SortedList): return False
         for obj in self.collection.islice(start, end, reverse=reverse or self.reverse):
             if self.where and not self.where_condition(obj): continue
-            obj.set_file_schema()
-            if obj.schema: obj = obj.schema.map_to_schema(obj)
-            yield self.get_attr(obj, attr_path, rtn_none=False)
+            obj.set_schema()
+            if obj.schema: obj = obj.schema.model
+            yield get_attr(obj, attr_path, rtn_none=False) if attr_path else obj
 
 
 def get_module(pkg_path: str, callable_name: str) -> tuple[any, typing.Callable]:

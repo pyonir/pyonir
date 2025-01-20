@@ -4,7 +4,7 @@ from typing import Generator
 
 from .types import PyonirRequest, PyonirHooks
 from .utilities import get_attr, allFiles, tupleconverter, deserialize_datestr, Collection, create_file, \
-    remove_html_tags
+    remove_html_tags, dict_to_class
 
 ALLOWED_CONTENT_EXTENSIONS = ('prs', 'md', 'json', 'yaml')
 IGNORE_FILES = ('.vscode', '.vs', '.DS_Store', '__pycache__', '.git', '.', '_', '<', '>', '(', ')', '$', '!', '._')
@@ -63,7 +63,7 @@ def parse_markdown(content, kwargs):
 class Parsely:
     """Parsely is a static file parser"""
 
-    Extensions = {}  # Global extensions map that modify return values for parsely file data
+    # Extensions = {}  # Global extensions map that modify return values for parsely file data
     Filters = {'md': parse_markdown}  # Global filters that modify scalar values
 
     def deserializer(self):
@@ -242,9 +242,8 @@ class Parsely:
                 if as_dir:
                     return allFiles(filepath, force_all=return_all_files, entry_type=None, app_ctx=app_ctx,
                                     **query_params)
-                isschema = 'schemas' == self.file_type
                 rtn_key = has_attr_path or 'data'
-                p = ParselySchema.from_path(filepath, app_ctx) if isschema else Parsely(filepath, app_ctx)
+                p = Parsely(filepath, app_ctx)
                 d = get_attr(p, rtn_key) or p
                 EmbeddedTypes[filepath] = d
                 return d
@@ -497,6 +496,7 @@ class Parsely:
 
     def __init__(self, abspth, app_ctx=None):
         # assert abspth!=None, "Parsely expects an abspath to a resource"
+        self.prev_next = None
         ctx_dir, ctx_url, ctx_dirpath, ctx_staticpath = app_ctx
         contents_relpath = abspth.split(ctx_dirpath).pop().lstrip(os.path.sep) if abspth else ''
         contents_rootdir = os.path.dirname(contents_relpath.lstrip(os.path.sep))
@@ -535,13 +535,21 @@ class Parsely:
         self.file_ssg_api_dirpath = os.path.join(ctx_staticpath, 'api', self.slug)
         self.file_ssg_html_dirpath = os.path.join(ctx_staticpath, self.slug)
         self.apply_filters()
-        pass
 
     def throw_error(self, message: dict):
         msg = {
             'ERROR': f'{self.file_relpath} found an error on line {self._cursor}',
             'LINE': f'{self.file_lines[self._cursor]}', **message}
         return msg
+
+    def set_schema(self, schema_name: str | None = None):
+        """Set Schema and schema model for file type or schema_name argument"""
+        from pyonir import Site
+        schema_path = os.path.join(Site.schemas_dirpath, (schema_name or self.file_type)+'.md')
+        schema = Schema(schema_path, self.app_ctx)
+        if schema.file_exists:
+            self.schema = schema
+            self.schema.map_input_to_model(self)
 
     def set_file_schema(self, schema_name=''):
         """Sets schema model object described by file's type"""
@@ -573,7 +581,7 @@ class Parsely:
         """Renders and html output"""
         from pyonir import Site
         # if not self.is_api and self.file_exists:
-        #     Site.TemplateParser.globals['prevNext'] = self.prev_next()
+        Site.TemplateParser.globals['prevNext'] = self.prev_next
         Site.TemplateParser.globals['page'] = self
         html = Site.TemplateParser.get_template(self.template).render()
 
@@ -637,8 +645,12 @@ class ParselyPage(Parsely):
     def resolver(self):
         return self.data.get('@resolver', None)
 
+    @property
+    def entries(self):
+        if not self.data or not self.data.get('entries'): return None
+        return self.data.get('entries')
+
     def __init__(self, filepath: str, ctx: str = None):
-        self.entries = None
         from pyonir import PAGINATE_LIMIT
         super().__init__(filepath, app_ctx=ctx)
 
@@ -657,10 +669,14 @@ class ParselyPage(Parsely):
         from pyonir.server import JSON_RES, TEXT_RES, EVENT_RES, apply_plugin_resolvers
         if not self.file_exists:
             self.data = req.render_error()
-        if self.is_resolver:
-            req.type = self.resolver.get('headers', {}).get('accept', req.type)
-            return await apply_plugin_resolvers(self, req)
-        if req.type == JSON_RES: self.set_paginated_entries(req)
+        else:
+            if self.is_resolver:
+                req.type = self.resolver.get('headers', {}).get('accept', req.type)
+                return await apply_plugin_resolvers(self, req)
+            self.set_paginated_entries(req)
+            if req.type == JSON_RES:
+                self.set_schema(self.data.get('@schema'))
+                return self.output_json(self.schema.model)
         return self.output_html(req) if req.type in (TEXT_RES, '*/*') else self.output_json() \
             if req.type == JSON_RES else self.data
 
@@ -680,7 +696,7 @@ class ParselyPage(Parsely):
         self.limit = limit
         self.pagenum = pagenum
         self.paginate = (maxCount // limit) + (maxCount % limit > 0)
-        self.entries = list(entries.paginate(start=start, end=end, reverse=True))
+        self.data['entries'] = list(entries.paginate(start=start, end=end, reverse=True))
         if gallery:
             self.data['gallery']['files'] = list(gallery.paginate(start=start, end=end, reverse=True))
 
@@ -980,192 +996,58 @@ class ParselyMedia(Parsely):
         return self.thumbnails.get(f'{width}x{height}')
 
 
-class ParselySchema:
-    """Schema file"""
+class Schema(Parsely):
+    PRIVATE_PREFIX = '_'
 
     @property
-    def data(self):
-        return self.file.data
-
-    def __init__(self, parselyfile: Parsely, table_name: str = None) -> None:
-
-        self.foreign_schemas = {}
-        """ map of foriegn keys schema definitions relative to this schema"""
-        self.file: Parsely = parselyfile
-        """ parsely schema definitions """
-        self.table = self.file_data.get('@table', (table_name or f"{self.file.file_ctx}.{self.file.file_type}"))
-        self.name = self.file.file_name or self.file_data.get('@schema', table_name or 'embedded')
-        self.validator: SchemaValidator = SchemaValidator(self)
-        self.file_keys: list[str] = self.file.data.keys()
-        pass
-
-    @classmethod
-    def from_path(cls, path, app_ctx):
-        """Creates new ParselySchema from file path"""
-        if not isinstance(path, str): return None
-        f = Parsely(path, app_ctx)
-        return cls(f)
-
-    @classmethod
-    def from_data(cls, data, app_ctx, schema_name=None):
-        f = Parsely.from_input(data, app_ctx)
-        return cls(f, table_name=schema_name) if data else None
-
-    def map_to_schema(self, src_data, block_private: bool = True):
-        """Returns dict representing schema fields"""
-        enabled_extensions = (dict, Parsely) + tuple(
-            ext for _, ext in Parsely.Extensions.items() if hasattr(ext, 'parsely_extension'))
-        protected = self.protected_fields + PROTECTED_FIELDS
-        private_fields = self.private_fields or PRIVATE_FIELDS
-        result = dict({})
-        app_ctx = self.file.app_ctx
-        # src_tbl_name = src_data.file_content_schema_tbl_name if hasattr(src_data, 'file_content_schema_tbl_name') else self.table
-        result = dict({"@schema_src": f'{self.name}'})
-
-        def prefixer(field):
-            """Prefix protected symbol on field names"""
-            field = field.replace('*', '').strip()
-            if self.provider_model:
-                field = self.provider_model.get(field, field)
-            try:
-                return f"{PROTECTED_FIELD_PREFIX}{field}" if field in protected and self.with_symbols and not self.is_safe else field
-            except Exception as e:
-                return field
-
-        def obfuscate(key, value):
-            """Hides values for any private fields in object schema"""
-            if self.is_safe: return value
-            return "***" if block_private and key in private_fields else value
-
-        def validateType(value):
-            return value
-
-        def convert_sch(k) -> ParselySchema:
-            """Converts embedded schema objects into ParselySchema objects"""
-            embed_obj_sch = self.file_data.get(k, None)
-            embed_obj_sch = embed_obj_sch[0] if isinstance(embed_obj_sch, list) else embed_obj_sch
-            embed_obj_sch = embed_obj_sch.data if isinstance(embed_obj_sch, Parsely) else embed_obj_sch
-            if isinstance(embed_obj_sch, str) or not embed_obj_sch: return None
-            return ParselySchema.from_data(embed_obj_sch, app_ctx, k)
-
-        def get_value(k):
-            """Maps schemas for nested objects"""
-            v = get_attr(src_data, k)
-            v = get_attr(src_data.data, k) if not v and isinstance(src_data, Parsely) else v
-            if not v: return v
-            sch = convert_sch(k)
-            if isinstance(v, enabled_extensions):
-                v = sch.map_to_schema(v) if sch else v
-            elif isinstance(v, (list, Generator, set)):
-                v = [sch.map_to_schema(p) if sch else p for p in v]
-            return obfuscate(k, v)
-
-        try:
-            for k in self.all_fields:
-                if k in ('provider_model',): continue
-                v = get_value(k)
-                k = prefixer(k)
-                v = validateType(v)
-                result.update({k: v})
-
-            return result
-        except Exception as e:
-            result.update({
-                "@schema_src": "MAPPING ERROR",
-                "msg": str(e)
-            })
-            raise
-
-    def merge(self, input_data: dict, src_data: dict):
-        sch_data = dict()
-        etc_data = dict()
-        for ik, iv in input_data.items():
-            if ik in DEFAULT_IGNORE_FIELDS: continue
-            if ik in self.all_fields:
-                sch_data[ik] = iv
-            etc_data[ik] = iv
-        sch_data.update(etc_data)
-        src_data.update(sch_data)
-        return src_data
-
-    def set_foreign_schemas(self):
-        res = {}
-        for fk in self.foreign_keys:
-            v = self.file_data.get(fk)
-            is_list = isinstance(v, list) and isinstance(v[0], dict)
-            edata = v[0] if is_list else v
-            fschma = ParselySchema.from_data(edata,
-                                             self.table + "." + fk)  # if edata else Site.schemas if Site else None
-            if not fschma: continue
-            res.update({fk.lower(): fschma})
-        if res:
-            self.foreign_schemas = tupleconverter("ForeignSchemas", res)
-
-    @property
-    def is_safe(self):
-        """Bypass prefix and obfuscating any fields"""
-        if not self.file: return None
-        return self.file_data.get('@safe', None)
-
-    @property
-    def with_symbols(self):
-        """Returns protected attributes with special annotation prefex"""
-        if not self.file_data: return None
-        return self.file_data.get('@with_symbols', None)
-
-    @property
-    def file_data(self):
-        if not self.file: return dict()
-        return self.file.data  # if isinstance(self.file.data, dict) else self.file.data.data
-
-    @property
-    def provider_model(self) -> dict:
-        """Transformer map of domain attributes to public attribute names"""
-        if not self.file_data: return dict()
-        return self.file_data.get('@provider_model', dict())
-
-    @property
-    def foreign_keys(self) -> tuple:
-        """List of fields that are foreign keys"""
-        if not self.file_data: return tuple()
-        return tuple((fk for fk in self.file_data.get('@fk', tuple())))
+    def provider_model(self) -> dict | None:
+        """Public model field names"""
+        return self.data.get('@provider_model', {})
 
     @property
     def primary_key(self):
         """Primary key column name"""
-        if not self.file_data: return None
-        return self.file_data.get('@pk', 'id')
+        return self.data.get('@pk', 'id')
 
-    @property
-    def private_fields(self) -> tuple:
-        """List of attributes to obfuscate that includes the system defaults"""
-        if not self.file_data: return tuple()
-        return tuple(x for x in self.file_data.get('@private_keys', tuple()))
+    def __init__(self, schema_path: str, app_ctx: list):
+        super().__init__(schema_path, app_ctx)
+        self.fields: set[str] = set(Schema.sanitize(k) for k in self.data.keys() if not k.startswith('@'))\
+            if self.file_exists else None
+        self.private_fields = set(Schema.sanitize(f) for f in self.data.keys() if f.startswith('_'))
+        self.model = None
+        pass
 
-    @property
-    def protected_fields(self) -> tuple:
-        """Read only fields"""
-        if not self.file_data: return tuple()
-        keys = self.file_keys or []
-        return tuple((f.replace('@', '') for f in keys if f.startswith('@') and f not in ("@fk", "@pk")))
+    @staticmethod
+    def sanitize(key: str):
+        return key[1:] if key.startswith(Schema.PRIVATE_PREFIX) else key
 
-    @property
-    def public_fields(self) -> tuple:
-        """Read and Writtable fields"""
-        if not self.file_data: return ()
-        # keys = self.file_keys or
-        return tuple((f.replace('*', '') for f in self.file_keys if not f.startswith('@')))
+    def map_input_to_model(self, subject: dict | Parsely):
+        """Returns a schema model from subject data"""
+        def get_value(key):
+            """get key value on subject"""
+            v = get_attr(subject, key)
+            v = get_attr(subject.data, key) if v is None and isinstance(subject, Parsely) else v
+            if isinstance(self.data.get(key), (list, set, Generator)):
+                itr_schema_type = self.data.get(key)[0]
+                entries = []
+                for entry in v:
+                    if hasattr(entry,'set_schema'): entry.set_schema(itr_schema_type)
+                    target = entry.schema.model if hasattr(entry,'set_schema') else entry
+                    entries.append(target)
+                v = entries
+            return "***" if key in self.private_fields and v is not None else v
 
-    @property
-    def required_fields(self) -> tuple:
-        """Required field name for object and not null fields"""
-        if not self.file_data: return tuple()
-        keys = self.file_keys or []
-        return tuple((f.replace('*', '') for f in keys if f and f.replace('@', '').startswith('*')))
+        model = type(self.file_name, (object,), {"__schema__": self.file_name})()
+        for field in self.fields:
+            v = get_value(field)
+            setattr(model, self.provider_model.get(field, field), v)
+            pass
+        self.model = model
+        return model
 
-    @property
-    def all_fields(self):
-        return tuple(set(self.required_fields + self.public_fields))
+    def validate_model(self):
+        """Validates model against schema conditions"""
+        pass
 
 
 class SchemaValidator:

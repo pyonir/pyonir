@@ -264,10 +264,8 @@ class IApp:
     def request_paths(self):
         """list of base file paths to resolve web requests. includes child apps"""
         _ppth = [self.pages_dirpath, self.api_dirpath]
-        _apprunes = [os.path.basename(p) for p in _ppth]
-        appth = (self.name, '/', _ppth, _apprunes)
-        ppth = [appth]
-        return ppth
+        _prunes = [os.path.basename(p) for p in _ppth]
+        return [(self.name, '/', _ppth, _prunes)]
 
     def __init__(self, app_rootpth: str = None) -> None:
         self.server = None
@@ -283,18 +281,18 @@ class IApp:
         self.api_dirpath = os.path.join(self.contents_dirpath, API_DIRNAME)
         self.users_dirpath = os.path.join(self.contents_dirpath, USERS_DIRNAME)
         self.pages_dirpath = os.path.join(self.contents_dirpath, PAGES_DIRNAME)
+        self.schemas_dirpath = os.path.join(self.contents_dirpath, SCHEMAS_DIRNAME)
         self.uploads_dirpath = os.path.join(self.contents_dirpath, UPLOADS_DIRNAME)
         self.datastore_dirpath = os.path.join(self.contents_dirpath, DATASTORE_DIRNAME)
         self.frontend_dirpath = os.path.join(app_rootpth, FRONTEND_DIRNAME)
         self.themes_dirpath = os.path.join(self.frontend_dirpath, THEMES_DIRNAME)
         self.files_ctx = ('', '', self.contents_dirpath, self.ssg_dirpath)
         self.messages = {}
-        # self.available_plugins = {Forms(self), Navigation(self)}
         self.TemplateParser = None
         self.configs = self.process_contents(os.path.join(self.contents_dirpath, CONFIGS_DIRNAME), self.files_ctx)
         self.jinja_template_dirpaths = (self.theme_templates_dirpath, PYONIR_JINJA_TEMPLATES_DIRPATH,)
         self.setup_jinja()
-        self.schemas = self.process_contents(os.path.join(self.contents_dirpath, SCHEMAS_DIRNAME), self.files_ctx)
+        # self.schemas = self.process_contents(os.path.join(self.contents_dirpath, SCHEMAS_DIRNAME), self.files_ctx)
 
         # Setups
         self.setup_system_msgs()

@@ -1,0 +1,153 @@
+{% if page.entries %}
+<div iml-app id="listingComponent">
+    {# <iml> tags written in this template are reactive text fragments used with the optimljs library #}
+    {%- include 'components/pagination.html' -%}
+    <div class="list-search">
+        <div class="form-row" tabindex="0">
+            <label for="filter-list" class="form-label">Search list (
+                {{page.entries.max_count }}
+                {{'' | iml('colors.length')}}
+                )</label>
+            <input name="search"
+                   attrs
+                   oninput="{filterSearch}"
+                   id="filter-list"
+                   class="form-input"
+                   type="text"
+                   placeholder="Search"
+                   tabindex="0">
+        </div>
+    </div>
+    <ul class="scrollable-list">
+        <button attrs onclick="{addColor}" data-foo="{colors.length}">Add Item</button>
+        {%- for entry in page.entries.items %}
+        <li class="list-item" each="entry in filteredItems" index="{{loop.index0}}">
+            <div class="head">
+                <a class="title" href="{{entry.url}}">{{loop.index}}.
+                    <iml js="highlight(entry.title)" html>{{entry.title}}</iml>
+                </a>
+                <div class="date">{{entry.date.strftime('%a, %B %d')}}</div>
+            </div>
+            <div class="tags">
+                from: {{entry.author}}
+                <ul>
+                    {%- for color in ['red','green','blue'] %}
+                    <li class="colors" each="color in colors" index="{{loop.index0}}">
+                        <iml js="i+1">{{loop.index}}.</iml> <iml js="(color)">{{color}}</iml>
+                        <button attrs onclick="{deleteColor}">X</button>
+                    </li>
+                    {% endfor %}
+                </ul>
+            </div>
+        </li>
+        {%- endfor %}
+    </ul>
+</div>
+{% pull 'js' %}
+<script type="importmap">
+  {
+    "imports": { "optiml": "http://localhost:3000/index.js" }
+  }
+</script>
+
+<script type="module">
+// import {render} from "/public/js/optiml.min.js";
+import {render} from "optiml";
+ function highlight(txt){
+    const char = listingComponent.state.filter;
+    if(!char) return txt;
+    const regex = new RegExp(String.raw`${char}`,'g');
+    return txt.replace(regex, `<span class="hlt">${char}</span>`);
+}
+function filterSearch(evt, state, app){
+    state.filter = evt.target.value;
+    app._update()
+}
+const state = { colors: ['red','green','blue'], filter: '', highlight, filterSearch,
+    get filteredItems(){
+        return this.filter ? this.entries.items.filter(x=> x.title.toLowerCase().indexOf(this.filter.toLowerCase()) > -1) : [...this.entries.items];
+    }
+ };
+state.entries = {{page.entries | asjson }}
+
+const actions = {
+    deleteColor(evt, {color, i}, state){
+        state.colors.splice(i, 1)
+    },
+    addColor(evt, state){
+        state.colors.push('foo'+Math.random())
+    },
+    highlight,
+    filterSearch
+}
+render(listingComponent, {state, actions});
+</script>
+{% endpull %}
+<style>
+    .hlt {
+    background: yellow;
+    color: black;
+}
+    #listingComponent {
+        background: #212121;
+        color: white;
+        padding: 2rem;
+        border-radius: 12px;
+        font-size: 1.2rem;
+
+        & input#filter-list {
+            width: 100%;
+            background: black;
+            border-radius: .345rem;
+            color: white;
+        }
+
+        .scrollable-list {
+            max-height: 300px;
+            overflow-y: scroll;
+            overflow-x: hidden;
+        }
+
+        .list-item {
+            display: flex;
+            flex-direction: column;
+            gap: .25em;
+        }
+
+        .list-item:hover {
+            background-color: #ffffff12;
+        }
+
+        & .excerpt {
+            line-height: 1.456rem;
+        }
+
+        & .head {
+            display: flex;
+            justify-content: space-between;
+        }
+
+        & h1 {
+            font-size: 1.6rem;
+        }
+
+        & ul li a {
+            color: inherit;
+            font-weight: 900;
+        }
+
+        & ul li {
+            list-style: none;
+            padding: .756rem;
+            background: #0000007a;
+            border-radius: .345rem;
+            margin-bottom: calc(.5rem * calc(1 - 0));
+            margin-top: 0;
+        }
+
+        > ul {
+            margin: 0;
+        }
+    }
+</style>
+{% endif %}

@@ -14,7 +14,7 @@ def init():
 
 class BlockPushExtension(Extension):
     """Defines custom blocks to gather template fragments and output them in specific areas in the jinja template"""
-    tags = set(['pull', 'yield'])
+    tags = {'pull', 'yield'}
 
     def __init__(self, environment):
         super(BlockPushExtension, self).__init__(environment)

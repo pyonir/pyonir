@@ -1,0 +1,14 @@
+group: string
+parent: string
+name: string
+title: string
+icon: string
+img: string
+order: int
+subtitle: string
+class: string
+status: string
+sub_menus:- menu
+url: string
+slug: string
+_key: menu

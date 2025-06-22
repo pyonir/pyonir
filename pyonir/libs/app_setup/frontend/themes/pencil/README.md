@@ -1,5 +1,6 @@
-title: Pencil theme
+name: Pencil theme
 author: Pablo Pycasso
+static: public
 ===
 # Frontend
 

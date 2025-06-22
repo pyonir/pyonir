@@ -1,5 +1,5 @@
-{% if data.form %}
-{% set form = data.form %}
+{% if page.form.inputs %}
+{% set form = page.form %}
 {% set user = form.auth.user if form.auth else False %}
 {% set formname = form.file_name or 'hyper' %}
 {%- set formId = form.id or formname|replace('-','_')|replace(' ','_')+"_form" -%}
@@ -7,17 +7,12 @@
 	action="{{ form.action or 'api/v1/forms/'+formname }}"
 	method="{{ form.method or 'POST' }}" {% if form.multisteps %} data-step="step-1"{% endif %} type="{{ form.type }}" {% if form.type == 'media' %} enctype="multipart/form-data"{% endif %}>
 		<div class="form-messages row">
-			{% if form_msgs %}
 			<div class="alert">
-				{% for msg in form_msgs %}
-					<li>{{msg|safe}}</li>
-				{% endfor %}
+				{{form.get_message(request)}}
 			</div>
-			{% endif %}
 		</div>
-		{% if form.redirect %}
-		<input type="hidden" name="redirect" value="{{form.redirect}}">
-		{% endif %}
+		<input type="hidden" name="form_id" value="{{formname}}">
+		<input type="hidden" name="redirect" value="{{form.redirect or request.url}}">
 		<input type="hidden" name="csrf_token" value="{{ csrf_token }}">
 		{% if form.inputs %}
 			{% for input in form.inputs %}
@@ -32,6 +27,10 @@
 {% if form.js %}
 {{ form.js }}
 {% endif %}
+{% else %}
+<div class="alert-caution">
+Warning: Unable to find '{{page.form}}' form.
+</div>
 {% endif %}
 
 

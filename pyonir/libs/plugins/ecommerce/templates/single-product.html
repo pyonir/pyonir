@@ -1,0 +1,18 @@
+
+{% block content %}
+{% set product = page.product %}
+<product>
+    <product-image>
+        <img src="{{product.images[0]}}" alt="">
+    </product-image>
+    <product-title>{{product.name}}</product-title>
+    <product-price>${{product.price}}</product-price>
+    <form action="/api/my-shop/add_to_cart" method="POST">
+        <input type="hidden" name="redirect" value="{{request.raw_path}}">
+        <input type="hidden" name="product_id" value="{{product.product_id}}">
+        <input type="number" name="quantity" value="1">
+        <button>Add To Cart</button>
+    </form>
+</product>
+<a href="{{request.url}}">Back</a>
+{% endblock %}

@@ -1,0 +1,23 @@
+{% if page.entries and page.entries.items and page.entries.page_nums %}
+{%
+set page_num, pg_limit, pg_nums, pg_max =
+page.entries.curr_page,
+page.entries.limit,
+page.entries.page_nums,
+page.entries.max_count
+%}
+<ul style="display: flex;list-style: none;gap: 1rem;">
+    {% if page_num > 1 %}
+    <li><a href="?pg={{page_num-1}}&limit={{pg_limit}}">Previous</a></li>
+    {% endif %}
+    {% for num in pg_nums %}
+        <li>
+        <a {% if num == page_num %}class="active"{% endif %} href="?pg={{num}}&limit={{pg_limit}}">{{num}}</a>
+        </li>
+    {% endfor %}
+    {% if (page_num*page_num) < pg_max %}
+    <li><a href="?pg={{page_num+1}}&limit={{pg_limit}}">Next</a></li>
+    {% endif %}
+</ul>
+
+{% endif %}

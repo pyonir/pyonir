@@ -1,47 +1,56 @@
 {% extends 'base.html' %}
 {% block content %}
 
-{% set pagenum, limit, paginate = page.pagenum, page.limit, page.paginate %}
-{% set start = (pagenum*limit) - limit %}
-{% set end = limit*pagenum %}
-<h1>
-    {{page.title}}
-</h1>
+
+<h1 class="center">{{page.title}}</h1>
 {{page.content|safe}}
 
 
 {% if page.form %}
-{{ formsPlugin.buildForm( data=page) }}
+{% include 'formbuilder.html' %}
 {% endif %}
 
 {% if page.gallery %}
 <div class="gallery">
-    {% for image in page.gallery.files if image.is_thumb %}
+    {{page.gallery.files.max_count}}
+    {{page.gallery.files.items|length}}
+    {% for image in page.gallery.files.items if image.is_thumb %}
     <figure>
         <img
             src="{{image.url}}"
             alt="{{image.name}}"
         />
         <figcaption>
-            {{image.data.group}}
-            <a href="{{image.data.full_url}}" target="_blank">{{image.name}}</a>
-            <button type="submit">Delete</button>
+            {{image.group}}
+            <a href="{{image.full_url}}" target="_blank">{{image.name}}</a>
+            <button data-id="{{image.group}}/{{image.file_name}}.{{image.file_ext}}" onclick="deleteImg(event)" type="submit">Delete</button>
         </figcaption>
     </figure>
     {% endfor %}
+    <script>
+    async function deleteImg(event){
+        const itemId = event.target.getAttribute('data-id');
+        const response = await fetch(`/api/demo-uploads?file_id=${itemId}`, {
+            method: 'DELETE',
+            headers: {
+              'Content-Type': 'application/json',
+            }
+          });
+        if (response.ok) {
+            alert('Item deleted successfully!');
+        } else {
+            const error = await response.text();
+            console.error('Failed to delete:', error);
+            alert('Failed to delete item.');
+        }
+    }
+</script>
 </div>
 {% endif %}
 
-{% if page.entries %}
-<ul>
-    {% for entry in page.entries.collection %}
-    <li><a href="{{entry.url}}">{{entry.title}}</a></li>
-    {% endfor %}
-</ul>
-{% endif %}
 {% endblock %}
 
 {% block js %}
     {{super()}}
-    {{ page.js.script }}
+    {{ page.js }}
 {% endblock %}

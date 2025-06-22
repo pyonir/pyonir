@@ -1,10 +1,14 @@
 import os, pytz, re, json
+import typing
 from datetime import datetime
-from typing import Generator
+from dataclasses import dataclass, field
+from typing import Any, Optional, Generator
 
-from .types import PyonirRequest, PyonirHooks
-from .utilities import get_attr, allFiles, tupleconverter, deserialize_datestr, Collection, create_file, \
-    remove_html_tags, dict_to_class
+from PIL.ImageFile import ImageFile
+
+from .types import PyonirRequest, ParselyCollection
+from .utilities import get_attr, allFiles, deserialize_datestr, create_file, \
+    remove_html_tags, dict_to_class, get_module, PyonirCollection, cls_mapper
 
 ALLOWED_CONTENT_EXTENSIONS = ('prs', 'md', 'json', 'yaml')
 IGNORE_FILES = ('.vscode', '.vs', '.DS_Store', '__pycache__', '.git', '.', '_', '<', '>', '(', ')', '$', '!', '._')
@@ -19,19 +23,12 @@ ILN_DCT_DLM = ":: "
 BLOCK_PREFIX_STR = "==="
 LOOKUP_EMBED_PREFIX = '$'
 LOOKUP_FILE_PREFIX = '$file'
-LOOKUP_CONTENT_PREFIX = '$content'
+# LOOKUP_CONTENT_PREFIX = '$content'
 LOOKUP_DIR_PREFIX = '$dir'
 FILTER_KEY = '@filter'
+RESOLVER_KEY = '@resolvers'
 DEFAULT_IGNORE_FIELDS = ()
 EmbeddedTypes = dict()
-# Schemas configs
-PROTECTED_FIELD_PREFIX = '@'
-# Private fields should can be read and written but should not be exposed
-PRIVATE_FIELDS = ('password', 'ssn', 'auth_token', 'id', 'uid', 'privateKey')
-# Protected fields are allowed to be read but are not allowed to be changed directly
-PROTECTED_FIELDS = (
-                       'created_on', 'modified_on', 'modified_by', 'last_modified_by',
-                       'date_created', 'date_modified', 'raw', 'provider_model') + PRIVATE_FIELDS
 
 # Image configs
 IMG_FILENAME_DELIM = '|'  # delimits the file name and description
@@ -55,31 +52,346 @@ IMAGE_FORMATS = (
 
 
 def parse_markdown(content, kwargs):
-    from mistletoe import markdown
+    import html, mistletoe
     from mistletoe.html_attributes_renderer import HTMLAttributesRenderer
-    return markdown(content, renderer=HTMLAttributesRenderer)
+    res = mistletoe.markdown(content, renderer=HTMLAttributesRenderer)
+    return html.unescape(res)
 
+
+@dataclass
+class Page:
+    """Represents a single page returned from a web request"""
+    _mapper = {'created_on': 'file_created_on', 'modified_on': 'file_modified_on'}
+    _mapper_merge = True # merges additional data properties to model
+    url: str
+    created_on: datetime = None
+    modified_on: datetime = None
+    tags: list = None
+    date: datetime = None
+    category: str = ''
+    template: str = ''
+    order: int = 0
+    title: str = ''
+    content: str = ''
+    slug: str = ''
+    author: str = 'pyonir'
+    entries: ParselyCollection = None
+    gallery: dict = None
+    file_name: str = ''
+    file_path: str = ''
+    contents_relpath: str = ''
+
+
+@dataclass
+class ParselyMedia:
+    name: str
+    group: str
+    url: str
+    width: int
+    height: int
+    file_size: int
+    thumbnails: dict = field(default_factory=dict)
+    slug: str = ''
+    is_thumb: bool = False
+    captions: str = ''
+    full_url: str = ''
+    file_name: str = ''
+    app_ctx: list = None
+    file_ext: str = ''
+    file_path: str = ''
+    file_dirpath: str = ''
+    file_exists: bool = False
+    _sizes: list = field(default_factory=list)
+
+    def open_image(self):
+        from PIL import Image
+        raw_img = Image.open(self.file_path)
+        self.width = get_attr(raw_img, "width", None)
+        self.height = get_attr(raw_img, "height", None)
+        return raw_img
+
+    def to_json(self) -> dict:
+        """Json serializable repr"""
+        return {k:v for k,v in self.__dict__.items() if k[0]!='_' and k!='app_ctx'}
+
+    @staticmethod
+    def createImagefolders(folderpath: str):
+        thumbspath = os.path.join(folderpath, 'thumbnails')
+        if not os.path.exists(folderpath):
+            os.makedirs(folderpath)
+        if not os.path.exists(thumbspath):
+            os.makedirs(thumbspath)
+
+    @staticmethod
+    async def save_upload(upload_doc, img_folder_abspath, app_ctx) -> 'ParselyMedia':
+        """Saves base64 file contents into file system"""
+        filename, filedata, rootpath = upload_doc
+        file_name, file_ext = os.path.splitext(filename)
+        ParselyMedia.createImagefolders(img_folder_abspath)
+        new_img_path = os.path.join(img_folder_abspath, file_name + file_ext)
+        file_contents = await filedata.read()
+        with open(new_img_path, 'wb') as f:
+            f.write(file_contents)
+        parselyMedia = ParselyMedia.from_path(str(new_img_path), app_ctx)
+        return parselyMedia
+
+    @classmethod
+    def from_path(cls, file_path, app_ctx):
+        p = Parsely(file_path, app_ctx)
+        return p.map_to_model(cls)
+
+    def resize(self, sizes=None):
+        '''
+        Resize each image and save to the upload path in corresponding image size and paths
+        This happens after full size images are saved to the filesystem
+        '''
+        from PIL import Image
+        from pyonir import Site
+        raw_img = self.open_image()
+        if sizes is None:
+            sizes = [Site.THUMBNAIL_DEFAULT]
+        try:
+            for dimensions in sizes:
+                width, height = dimensions
+                self._sizes.append(dimensions)
+                img = raw_img.resize((width, height), Image.Resampling.BICUBIC)
+                file_name = f'{self.file_name}--{width}x{height}'
+                img_dirpath = os.path.dirname(self.file_path)
+                self.createImagefolders(img_dirpath)
+                filepath = os.path.join(img_dirpath, Site.UPLOADS_THUMBNAIL_DIRNAME, file_name + '.' + self.file_ext)
+                if not os.path.exists(filepath): img.save(filepath)
+        except Exception as e:
+            raise
+
+    def generate_thumb(self, width, height) -> str:
+        """Generates an image accordion to width and height parameters and returns url to the new resized image"""
+        self._sizes.append((width, height))
+        if not self.thumbnails.get(f'{width}x{height}'): self.resize([(width, height)])
+        return self.thumbnails.get(f'{width}x{height}')
+
+    def get_all_thumbnails(self) -> dict | None:
+        """Collects thumbnails for the image"""
+        if self.is_thumb: return None
+        from pyonir import Site
+        if self.group != Site.UPLOADS_DIRNAME: self.group = f'{Site.UPLOADS_DIRNAME}/{self.group}'
+        thumbs_dir = os.path.join(self.file_dirpath, self.group, Site.UPLOADS_THUMBNAIL_DIRNAME)
+        files = allFiles(str(thumbs_dir), app_ctx=self.app_ctx)
+        target_name = self.file_name
+        thumbs = {}
+        # filter files based on name
+        for file in files:
+            if file.file_name[:len(target_name)] != target_name: continue
+            w = file.width
+            h = file.height
+            thumbs[f'{w}x{h}'] = file
+            pass
+        return thumbs
 
 class Parsely:
     """Parsely is a static file parser"""
+    _Filters = {'md': parse_markdown}  # Global filters that modify scalar values
 
-    # Extensions = {}  # Global extensions map that modify return values for parsely file data
-    Filters = {'md': parse_markdown}  # Global filters that modify scalar values
+    def process_ctx(self, app_ctx):
+        ctx_dir, ctx_url, ctx_dirpath, ctx_staticpath = app_ctx
+        _, _, content_dirpath = self.file_path.partition(ctx_dirpath)
+        file_name, file_ext = os.path.splitext(os.path.basename(content_dirpath))
+        content_dirpath = content_dirpath.lstrip(os.path.sep).rstrip(file_ext)
+        return ctx_url, ctx_dir, ctx_dirpath, ctx_staticpath, content_dirpath, file_name, file_ext
+
+    def __init__(self, abspth: str, app_ctx=None):
+        from pyonir import Site
+        assert abspth is not None, f"Parsely was not provided. {abspth} is not a valid string!"
+        self._cursor = None
+        self._blob_keys = []
+        self.resolver = None
+        self.app_ctx = app_ctx # application context for file
+        self.file_path = abspth
+        self.file_dirpath = os.path.dirname(abspth) # path to files contents directory
+        # file data processing
+        self.file_contents = ''
+        self.file_lines = None
+        self.file_line_count = None
+        self.data = {}
+
+        self.schema = None
+        ctx_url, ctx_name, ctx_dirpath, ctx_staticpath, contents_relpath, file_name, file_ext = self.process_ctx(app_ctx)
+        content_type, *content_subs = os.path.dirname(contents_relpath).split(os.path.sep) # directory at root of contents scope
+        is_page = ctx_url=='' and content_type in (Site.PAGES_DIRNAME, Site.API_DIRNAME)
+
+        self.file_contents_dirpath =  ctx_dirpath # contents directory path used when querying refs
+        self.is_home = is_page and contents_relpath == f'{Site.PAGES_DIRNAME}/index'
+        self.file_ctx = ctx_name # the application context name
+        self.file_dirname = os.path.basename(self.file_dirpath) # nearest parent directory for file
+        self.file_data_type = content_type
+        self.file_name = file_name
+        self.file_ext = file_ext.lstrip('.')
+
+        # page attributes
+        surl = re.sub(fr'\b{Site.PAGES_DIRNAME}/\b|\bindex\b', '', contents_relpath)
+        slug = f'{ctx_url}/{surl}'.lstrip('/').lower()
+        url = '/' if self.is_home else '/' + slug
+        # if self.is_home: print(ctx_name, contents_relpath, slug)
+
+        self.data['url']  = url
+        self.data['slug'] = slug
+        self.data['tags'] = content_subs
+        self.file_ssg_api_dirpath = os.path.join(ctx_staticpath, 'api', slug)
+        self.file_ssg_html_dirpath = os.path.join(ctx_staticpath, slug)
+
+        self.deserializer()
+        self.apply_filters()
+
+
+    @property
+    def file_status(self):  # String
+        if not self.file_exists: return None
+        return 'hidden' if self.file_name.startswith('_') else 'public'
+
+    @property
+    def file_created_on(self):  # Datetime
+        return datetime.fromtimestamp(os.path.getctime(self.file_path), tz=pytz.UTC) if self.file_exists else None
+
+    @property
+    def file_modified_on(self):  # Datetime
+        return datetime.fromtimestamp(os.path.getmtime(self.file_path), tz=pytz.UTC) if self.file_exists else None
+
+    @property
+    def file_exists(self):
+        return os.path.exists(self.file_path) if self.file_path else None
+
+    @property
+    def template(self) -> str:
+        if not self.file_exists or not isinstance(self.data, dict): return "40x.html"
+        return self.data.get('template', "pages.html")
+
+    @property
+    def date(self):
+        """Returns manual published date but defaults to file_created_on date"""
+        file_date = self.data.get('date', self.file_created_on) if isinstance(self.data, dict) else self.file_created_on
+        if isinstance(file_date, str):
+            file_date = deserialize_datestr(file_date)
+        return file_date
+
+    @property
+    def canonical(self):
+        from pyonir import Site
+        return f"{Site.origin}{self.data.get('url')}"
+
+    def set_taxonomy(self) -> list[str] | None:
+        if not self.file_exists: return None
+        # cat_list = os.path.dirname(self.file_relpath).lstrip('/').split('/')
+        self.data['tags'] = self.data.get('tags')
+        self.data['category'] = self.data.get('category')
+
+    def set_media(self):
+        """Sets data property for media files. (jpeg, png, pdf, etc)"""
+        if self.file_ext.endswith(ALLOWED_CONTENT_EXTENSIONS): return
+        from PIL import Image
+        from pyonir import Site
+        group = self.file_dirname.split(f'{Site.UPLOADS_DIRNAME}{os.path.sep}', 1).pop()
+        # name = self.data.get('name')
+        image_name, *image_captions = self.file_name.replace('.' + self.file_ext, '').split(IMG_FILENAME_DELIM)
+        formatted_name = re.sub(r'[^a-zA-Z0-9]+', ' ', image_name).title()
+        formated_caption = "".join(image_captions or formatted_name).title()
+        _url = self.data.get('url')+'.'+self.file_ext
+        _slug = self.data.get('slug')
+        is_thumb = Site.UPLOADS_THUMBNAIL_DIRNAME in self.file_dirname
+        full_url = _slug.replace(Site.UPLOADS_THUMBNAIL_DIRNAME + '/', '').split('--')[0] + f".{self.file_ext}" \
+            if is_thumb else _url
+        raw_img = Image.open(self.file_path)
+        width = get_attr(raw_img, "width", None)
+        height = get_attr(raw_img, "height", None)
+
+
+        self.data = {
+            'file_size': os.path.getsize(self.file_path),
+            'url': _url,
+            'slug': _slug,
+            'name': formatted_name,
+            'full_url': full_url,
+            'group': group,
+            'is_thumb': is_thumb,
+            'captions': formated_caption,
+            'width':width, 'height': height,
+            # 'raw_img': raw_img,
+        }
+
+    def map_to_model(self, model):
+        return cls_mapper(self, model)
+
+    def apply_filters(self):
+        """Applies filter methods to data attributes"""
+        if not bool(self.data): return
+        filters = self.data.get(FILTER_KEY)
+        if not filters: return
+        for filtr, datakeys in filters.items():
+            ifiltr = Parsely._Filters.get(filtr)
+            if not ifiltr: continue
+            for key in datakeys:
+                mod_val = ifiltr(get_attr(self.data, key), {"page": self.data})
+                self.update_nested(key, self.data, data_update=mod_val)
+        del self.data[FILTER_KEY]
+
+    async def process_response(self, req: PyonirRequest) -> str:
+        """process web request into response"""
+        from pyonir.server import JSON_RES, TEXT_RES
+        if not self.file_exists:
+            self.data = req.render_error() if not req.form and not req.server_response else req.server_response
+        else:
+            if req.type == JSON_RES:
+                # self.map_to_model(self.model)
+                return self.output_json(req.server_response)
+        return self.output_html(req) if req.type in (TEXT_RES, '*/*') else self.output_json() \
+            if req.type == JSON_RES else req.server_response
+
+    async def process_resolver(self, request: PyonirRequest):
+        from pyonir import Site
+        from pyonir.types import PyonirPlugin
+        resolver_obj = self.data.get(RESOLVER_KEY, {}).get(request.method)
+        if not resolver_obj: return
+        resolver_path = resolver_obj.get('call')
+
+        if not resolver_path: return
+
+        pkg = resolver_path.split('.')
+        meth_name = pkg.pop()
+        isplugin: PyonirPlugin = list(filter(lambda p: p.module == pkg[0], Site.available_plugins))
+        if len(isplugin): isplugin = isplugin[0]
+        if isplugin:
+            pkg.pop(0)
+            resolver = get_attr(isplugin, resolver_path)
+            if not resolver:
+                mod_path = os.path.join(isplugin.resolvers_dirpath, *pkg)+'.py'
+                module, resolver = get_module(mod_path, meth_name)
+        elif pkg[0] == 'pyonir':
+            mod_path = os.path.join(Site.pyonir_path,'server.py')
+            module, resolver = get_module(mod_path, meth_name)
+            # resolver = get_attr(Site.server.resolvers, resolver_path)
+        else:
+            pkg_path = os.path.join(Site.backend_dirpath, *pkg) + '.py'
+            if not os.path.exists(pkg_path): pkg_path = os.path.join(Site.backend_dirpath, *pkg, '__init__.py')
+            module, resolver = get_module(pkg_path, meth_name)
+        request.type = resolver_obj.get('headers', {}).get('accept', request.type)
+        self.resolver = resolver
 
     def deserializer(self):
         """Deserialize file line strings into map object"""
+        if not self.file_exists:
+            return
         if self.file_ext == 'md' or self.file_contents:
             self.process_setup()
             if self.file_line_count > 0:
                 self.process_line(0, output_data=self.data)
         elif self.file_ext == 'json':
-            self.data = self.open_file(self.abspath, rtn_as='json') or {}
+            self.data = self.open_file(self.file_path, rtn_as='json') or {}
+        elif self.file_ext.upper() in IMAGE_FORMATS:
+            self.set_media()
         return True
 
     def process_setup(self):
         lines = self.file_contents or ''
         if self.file_exists and self.file_ext == 'md':
-            lines = self.open_file(self.abspath)
+            lines = self.open_file(self.file_path)
         self.file_lines = lines.strip().split("\n")
         self.file_contents = "\n".join(self.file_lines)
         self.file_line_count = len(self.file_lines)
@@ -122,7 +434,7 @@ class Parsely:
             parsed_key = keystr.strip() if keystr and keystr.strip() != '' else None
             val_type = get_container_type(delim) if val_type is None else val_type
             parsed_val = valuestr.strip()
-            force_scalr = delim and delim.endswith('`')
+            force_scalr = delim and delim.endswith('`') or parsed_val.startswith(LOOKUP_DIR_PREFIX)
             if parsed_key and parsed_val and not force_scalr:
                 has_dotpath = "." in parsed_key
                 if has_dotpath or (isinstance(val_type, (list, dict)) or ("," in parsed_val)):  # inline list
@@ -186,8 +498,8 @@ class Parsely:
                                                                    is_blob=isinstance(val_type, str))
                             if isinstance(parsed_val, list) and '-' in parsed_val:  # consolidate list of maps
                                 parsed_val = self.post_process_blocklist(parsed_val)
-                            if "|" in parsed_key:
-                                print('Pipe filters are deprecated', self.abspath)
+                            # if "|" in parsed_key:
+                            #     print('Pipe filters are deprecated', self.abspath)
 
                         # Store objects with $ prefix
                         if parsed_key and parsed_key.startswith('$'):
@@ -196,7 +508,7 @@ class Parsely:
                             # Extend objects that inheirit from other files during post processing
                             if parsed_key == '@extends':
                                 if not isinstance(parsed_val, dict):
-                                    print(f'{self.abspath}')
+                                    print(f'{self.file_path}')
                                 output_data.update(parsed_val)
                                 output_data['@extends'] = ln_frag.split(':').pop().strip()
                             else:
@@ -238,12 +550,16 @@ class Parsely:
 
             def parse_ref_to_files(filepath, as_dir=0):
                 # use proper app context for path reference outside of scope is always the root level
-                app_ctx = self.app_ctx  # if not use_root else ("", "", os.path.dirname(self.absdir))
                 if as_dir:
-                    return allFiles(filepath, force_all=return_all_files, entry_type=None, app_ctx=app_ctx,
-                                    **query_params)
+
+                    file_gen = PyonirCollection.query(filepath,
+                                        app_ctx=self.app_ctx,
+                                        force_all=return_all_files,
+                                        exclude_file=self.file_name + '.' + self.file_ext)
+                    return file_gen.paginated_collection(query_params)
+
                 rtn_key = has_attr_path or 'data'
-                p = Parsely(filepath, app_ctx)
+                p = Parsely(filepath, self.app_ctx)
                 d = get_attr(p, rtn_key) or p
                 EmbeddedTypes[filepath] = d
                 return d
@@ -252,54 +568,33 @@ class Parsely:
             valuestr = valuestr.strip()
             has_file_ref = valuestr.startswith(LOOKUP_FILE_PREFIX)
             has_dir_ref = valuestr.startswith(LOOKUP_DIR_PREFIX)
-            query_params = valuestr.split("?").pop() if "?" in valuestr else False
-            has_attr_path = valuestr.split("#")[-1] if "#" in valuestr else ''
-            valuestr = valuestr.replace(f"{LOOKUP_DIR_PREFIX}/", "") \
-                .replace(f"{LOOKUP_FILE_PREFIX}/", "") \
-                .replace(f"?{query_params}", "") \
-                .replace(f'#{has_attr_path}', '')
-            query_params = dict(map(lambda x: x.split("="), query_params.split('&')) if query_params else '')
-            use_root = valuestr.startswith('../')
-            return_all_files = valuestr.endswith('/*')
-            valuestr = valuestr.replace('../', '').replace('/*', '')
-            dir_root = os.path.dirname(self.absdir) if self.file_ctx and use_root else self.absdir
-            lookup_fpath = os.path.join(dir_root, *valuestr.split("/"))
-            if '{{' in lookup_fpath:
-                lookup_fpath = self.Filters['jinja'](lookup_fpath, self.data)
-            if not os.path.exists(lookup_fpath):
-                return self.throw_error({
-                    'ISSUE': f'FileNotFound while processing {cvaluestr}',
-                    'SOLUTION': f'Make sure the `{lookup_fpath}` file exists. Note that only valid md and json files can be processed.'
-                })
+            if '{{' in valuestr:
+                valuestr = self._Filters['jinja'](valuestr, self.data)
             if has_file_ref:
-                val = EmbeddedTypes.get(lookup_fpath, parse_ref_to_files(lookup_fpath))
-                return val
+                return get_attr(self, valuestr)
             elif has_dir_ref:
-                return parse_ref_to_files(lookup_fpath, 1)
+                query_params = valuestr.split("?").pop() if "?" in valuestr else False
+                has_attr_path = valuestr.split("#")[-1] if "#" in valuestr else ''
+                valuestr = valuestr.replace(f"{LOOKUP_DIR_PREFIX}/", "") \
+                    .replace(f"{LOOKUP_FILE_PREFIX}/", "") \
+                    .replace(f"?{query_params}", "") \
+                    .replace(f'#{has_attr_path}', '')
+                query_params = dict(map(lambda x: x.split("="), query_params.split('&')) if query_params else '')
+                use_rel = valuestr.startswith('./')
+                return_all_files = valuestr.endswith('/*')
+                valuestr = valuestr.replace('../', '').replace('/*', '')
+                dir_root = self.file_contents_dirpath if not use_rel else self.file_dirpath
+                # dir_root = os.path.dirname(self.file_dirpath) if self.file_ctx and use_rel else self.file_dirpath
+                lookup_fpath = os.path.join(dir_root, *valuestr.split("/"))
+                if not os.path.exists(lookup_fpath):
+                    return self.throw_error({
+                        'ISSUE': f'FileNotFound while processing {cvaluestr}',
+                        'SOLUTION': f'Make sure the `{lookup_fpath}` file exists. Note that only valid md and json files can be processed.'
+                    })
+                if os.path.isdir(lookup_fpath): return parse_ref_to_files(lookup_fpath, 1)
+                return EmbeddedTypes.get(lookup_fpath, parse_ref_to_files(lookup_fpath))
 
         return valuestr
-
-    def apply_plugins(self, hook: PyonirHooks):
-        """Applies installed active plugins to parsed file"""
-        from pyonir import Site
-        if Site:
-            hook = hook.name.lower()
-            for plg in Site.available_plugins:
-                if not hasattr(plg, hook): continue
-                fn = getattr(plg, hook)
-                fn(self, Site)
-
-    def apply_filters(self):
-        """Applies filter methods to data attributes"""
-        if self.data == None: return
-        filters = self.data.get(FILTER_KEY)
-        if not filters or self.file_type == 'schemas': return
-        for filtr, datakeys in filters.items():
-            ifiltr = Parsely.Filters.get(filtr)
-            if not ifiltr: continue
-            for key in datakeys:
-                mod_val = ifiltr(get_attr(self.data, key), self.data)
-                self.update_nested(key, self.data, data_update=mod_val)
 
     @staticmethod
     def serializer(json_map: any, namespace: list = [], inline_mode: bool = False, filter_params=None) -> str:
@@ -384,7 +679,7 @@ class Parsely:
                 else:
                     return target_file.read()
             except Exception as e:
-                return {"error": "pycasso.parsely.Parsely.open_file", "message": str(e)} if rtn_as == "json" else []
+                return {"error": "pyonir.parsely.Parsely.open_file", "message": str(e)} if rtn_as == "json" else []
 
     @staticmethod
     def post_process_blocklist(blocklist: list):
@@ -463,29 +758,6 @@ class Parsely:
 
         return completed, (data_src if not find else _data)
 
-    @property
-    def file_status(self):  # String
-        if not self.file_exists: return None
-        return 'hidden' if self.file_name.startswith('_') else 'public'
-
-    @property
-    def file_created_on(self):  # Datetime
-        return datetime.fromtimestamp(os.path.getctime(self.abspath), tz=pytz.UTC) if self.file_exists else None
-
-    @property
-    def file_modified_on(self):  # Datetime
-        return datetime.fromtimestamp(os.path.getmtime(self.abspath), tz=pytz.UTC) if self.file_exists else None
-
-    @property
-    def file_exists(self):
-        return os.path.exists(self.abspath) if self.abspath else None
-
-    @property
-    def template(self) -> str:
-        if not self.file_exists or not isinstance(self.data, dict): return "40x.html"
-        context_template = "index.html" if self.is_home else "pages.html"
-        return self.data.get('template') or context_template
-
     @classmethod
     def from_input(cls, input_src: dict, app_ctx: tuple):
         """Creates Parsely object setting the data from input src"""
@@ -494,77 +766,21 @@ class Parsely:
         res.data = input_src
         return res
 
-    def __init__(self, abspth, app_ctx=None):
-        # assert abspth!=None, "Parsely expects an abspath to a resource"
-        self.prev_next = None
-        ctx_dir, ctx_url, ctx_dirpath, ctx_staticpath = app_ctx
-        contents_relpath = abspth.split(ctx_dirpath).pop().lstrip(os.path.sep) if abspth else ''
-        contents_rootdir = os.path.dirname(contents_relpath.lstrip(os.path.sep))
-        fname, fext = os.path.splitext(os.path.basename(contents_relpath)) if abspth else ('', '')
-
-        self._cursor = None
-        self.app_ctx = app_ctx
-        self.abspath = abspth
-        self.absdir = ctx_dirpath
-        self.contents_relpath = contents_relpath
-        self.file_ctx = ctx_dir
-        self.file_dir = os.path.dirname(contents_relpath)
-        self.file_type = contents_rootdir.split(os.path.sep)[0]
-        self.file_name = fname
-        self.file_ext = fext.split('.').pop()
-        self.file_relpath = contents_relpath
-        self.file_contents = ''
-        self.file_lines = None
-        self.file_line_count = None
-
-        # file data processing
-        self._blob_keys = []
-        self.data = {}
-        self.schema = None
-        self.deserializer()
-
-        # page attributes
-        is_pg = self.file_type != 'schemas'
-        surl = re.sub(r'\bpages/\b|\bindex\b', '', contents_relpath.replace(f'.{self.file_ext}', '')) if is_pg else ''
-        slug = self.data.get('url', surl.rstrip('/').lstrip('/'))
-
-        self.is_home = not self.file_ctx and self.file_relpath == '/pages/index.md'
-        self.slug = '' if self.is_home else f'{ctx_url}/{slug}'.lstrip('/') if is_pg else ''
-        self.url = '/' if self.is_home else '/' + self.slug if is_pg else ''
-
-        self.file_ssg_api_dirpath = os.path.join(ctx_staticpath, 'api', self.slug)
-        self.file_ssg_html_dirpath = os.path.join(ctx_staticpath, self.slug)
-        self.apply_filters()
-
     def throw_error(self, message: dict):
         msg = {
-            'ERROR': f'{self.file_relpath} found an error on line {self._cursor}',
+            'ERROR': f'{self.file_path} found an error on line {self._cursor}',
             'LINE': f'{self.file_lines[self._cursor]}', **message}
         return msg
 
-    def set_schema(self, schema_name: str | None = None):
-        """Set Schema and schema model for file type or schema_name argument"""
-        from pyonir import Site
-        schema_path = os.path.join(Site.schemas_dirpath, (schema_name or self.file_type)+'.md')
-        schema = Schema(schema_path, self.app_ctx)
-        if schema.file_exists:
-            self.schema = schema
-            self.schema.map_input_to_model(self)
-
-    def set_file_schema(self, schema_name=''):
-        """Sets schema model object described by file's type"""
-        from . import Site
-        if (not self.file_exists and not schema_name): return
-        hasSite = hasattr(Site, 'schemas')
-        target_schema_name = self.data.get('@schema', schema_name or self.file_type[:-1])
-        # Perform lookup schema name against Site schemas
-        schema_fpath = os.path.join(self.absdir, 'schemas', target_schema_name + '.md')
-        schema_file = get_attr(Site.schemas, target_schema_name) if hasSite else None
-        if os.path.exists(schema_fpath):
-            schema_file = ParselySchema.from_path(schema_fpath, self.app_ctx)
-        plugin_schema_file = None
-
-        self.schema = plugin_schema_file or schema_file
+    # def set_schema(self, schema_name: str | None = None):
+    #     """Set Schema and schema model for file type or schema_name argument"""
+    #     from pyonir import Site
+    #     schema_path = os.path.join(Site.schemas_dirpath, (schema_name or self.file_type) + '.md')
+    #     # schema = Schema(schema_path, self.app_ctx)
+    #     pass
+    #     # if schema.file_exists:
+    #     #     self.schema = schema
+    #     #     self.schema.map_input_to_model(self)
 
     def refresh_data(self):
         """Parses file and update data values"""
@@ -572,25 +788,30 @@ class Parsely:
         self._blob_keys.clear()
         self.deserializer()
 
-    def output_json(self, data_value: any = None):
+    def prev_next(self):
+        if self.file_dirname != 'pages' or self.is_home:
+            return None
+        return PyonirCollection.prev_next(self)
+
+
+    def output_json(self, data_value: any = None, as_str=True):
         """Outputs a json string"""
         from .utilities import json_serial
+        if not as_str: return {"data": data_value or self}
         return json.dumps({"data": data_value or self}, default=json_serial)
 
     def output_html(self, req: PyonirRequest):
         """Renders and html output"""
         from pyonir import Site
-        # if not self.is_api and self.file_exists:
-        Site.TemplateParser.globals['prevNext'] = self.prev_next
-        Site.TemplateParser.globals['page'] = self
-        html = Site.TemplateParser.get_template(self.template).render()
-
-        Site.TemplateParser.block_pull_cache.clear()
+        Site.TemplateEnvironment.globals['prevNext'] = self.prev_next
+        Site.TemplateEnvironment.globals['page'] = self.map_to_model(Page)
+        html = Site.TemplateEnvironment.get_template(self.template).render()
+        Site.TemplateEnvironment.block_pull_cache.clear()
         return html
 
     def save(self, file_path=None, contents=None, dir_path=None) -> bool:
         """Saves data into file_path"""
-        file_path = file_path or self.abspath
+        file_path = file_path or self.file_path
         is_json = file_path.endswith('json')
         if dir_path and not os.path.exists(dir_path):
             os.makedirs(dir_path)
@@ -602,7 +823,7 @@ class Parsely:
 
     def generate_static_file(self, page_request=None, rtn_results=False):
         """Generate target file as html or json. Takes html or json content to save"""
-        from pyonir import Site
+        # from pyonir import Site
         # from htmlmin import minify
 
         count = 0
@@ -612,7 +833,7 @@ class Parsely:
         def render_save():
             # -- Render Content --
             html_data = self.output_html(page_request)
-            json_data = self.output_json()
+            json_data = self.output_json(as_str=False)
             # -- Save contents --
             self.save(path_to_static_html, html_data, self.file_ssg_html_dirpath)
             self.save(path_to_static_api, json_data, self.file_ssg_api_dirpath)
@@ -636,527 +857,3 @@ class Parsely:
             return html_data, json_data
 
         return count
-
-
-class ParselyPage(Parsely):
-    """Page object discovered in the contents/pages directory used to resolve page web request"""
-
-    @property
-    def resolver(self):
-        return self.data.get('@resolver', None)
-
-    @property
-    def entries(self):
-        if not self.data or not self.data.get('entries'): return None
-        return self.data.get('entries')
-
-    def __init__(self, filepath: str, ctx: str = None):
-        from pyonir import PAGINATE_LIMIT
-        super().__init__(filepath, app_ctx=ctx)
-
-        self.ctx_endpoint: str = ctx[1] if ctx else None
-        self.paginate = None
-        self.maxCount = None
-        self.pagenum = 1
-        self.allow_all = None
-        self.show_all = None
-        self.lookup = None
-        self.limit = PAGINATE_LIMIT
-        self.is_resolver = self.data.get('@resolver')
-
-    async def process_response(self, req: PyonirRequest) -> str:
-        """process web request into response"""
-        from pyonir.server import JSON_RES, TEXT_RES, EVENT_RES, apply_plugin_resolvers
-        if not self.file_exists:
-            self.data = req.render_error()
-        else:
-            if self.is_resolver:
-                req.type = self.resolver.get('headers', {}).get('accept', req.type)
-                return await apply_plugin_resolvers(self, req)
-            self.set_paginated_entries(req)
-            if req.type == JSON_RES:
-                self.set_schema(self.data.get('@schema'))
-                return self.output_json(self.schema.model)
-        return self.output_html(req) if req.type in (TEXT_RES, '*/*') else self.output_json() \
-            if req.type == JSON_RES else self.data
-
-    def set_paginated_entries(self, request: PyonirRequest):
-        """Paginated Files contained under a content type directory"""
-        limit = int(request.limit)
-        pagenum = int(request.query_params.get('pg', 1))
-        show_all = None
-        entries = Collection(self.data.get('entries', []))
-        gallery = Collection(self.gallery.get('files', []), sortBy='file_created_on') if self.gallery else None
-        maxCount = entries.count or 0
-        limit = int(limit)
-        if self.is_api and show_all:
-            limit = maxCount
-        start = (pagenum * limit) - limit
-        end = (limit * pagenum)
-        self.limit = limit
-        self.pagenum = pagenum
-        self.paginate = (maxCount // limit) + (maxCount % limit > 0)
-        self.data['entries'] = list(entries.paginate(start=start, end=end, reverse=True))
-        if gallery:
-            self.data['gallery']['files'] = list(gallery.paginate(start=start, end=end, reverse=True))
-
-    @property
-    def is_api(self):
-        return self.file_dir == 'api'
-
-    @property
-    def name(self):
-        return self.data.get('name', self.data.get('title', self.file_name))
-
-    @property
-    def title(self):
-        return self.data.get('title', self.name)
-
-    @property
-    def date(self):
-        """Returns manual published date but defaults to file_created_on date"""
-        import datetime
-        file_date = self.data.get('date', self.file_created_on) if isinstance(self.data, dict) else self.file_created_on
-        event_date = Collection.get_attr(self.data, 'event.begins.start_datetime')
-        if isinstance(file_date, str):
-            file_date = deserialize_datestr(file_date)
-        return event_date if isinstance(event_date, datetime.datetime) else file_date
-
-    @property
-    def created_on(self):
-        return self.file_created_on
-
-    @property
-    def modified_on(self):
-        return deserialize_datestr(self.data.get('@last_saved', self.file_modified_on))
-
-    @property
-    def excerpt(self):
-        """Summary of content in 280 characters"""
-        if not self.data or not isinstance(self.data, dict): return None
-        default_excerpt = remove_html_tags(self.content or '')[0:280] + "..."
-        return self.data.get('excerpt', default_excerpt)
-
-    @property
-    def content(self):
-        return self.data.get('content',
-                             ' ')  # self.markdown_parser(self.data.get('content')) if self.data.get('content') else ''
-
-    @property
-    def canonical(self):
-        from pyonir import Site
-        return f"{Site.configs.site.domain}{self.url}"
-
-    @property
-    def tags(self):
-        if not self.file_exists: return None
-        catlist = os.path.dirname(self.file_relpath).lstrip('/').split('/')
-        return self.data.get('tags', '').split(',') if self.data.get('tags') else catlist
-
-    @property
-    def category(self) -> str:
-        if not self.file_exists: return None
-        catlist = os.path.dirname(self.file_relpath).lstrip('/').split('/')
-        return self.data.get('category', catlist[-1])
-
-    @property
-    def order(self):
-        return self.data.get('order', 99)
-
-    @property
-    def author(self):
-        return self.data.get('author')
-
-    @property
-    def status(self):
-        return self.data.get('status', self.file_status)
-
-    @property
-    def menu(self):
-        if not self.data: return None
-        return self.data.get('menu')
-
-    @property
-    def menu_parent(self):
-        if not self.data: return None
-        return self.data.get('menu_parent', None)
-
-    @property
-    def model(self):
-        """overrides page schema model name"""
-        return self.data.get('page_schema', None) if self.data else None
-
-    @property
-    def redirect_url(self):
-        return self.data.get('redirect_url') if self.data else None
-
-    @property
-    def js(self):
-        """Javascript content block"""
-        if not self.file_exists or not self.data.get('js'): return None
-        js_str = self.data.get('js') if isinstance(self.data.get('js'), str) else None
-        jsdata = {"script": js_str}
-        if isinstance(self.data.get('js'), dict):
-            jsdata.update(**self.data.get('js'))
-        return jsdata
-
-    @property
-    def css(self):
-        """CSS styles to include on html template"""
-        if not self.file_exists or not self.data.get('css'): return None
-        css_str = self.data.get('css') if isinstance(self.data.get('css'), str) else None
-        cssdata = {"style": css_str}
-        if isinstance(self.data.get('css'), dict):
-            cssdata.update(**self.data.get('css'))
-        return tupleconverter('css', cssdata)
-
-    @property
-    def gallery(self):
-        """Gallery plugin object"""
-        return self.data.get('gallery')
-
-    @property
-    def form(self):
-        """Form plugin object"""
-        return self.data.get('form')
-
-    @property
-    def ctx_redirect(self):
-        return self.data.get('redirect') if isinstance(self.data, dict) else None
-
-    def prev_next(self):
-        """Returns sorted dictionary for prev and next page based on date specified in file"""
-        if self.file_type != 'pages' or self.is_home: return None
-
-        def pgen():
-            for item in Collection(allFiles(os.path.dirname(self.abspath))).collection:
-                yield item
-
-        # result = {"next": False, "prev": False}
-        prv = None
-        nxt = None
-        home = {'title': self.category, 'url': os.path.dirname(self.url)}
-        gen_data = pgen()
-        for file in gen_data:
-            if file.file_status == 'hidden' or not file.file_exists: continue
-            if self.file_name == file.file_name:
-                try:
-                    nxt = next(gen_data)
-                    break
-                except StopIteration:
-                    if nxt:
-                        nxt.set_file_schema()
-                        nxt = nxt.file_schema.map_to_schema(nxt) if nxt.file_schema else nxt
-                    if prv:
-                        prv.set_file_schema()
-                        prv = prv.file_schema.map_to_schema(prv) if prv.file_schema else prv
-                    pass
-            else:
-                prv = file
-
-        return {"next": nxt or home, "prev": prv or home, "home": home}
-
-
-class ParselyMedia(Parsely):
-    """Represents an image or media document file"""
-
-    @property
-    def thumbnails(self):
-        """Returns a map of thumbnail sizes available for media file"""
-        return self.data.get('thumbnails')
-
-    @property
-    def id(self):
-        from pyonir import UPLOADS_THUMBNAIL_DIRNAME, UPLOADS_DIRNAME
-        if not self.data: return None
-        if self.is_thumb:
-            return self.data.get('full_url')
-        group = self.data.get('group')
-        if group != UPLOADS_DIRNAME: group = f'{UPLOADS_DIRNAME}/{group}'
-        name = self.name.split(' ', 1)[0].lower()
-        return f"{group}/{name}.{self.file_ext}"
-
-    def __init__(self, file_path: str = None, app_ctx=None):
-        super().__init__(file_path, app_ctx)
-        from pyonir import UPLOADS_ROUTE
-
-        self.sizes = []
-        self.url = f"{UPLOADS_ROUTE}{self.file_relpath.replace(self.file_type, '')}"
-        self.slug = self.url.lstrip('/')
-        self.is_img = None
-        self.raw_img = None
-        self.name = ''
-        self.is_thumb = None
-        self.set_data()
-
-    def set_data(self):
-        from PIL import Image
-        from pyonir import UPLOADS_DIRNAME, UPLOADS_THUMBNAIL_DIRNAME
-        if not self.file_exists: return
-        image_name, *image_captions = self.file_name.replace('.' + self.file_ext, '') \
-            .split(IMG_FILENAME_DELIM)
-
-        is_thumb = UPLOADS_THUMBNAIL_DIRNAME in self.file_dir
-        formatted_name = re.sub(r'[^a-zA-Z0-9]+', ' ', image_name).title()
-        formated_caption = "".join(image_captions or self.name).title()
-        full_img = self.slug.replace(UPLOADS_THUMBNAIL_DIRNAME + '/', '').split('--')[0] + f".{self.file_ext}" \
-            if is_thumb else self.url
-        self.raw_img = Image.open(self.abspath)
-        self.name = formatted_name
-        self.is_thumb = is_thumb
-        self.data = {
-            "@schema": "media",
-            "file_name": image_name if not is_thumb else image_name.split('--')[0],
-            "name": self.name,
-            "url": self.url,
-            "full_url": full_img,
-            "slug": self.slug,
-            "date": self.file_created_on,
-            "type": self.file_ext,
-            "group": self.file_dir.split(f'{UPLOADS_DIRNAME}{os.path.sep}', 1).pop(),
-            "captions": formated_caption.title(),
-            "size": os.path.getsize(self.abspath),
-            "width": get_attr(self.raw_img, "width", None),
-            "height": get_attr(self.raw_img, "height", None)
-        }
-        self.data.update({"thumbnails": self.get_all_thumbnails()})
-
-    def get_all_thumbnails(self) -> dict | None:
-        """Collects thumbnails for the image"""
-        if self.is_thumb: return None
-        from pyonir import UPLOADS_DIRNAME, UPLOADS_THUMBNAIL_DIRNAME
-        group_dir = self.data.get('group')
-        if group_dir != UPLOADS_DIRNAME: group_dir = f'{UPLOADS_DIRNAME}/{group_dir}'
-        thumbs_dir = os.path.join(self.absdir, group_dir, UPLOADS_THUMBNAIL_DIRNAME)
-        files = allFiles(thumbs_dir, app_ctx=self.app_ctx)
-        target_name = self.data.get('file_name')
-        thumbs = {}
-        # filter files based on name
-        for file in files:
-            if file.data.get('file_name') != target_name: continue
-            w = file.data.get('width')
-            h = file.data.get('height')
-            thumbs[f'{w}x{h}'] = file
-            pass
-        return thumbs
-
-    @staticmethod
-    def createImagefolders(folderpath: str):
-        thumbspath = os.path.join(folderpath, 'thumbnails')
-        if not os.path.exists(folderpath):
-            os.makedirs(folderpath)
-        if not os.path.exists(thumbspath):
-            os.makedirs(thumbspath)
-
-    @staticmethod
-    async def save_upload(upload_doc, img_folder_abspath) -> 'ParselyMedia':
-        """Saves base64 file contents into file system"""
-        filename, filedata, rootpath = upload_doc
-        file_name, file_ext = os.path.splitext(filename)
-        ParselyMedia.createImagefolders(img_folder_abspath)
-        abspath = os.path.join(img_folder_abspath, file_name + file_ext)
-        file_contents = await filedata.read()
-        with open(abspath, 'wb') as f:
-            f.write(file_contents)
-        parselyMedia = ParselyMedia.new(abspath)
-        return parselyMedia
-
-    @classmethod
-    def new(cls, file_path):
-        from pyonir import Site
-        pm = cls(file_path, Site.files_ctx)
-        return pm
-
-    def resize(self, sizes=None):
-        '''
-        Resize each image and save to the upload path in corresponding image size and paths
-        This happens after full size images are saved to the filesystem
-        '''
-        from PIL import Image
-        from pyonir import THUMBNAIL_DEFAULT
-        if sizes is None:
-            sizes = [THUMBNAIL_DEFAULT]
-        try:
-            for dimensions in sizes:
-                width, height = dimensions
-                self.sizes.append(dimensions)
-                img = self.raw_img.resize((width, height), Image.Resampling.BICUBIC)
-                file_name = f'{self.file_name}--{width}x{height}'
-                folderpath = os.path.dirname(self.abspath)
-                self.createImagefolders(folderpath)
-                filepath = os.path.join(folderpath, 'thumbnails', file_name + '.' + self.file_ext)
-                if not os.path.exists(filepath): img.save(filepath)
-        except Exception as e:
-            raise
-
-    def generate_thumb(self, width, height) -> str:
-        """Generates an image accordion to width and height parameters and returns url to the new resized image"""
-        self.sizes.append((width, height))
-        if not self.thumbnails.get(f'{width}x{height}'): self.resize([(width, height)])
-        return self.thumbnails.get(f'{width}x{height}')
-
-
-class Schema(Parsely):
-    PRIVATE_PREFIX = '_'
-
-    @property
-    def provider_model(self) -> dict | None:
-        """Public model field names"""
-        return self.data.get('@provider_model', {})
-
-    @property
-    def primary_key(self):
-        """Primary key column name"""
-        return self.data.get('@pk', 'id')
-
-    def __init__(self, schema_path: str, app_ctx: list):
-        super().__init__(schema_path, app_ctx)
-        self.fields: set[str] = set(Schema.sanitize(k) for k in self.data.keys() if not k.startswith('@'))\
-            if self.file_exists else None
-        self.private_fields = set(Schema.sanitize(f) for f in self.data.keys() if f.startswith('_'))
-        self.model = None
-        pass
-
-    @staticmethod
-    def sanitize(key: str):
-        return key[1:] if key.startswith(Schema.PRIVATE_PREFIX) else key
-
-    def map_input_to_model(self, subject: dict | Parsely):
-        """Returns a schema model from subject data"""
-        def get_value(key):
-            """get key value on subject"""
-            v = get_attr(subject, key)
-            v = get_attr(subject.data, key) if v is None and isinstance(subject, Parsely) else v
-            if isinstance(self.data.get(key), (list, set, Generator)):
-                itr_schema_type = self.data.get(key)[0]
-                entries = []
-                for entry in v:
-                    if hasattr(entry,'set_schema'): entry.set_schema(itr_schema_type)
-                    target = entry.schema.model if hasattr(entry,'set_schema') else entry
-                    entries.append(target)
-                v = entries
-            return "***" if key in self.private_fields and v is not None else v
-
-        model = type(self.file_name, (object,), {"__schema__": self.file_name})()
-        for field in self.fields:
-            v = get_value(field)
-            setattr(model, self.provider_model.get(field, field), v)
-            pass
-        self.model = model
-        return model
-
-    def validate_model(self):
-        """Validates model against schema conditions"""
-        pass
-
-
-class SchemaValidator:
-    """Collection of functions to validate schema values"""
-
-    @property
-    def validation_errors(self):
-        return list(self.errors_bag.values()) if bool(self.errors_bag) else None
-
-    @property
-    def is_valid(self):
-        return True if len(self.errors_bag) == 0 or self.schema is None else False
-
-    def __init__(self, schema):
-        self.schema = schema
-        self.__schema_value = None
-        self.__schema_key = None
-        self.errors_bag = dict()
-
-    def send_error(self, msg=None):
-        self.errors_bag[self.__schema_key] = f"{msg or 'error found'}"
-
-    def validate_input(self, input_data):
-        """Validates input data against available schema definitions"""
-        self.errors_bag.clear()
-        for field in self.schema.required_fields:
-            schema_methods = self.schema.file.data.get(f"*{field}")
-            self.__schema_key = field
-            self.__schema_value = get_attr(input_data, self.__schema_key)
-            for meth in schema_methods.split('|'):
-                if getattr(self, meth.strip())() is True: continue
-                break
-        return self
-
-    def update(self, schema):
-        self.schema = schema
-
-    def bool(self):
-        return isinstance(self.__schema_value, bool)
-
-    def is_int(self):
-        return isinstance(self.__schema_value, int) or isinstance(self.__schema_value, float)
-
-    def string(self):
-        if isinstance(self.__schema_value, str):
-            return True
-        else:
-            self.send_error(f"{self.__schema_key} is not a string! Got an {type(self.__schema_value).__name__}")
-
-    def is_date(self):
-        import datetime
-        date_obj = deserialize_datestr(self.__schema_value, auto_correct=False)
-        if not isinstance(date_obj, datetime.datetime):
-            self.send_error(f"{self.__schema_value} is not a valid date value. {date_obj}")
-        else:
-            return True
-
-    def is_list(self):
-        return isinstance(self.__schema_value, list)
-
-    def as_address(self):
-        try:
-            street, city, state_zip = self.__schema_value.split(',')
-            state, zip = state_zip.strip().split(' ')
-            self.input_data[self.__schema_key] = {
-                "street": street.strip(),
-                "city": city.strip(),
-                "state": state.strip(),
-                "zip": zip.strip()
-            }
-            return True
-        except Exception as e:
-            self.send_error(str(e))
-            return False
-
-    def check_role(self):
-        return True
-
-    def check_email(self, email=None):
-        try:
-            from django.core.validators import validate_email, ValidationError
-            validate_email(email or self.__schema_value)
-            return True
-        except ValidationError:
-            self.send_error(f"{self.__schema_key.capitalize()} is not a valid.")
-            # return 'Email is not valid.'
-            return False
-
-    def min(self, min_num):
-        has_minimum = len(self.__schema_value) >= int(min_num)
-        if not has_minimum:
-            self.send_error(f"{self.__schema_key} should have a minimum of {min_num} characters.")
-        return has_minimum
-
-    def check_pwd(self):
-        # from pycasso.utils import Collection
-        # pswd = password or Collection.get_attr(self.schema.input_data, 'password', True)
-        error = 'Password requires alpha numeric values with 6 characters.'
-        if not self.__schema_value:
-            error = 'Must provide a password.'
-        elif not self.__schema_value.isdigit() and len(self.__schema_value) > 5:
-            return True
-        self.send_error(error)
-        return False
-
-    def sanitize(self):
-        illegal_chars = "<,>,!,+,-,(,),~,`,\,/,:,;,&,^,%,$,#".split(',')
-        for c in self.__schema_value:
-            if c in illegal_chars:
-                self.send_error(f"{self.__schema_key} contains an invalid character.")
-                return False
-        return True  # if self.__schema_value not in illegal_chars else False

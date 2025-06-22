@@ -1,27 +1,125 @@
-import os, itertools
+from __future__ import annotations
+import os
 import typing
-from typing import Generator
+from typing import Generator, Iterable, Mapping, get_origin, get_args, get_type_hints
+from collections.abc import Iterable as ABCIterable
+from sortedcontainers import SortedList
+
+from pyonir.types import PyonirApp, PyonirRequest, ParselyCollection, Parsely
 
 
-def parse_all(path, app_ctx=None, file_type=None) -> object:
-    from pyonir.parser import Parsely
+def is_iterable(tp):
+    if not isinstance(tp, Iterable): return False
+    origin = get_origin(tp) or tp
+    return issubclass(origin, ABCIterable)
+
+def is_generator(tp):
+    origin = get_origin(tp) or tp
+    return issubclass(origin, Generator)
+
+def is_mappable_type(tp) -> bool:
+    origin = get_origin(tp)
+    args = get_args(tp)
+
+    # Check if the base is a Mapping (like dict) and it has two type arguments
+    return (
+        origin is not None and
+        issubclass(origin, Mapping) and
+        len(args) == 2
+    )
+
+def is_scalar_type(tp) -> bool:
+    origin = get_origin(tp) or tp
+    return origin in (int, float, str, bool)
+
+def is_custom_class(t):
+    return t.__init__.__annotations__ #isinstance(t, type) and not t.__module__ == "builtins"
+
+def cls_mapper(file_obj: any, cls: typing.Callable, from_request: PyonirRequest = None):
+    params = get_type_hints(cls)
+    if is_scalar_type(cls):
+        return cls(file_obj)
+    if not params: return file_obj
+    mapper_keys = cls._mapper if hasattr(cls, '_mapper') else {}
+    data = get_attr(file_obj, 'data') or {}
+    _parsely_data_key = '.'.join(['data', get_attr(cls, '_mapper_key') or cls.__name__.lower()])
+    kdata = get_attr(file_obj, _parsely_data_key)
+    if kdata: data.update(**kdata)
+    cls_args = {}
+    res = None
+    if hasattr(cls, 'from_dict'): # allows manual mapping of class instance
+        return cls.from_dict(file_obj)
+
+    for param_name, param_type in params.items():
+        try:
+            mapper_key = get_attr(mapper_keys, param_name) or param_name
+            param_value = get_attr(data, mapper_key) or get_attr(file_obj, mapper_key)
+            if param_type == PyonirRequest and from_request:
+                param_value = from_request
+            if param_value is None or param_name[0]=='_' or param_name=='return':
+                continue
+            if is_iterable(param_type):
+                iter_ptype = get_args(param_type)
+                is_mapp = is_mappable_type(param_type)
+                if is_mapp:
+                    ktype, vtype = iter_ptype
+                    is_list = is_iterable(vtype)
+                    if is_list: vtype = get_args(vtype)[0]
+                    cls_args[param_name] = {ktype(key): [cls_mapper(lval, vtype) for lval in value] if is_list else cls_mapper(value, vtype) for key, value in param_value.items()}
+                else:
+                    cls_args[param_name] = [cls_mapper(itm, iter_ptype[0]) for itm in param_value]
+            else:
+                is_instance = param_value == param_type
+                is_typed = isinstance(param_value, param_type)
+                # is_typed = isinstance(param_value, type(param_value)) or not isinstance(param_value, param_type)
+                if is_instance and from_request:
+                    param_value = cls_mapper(from_request.form, param_type) #param_type(**from_request.form)
+                cls_args[param_name] = param_value if is_typed or is_instance else param_type(param_value)
+        except Exception as e:
+            raise
+    try:
+        if not from_request: res = cls(**cls_args)
+    except Exception as e:
+        raise
+    if from_request: return cls_args
+    # assign all other non-model attributes
+    if hasattr(cls, '_mapper_merge'): # auto sets properties from file obj to class instance
+        for key, value in data.items():
+            if isinstance(getattr(cls, key, None), property): continue
+            if params.get(key) or key[0]=='_': continue
+            setattr(res, key, value)
+
+    if hasattr(file_obj, 'file_created_on'):
+        setattr(res, '@model', cls.__name__)
+        setattr(res, 'file_created_on', get_attr(file_obj, 'file_created_on'))
+
+    return res
+
+
+def process_contents(path, app_ctx=None, file_model: any = None):
     """Deserializes all files within the contents directory"""
-    key = os.path.basename(path)
-    etype = file_type or Parsely
-    all_files_in_dir = allFiles(path, entry_type=etype, app_ctx=app_ctx)
-    # Dynamically create a new class
-    cls = type(key, (object,), {})
+    from pyonir.parser import Parsely
 
-    # Create an instance of the class
-    fileMap = cls()
-    for pfile in all_files_in_dir:
-        configname = getattr(pfile, 'file_name', getattr(pfile, 'name', None))
-        setattr(fileMap, configname, pfile)
+    def update(self):
+        for key in self.__dict__.keys():
+            val = get_attr(self, key)
+            if not hasattr(val, '_path'): continue
+            pval = Parsely(val._path, app_ctx)
+            setattr(self, key, dict_to_class({**pval.data, '_path': pval.file_path}, key))
         pass
-    return fileMap
+
+    key = os.path.basename(path)
+    # etype = Parsely  # ParselySchema if 'schemas' in path else Parsely
+    pgs = allFiles(path, app_ctx=app_ctx, entry_type=file_model)
+    res = type(key, (object,), {'_update': update, '_ctx': app_ctx})()
+    for pg in pgs:
+        name = getattr(pg, 'file_name', getattr(pg, 'name', None))
+        setattr(res, name, pg)
+        # setattr(res, name, pg if file_model else dict_to_class({**pg.data, '_path': pg.file_path}, name))
+    return res
 
 
-def dict_to_class(data: dict, name: str):
+def dict_to_class(data: dict, name: str = 'T'):
     """
     Converts a dictionary into a class object with the given name.
 
@@ -44,13 +142,19 @@ def dict_to_class(data: dict, name: str):
 
     return instance
 
-
 def get_attr(rowObj, attrPath=None, default=None, rtn_none=True):
     """
-        @default returns a default obj when the target attr value is None
-        @rtn_none returns a None obj when target attr value is not discovered
-        otherwise the rowObj will be returned
-        """
+    Resolves nested attribute or dictionary key paths.
+
+    Args:
+        obj: the root object
+        attr_path: dot-separated string or list for nested access
+        default: fallback value if the target is None or missing
+        return_none: if True, returns `None` on missing keys/attrs instead of the original object
+
+    Returns:
+        The nested value, or `default`, or `obj` based on fallback rules.
+    """
     if attrPath == None: return rowObj
     attrPath = attrPath if isinstance(attrPath, list) else attrPath.split('.')
     targetObj = None
@@ -61,24 +165,24 @@ def get_attr(rowObj, attrPath=None, default=None, rtn_none=True):
             else:
                 targetObj = rowObj.get(key)
             pass
-        except Exception as TypeError:
+        except (KeyError, AttributeError, TypeError) as e:
             if targetObj:
                 targetObj = getattr(targetObj, key, None)
             else:
                 targetObj = getattr(rowObj, key, None)
             pass
-    if (rtn_none and targetObj is None) or (default and targetObj is None):
-        return default
-    if not default and targetObj is None:
-        return rowObj
+    if targetObj is None and rtn_none:
+        return default or None
+
     return targetObj
 
 
 def remove_html_tags(text):
     """Remove html tags from a excerpt string"""
     import re
-    clean = re.compile('<.*?>')
-    return re.sub(clean, '', text)
+    clean_style = re.sub(r'<style.*?</style>', '', text, flags=re.DOTALL)
+    clean_html = re.sub(re.compile('<.*?>'), '', clean_style)
+    return clean_html.replace('\n', ' ')
 
 
 def camel_to_snake(camel_str):
@@ -149,32 +253,34 @@ def sortBykey(listobj, sort_by_key="", limit="", reverse=True):
 
 
 def allFiles(abs_dirpath: str,
-             app_ctx: 'IApp' = None,
+             app_ctx: list = None,
              entry_type: any = None,
-             rtn_attr: str = None,
+             include_only: str = None,
              exclude_dirs: list[str] = None,
+             exclude_file: str = None,
              force_all: bool = True) -> Generator:
     """Returns a generator of files from a directory path"""
-    from .parser import ParselyMedia, ParselyPage
+
+    from .parser import Page, Parsely, ParselyMedia
     from .parser import ALLOWED_CONTENT_EXTENSIONS, IGNORE_FILES
     if abs_dirpath in (exclude_dirs or []): return []
-    if not entry_type: entry_type = ParselyPage
 
-    _, __, base_dir, static_dir = app_ctx
+    _, _, pages_dirpath, _ = app_ctx
 
-    def get_datatype(parentdir, rel_filepath, etype):
+    def get_datatype(parentdir, rel_filepath):
         filepath = os.path.normpath(os.path.join(parentdir, rel_filepath))
         if entry_type == 'path':
             return filepath
-        ispg = filepath.endswith(ALLOWED_CONTENT_EXTENSIONS)
-        isschema = hasattr(etype, 'from_path')
-        p = etype.from_path(filepath, app_ctx) if isschema else etype(filepath, app_ctx) \
-            if ispg else ParselyMedia(filepath, app_ctx)
-        return Collection.get_attr(p, rtn_attr, None)
+        ismedia = not filepath.endswith(ALLOWED_CONTENT_EXTENSIONS)
+        pf = Parsely(filepath, app_ctx)
+        if ismedia:
+            return cls_mapper(pf, ParselyMedia)
+        return cls_mapper(pf, entry_type or Page) #if entry_type else pf
+
 
     def is_public(parentdir, entry=None):
         if force_all: return True
-        parentdir = parentdir.replace(base_dir, "").lstrip(os.path.sep)
+        parentdir = parentdir.replace(pages_dirpath, "").lstrip(os.path.sep)
         is_hidden_dir = parentdir.startswith(IGNORE_FILES)
         if entry in IGNORE_FILES:
             return False
@@ -186,7 +292,7 @@ def allFiles(abs_dirpath: str,
             return False if is_filetype and is_hidden_file or is_hidden_dir else True
 
     for parentdir, subs, files in os.walk(os.path.normpath(abs_dirpath)):
-        folderRoot = parentdir.replace(base_dir, "").lstrip(os.path.sep)
+        folderRoot = parentdir.replace(pages_dirpath, "").lstrip(os.path.sep)
         subFolderRoot = os.path.basename(folderRoot)
         skipRoot = (folderRoot in IGNORE_FILES
                     or folderRoot.startswith(IGNORE_FILES)
@@ -195,9 +301,11 @@ def allFiles(abs_dirpath: str,
         if skipRoot or skipSubs: continue
 
         for filename in files:
+            include_only_file = (include_only and filename != include_only)
+            if filename == exclude_file or include_only_file: continue
             if not force_all and not filename.endswith(ALLOWED_CONTENT_EXTENSIONS): continue
             if not is_public(parentdir, filename) or filename in IGNORE_FILES: continue
-            yield get_datatype(parentdir, filename, entry_type)
+            yield get_datatype(parentdir, filename)
 
 
 def delete_file(full_filepath):
@@ -258,53 +366,19 @@ def copy_assets(src: str, dst: str, purge: bool = True):
         raise
 
 
-def tupleconverter(tuple_name, fileobj):
-    """Converts dicts into tuples"""
-    if isinstance(fileobj, tuple): return fileobj
-    from .parser import PROTECTED_FIELD_PREFIX, Parsely
-    def tupleConverter(named, v):
-        named = named.replace(' ', '_').replace('-', '_')
-        if isinstance(v, dict):
-            return tupleconverter(named, v)
-        elif isinstance(v, Parsely):
-            return tupleConverter(named, v.data)
-        elif isinstance(v, list):
-            return [tupleConverter(named, item) for item in v]
-        else:
-            return v
-
-    def sanitize(field):
-        f = field.replace(' ', '_').replace('-', '_')
-        fkw = 'class, for, return, global, pass, print, raise'.split(', ')
-        if f in fkw:
-            print(f'WARNING: reserved keyword {f} is not allowed and has changed to {f}_ ')
-            f = f + '_'
-        return f
-
-    try:
-        keys = [sanitize(key) for key in fileobj.keys() if not key.startswith(PROTECTED_FIELD_PREFIX)]
-
-        from collections import namedtuple
-        return namedtuple(tuple_name, keys)(
-            *tuple(tupleConverter(n, v) for n, v in fileobj.items() if
-                   not n.startswith(PROTECTED_FIELD_PREFIX))
-        )
-    except Exception as e:
-        print(f"tuple_converter: {tuple_name} {str(e)}")
-        return fileobj
-
 
 def json_serial(obj):
     """JSON serializer for nested objects not serializable by default jsonify"""
     from datetime import datetime
-    # from pycasso.utilities import Collection
-    from .parser import Parsely, ParselySchema
-    if isinstance(obj, (datetime)):
+    from .parser import Parsely, ParselyMedia
+    if isinstance(obj, datetime):
         return obj.isoformat()
-    elif isinstance(obj, Collection):
-        return list(obj.collection)
-    elif isinstance(obj, (ParselySchema, Parsely)):
+    elif isinstance(obj, (Generator, PyonirCollection)):
+        return list(obj)
+    elif isinstance(obj, Parsely):
         return obj.data
+    elif hasattr(obj, 'to_json'):
+        return obj.to_json()
     else:
         return None if not hasattr(obj, '__dict__') else obj.__dict__
 
@@ -327,6 +401,33 @@ def secure_upload_filename(filename):
     # Return the filename as lowercase for consistency
     return filename.lower()
 
+def load_modules_from(pkg_dirpath, as_list: bool = False)-> tuple[dict[str, object], dict[str, typing.Callable]]:
+    loaded_mods = {} if not as_list else []
+    loaded_funcs = {} if not as_list else []
+    if not os.path.exists(pkg_dirpath): return loaded_funcs
+    for mod_file in os.listdir(pkg_dirpath):
+        name,_, ext = mod_file.partition('.')
+        if ext!='py': continue
+        mod_abspath = os.path.join(pkg_dirpath, name.strip())+'.py'
+        mod, func = get_module(mod_abspath, name)
+        if as_list:
+            loaded_funcs.append(func)
+        else:
+            loaded_mods[name] = mod
+            loaded_funcs[name] = func
+
+    return loaded_funcs
+
+def get_module(pkg_path: str, callable_name: str) -> tuple[any, typing.Callable]:
+    from importlib import util
+    mod = util.spec_from_file_location(callable_name, pkg_path).loader.load_module(callable_name)
+    func = getattr(mod, callable_name)
+
+    return (mod, func)
+
+def generate_id():
+    import uuid
+    return str(uuid.uuid1())
 
 class pcolors:
     RESET = '\033[0m'
@@ -341,358 +442,161 @@ class pcolors:
     UNDERLINE = '\033[4m'
 
 
-class Collection:
-    @property
-    def is_bool(self):
-        return isinstance(self.where, list) and len(self.where) == 1
+class PyonirCollection:
 
-    @property
-    def count(self):
-        from sortedcontainers import SortedList
-        return self.collection._len if isinstance(self.collection, SortedList) else len(self.collection)
-
-    def __init__(self, targetIterator, sortBy: str = 'date', where: list = [], reverse=False):
-        from sortedcontainers import SortedList
-        self.reverse = reverse
-        self.sortBy = sortBy
-        self.where = where
-        self.collection = SortedList(targetIterator, key=lambda x: self.get_attr(x, sortBy))
-        pass
-
-    def where_condition(self, target):
-        """Evaluates if a property is true or false."""
-        from datetime import datetime, timedelta
-        from pyonir import Site
-        if not self.where: return True
+    @staticmethod
+    def coerce_bool(value: str):
+        d = ['false', 'true']
         try:
-            if self.is_bool:
-                return self.get_attr(target, self.where) != True
-            else:
-                attr_path, oper, rcon = self.where
-                target = target.data if not isinstance(target, dict) else target
-                lvalue = self.get_attr(target, attr_path)
-                # case handling for dates
-                if isinstance(lvalue, datetime):
-                    if isinstance(rcon, str):
-                        rcon = int(rcon)
-                    if oper == '>':  # future dates
-                        return lvalue > rcon
-                    elif oper == '<':  # past dates
-                        return lvalue < rcon
-                    elif oper == 'in_last':  # within days
-                        current_date = Site.system().get('current_date')
-                        day_margin = timedelta(days=rcon)
-                        return (current_date - day_margin) <= lvalue <= current_date + day_margin
-                elif isinstance(lvalue, str):
-                    # Case handling for strings
-                    if oper == 'in':
-                        return lvalue.find(rcon) > -1
-        except Exception as e:
-            # raise
-            return False
-        pass
+            i = d.index(value.lower().strip())
+            return True if i else False
+        except ValueError as e:
+            return value.strip()
 
     @staticmethod
-    def get_attr(rowObj, attrPath=None, default=None, rtn_none=True):
-        """
-        @default returns a default obj when the target attr value is None
-        @rtn_none returns a None obj when target attr value is None
-        """
-        if attrPath == None: return rowObj
-        attrPath = attrPath if isinstance(attrPath, list) else attrPath.split('.')
-        targetObj = None
-        for key in attrPath:
-            try:
-                if targetObj:
-                    targetObj = targetObj[key]
-                else:
-                    targetObj = rowObj.get(key)
-                pass
-            except Exception as TypeError:
-                if targetObj:
-                    targetObj = getattr(targetObj, key, None)
-                else:
-                    targetObj = getattr(rowObj, key, None)
-                pass
-        if (rtn_none and targetObj is None) or (default and targetObj is None):
-            return default
-        if not default and targetObj is None:
-            return rowObj
-        return targetObj
-        # return targetObj if not targetObj and rtn_empty else rowObj
-
-    def groupedBy(self, keyname, where=None, targetField=None):
-        """Returns dictionary groupings based on object keyname from a list"""
-        from collections import defaultdict
-        results = defaultdict(list)
-        if where: self.where = where
-        for item in self.collection:
-            item = self.get_attr(item, targetField)
-            groupname = self.get_attr(item, keyname)
-            try:
-                if not self.where_condition(item): continue
-            except NameError:
-                raise Exception('`item` was not found in the groupdedBy where argument')
-            if isinstance(groupname, list):
-                for tag in groupname:
-                    results[tag.lower().strip()].append(item)
-            elif groupname is not None and isinstance(groupname, str):
-                results[groupname.lower().strip()].append(item)
-        return results
-
-    def paginate(self, start: int = 0, end: int = None, reverse: bool = None, where: list = None,
-                 attr_path: str = None):
-        from sortedcontainers import SortedList
-        if where: self.where = where
-        end = self.count if end is None else end
-        begin = start
-        stop = end
-        if begin > stop or begin == self.count or not isinstance(self.collection, SortedList): return False
-        for obj in self.collection.islice(start, end, reverse=reverse or self.reverse):
-            if self.where and not self.where_condition(obj): continue
-            obj.set_schema()
-            if obj.schema: obj = obj.schema.model
-            yield get_attr(obj, attr_path, rtn_none=False) if attr_path else obj
-
-
-def get_module(pkg_path: str, callable_name: str) -> tuple[any, typing.Callable]:
-    from importlib import util
-    pkg = util.spec_from_file_location(callable_name, pkg_path).loader.load_module(callable_name)
-    func = getattr(pkg, callable_name)
-
-    return (pkg, func)
-
-
-def generate_id():
-    import uuid
-    return str(uuid.uuid1())
-
-
-class PyonirMod:
-    """Pyonir module object storing path and module class to be used later during runtime"""
-
-    def __init__(self, path):
-        from importlib import util
-        from pyonir import PYONIR_DIRPATH
-        assert (os.path.exists(path)), "Module path doesn't exist"
-
-        # init_file_path = path if path.endswith('.py') else os.path.join(path, '__init__.py')
-        self.class_module = None
-        self.package = os.path.dirname(path) \
-            .replace(os.path.dirname(PYONIR_DIRPATH), "") \
-            .replace(os.path.sep, ".").lstrip(".")
-        self.callable_name = os.path.basename(path).split('.py')[0]
-        self.import_str = f"{self.package}.{self.callable_name}.{self.callable_name}"
-        self.origin = os.path.join(path, self.callable_name + ".py") if not path.endswith('.py') else path
-        if not os.path.exists(self.origin): self.origin = os.path.join(path, '__init__.py')
-        try:  # Importing the module from file_path expects callable_name
-            self.class_module = getattr(
-                util.spec_from_file_location(self.callable_name, self.origin).loader.load_module(), self.callable_name)
-        except AttributeError as e:
-            raise
-            # self.class_module = importlib.util.spec_from_file_location(self.callable_name, file_path).loader.load_module()
-        except Exception as e:
-            raise
-            # print(f"{__name__} {self.origin}: {str(e)}")
-
-
-class DB:
-    def __init__(self):
-        pass
-
-    def connect(self, dbname: str, dbuser: str, dbpass: str, dbport: int, dbhost: str):
-        pass
-
-    @staticmethod
-    async def upload_documents(documents: list['RequestFile'] = None, upload_root_dirpath: str = None):
-        """Uploads files sent by server request"""
-        from . import IMAGE_SIZES, UPLOADS_ROUTE, ALLOWED_UPLOAD_EXTENSIONS
-        from .server import RequestFile
-
-        async def saveMedia(file: RequestFile, foldername: str = None) -> str:
-
-            def clean_up_path(filepath):
-                return filepath.replace(file.uploads_dirpath, UPLOADS_ROUTE)
-
-            def createImagefolder(folderpath, with_thumbs=None):
-                if not os.path.exists(folderpath):
-                    os.makedirs(folderpath)
-
-                '''create separate folders for smaller sizes'''
-                if with_thumbs:
-                    for sizename in IMAGE_SIZES:
-                        if not os.path.exists(os.path.join(folderpath, sizename)) and sizename != 'original':
-                            # make the path
-                            os.makedirs(os.path.join(folderpath, sizename))
-                return folderpath
-
-            def resize(filedirpath, imageFile):
-                from PIL import Image
-                '''
-                Resize each image and save to the upload path in corresponding image size and paths
-                This happens after full size images are saved to the filesystem
-                '''
-
-                try:
-                    for sizename, dimensions in IMAGE_SIZES.items():
-                        origimage = os.path.join(filedirpath, imageFile)
-                        img = Image.open(origimage)
-                        imgfilesize = os.path.getsize(origimage)
-                        # img = img.resize(dimensions, Image.ANTIALIAS)
-                        img.thumbnail(dimensions, Image.ANTIALIAS)
-                        folderpath = os.path.join(filedirpath, sizename)
-                        if not os.path.exists(folderpath):
-                            os.makedirs(folderpath)
-                        img.save(os.path.join(filedirpath, sizename, imageFile))
-
-                except Exception as e:
-                    pass
-
-            def secureFile(filename):
-                """ @return bool if file is allowed to upload """
-
-                def allowed_file(filename):
-                    # This function checks a given string extension
-                    return '.' in filename and \
-                        filename.rsplit('.', 1)[1] in ALLOWED_UPLOAD_EXTENSIONS
-
-                return secure_upload_filename(filename) if allowed_file(filename) else None
-
-            file_ext = file.filename.split('.').pop()
-            upload_folder = os.path.join("documents", foldername) if file_ext in ("pdf", "zip") else foldername
-            allowedFile = secureFile(file.filename)
-            is_image = file_ext not in ('pdf', 'zip')
-            if allowedFile:
-                upload_dir = os.path.join(file.uploads_dirpath, upload_folder)
-                folderpath = upload_dir.replace(' ', '-')
-                createImagefolder(folderpath, with_thumbs=is_image)
-                file.filepath = os.path.join(folderpath, allowedFile)
-                # save original file
-                await file.save()
-                # resize original file
-                if is_image: resize(file.uploads_dirpath, allowedFile)
-                # save base64
-                return clean_up_path(file.filepath)
-            return 'file named {} was not allowed'.format(file.filename)
-
-        upload_response = {'files': [], 'status': ''}
-        try:
-            upload_response['files'] = [await saveMedia(doc, upload_root_dirpath) for doc in documents]
-            upload_response['status'] = "successfully uploaded {} files".format(len(documents))
-        except Exception as e:
-            raise
-        return upload_response
-
-    @staticmethod
-    def find(
-            select,
-            where: str = None,
-            target: str = None,
-            entry_type: any = None,
-            allow_all=False):
-        from .parser import Parsely
-        if not entry_type: entry_type = Parsely
-        result = None
-        selected = allFiles(select, entry_type=entry_type)
-        if where and target and selected:
-            for file in selected:
-                if Collection.get_attr(file, where) == target:
-                    result = file.file_schema.map_to_schema(file)
-                    # result = file.to_dict() if rtn_file_as!='file' else file
+    def parse_params(param: str):
+        k, _, v = param.partition(':')
+        op = '='
+        is_eq = lambda x: x[1]==':'
+        if v.startswith('>'):
+            eqs = is_eq(v)
+            op = '>=' if eqs else '>'
+            v = v[1:] if not eqs else v[2:]
+        elif v.startswith('<'):
+            eqs = is_eq(v)
+            op = '<=' if eqs else '<'
+            v = v[1:] if not eqs else v[2:]
+            pass
         else:
-            result = list(selected)
-        return result
+            pass
+        # v = True if v.strip()=='true' else v.strip()
+        return {"attr": k.strip(), "op":op, "value":PyonirCollection.coerce_bool(v)}
 
-    @staticmethod
-    def get_menus(active_page=''):
-        """site navigations based on all index.md files and any file within the pages directory"""
-        from pyonir import Site as app
-        if app is None: return None
-        assert hasattr(app, 'pages_dirpath'), "Get menus 'app' parameter does not have a pages dirpath property"
+    @classmethod
+    def query(cls, query_path: str,
+             app_ctx: PyonirApp = None,
+             data_model: any = None,
+             include_only: str = None,
+             exclude_dirs: list[str] = None,
+             exclude_file: str = None,
+             force_all: bool = True,
+              sort_key: str = None):
+        """queries the file system for list of files"""
+        gen_data = allFiles(query_path, app_ctx=app_ctx, entry_type=data_model, include_only=include_only,
+                            exclude_dirs=exclude_dirs, exclude_file=exclude_file, force_all=force_all)
+        return cls(gen_data, sort_key=sort_key)
 
-        pages = {}
-        subpages = {}
-
-        def get_nav(app):
-            """Gets page nav based on file contents"""
-            file_list = allFiles(app.pages_dirpath, apply_schema='menu',
-                                 app_ctx=app.files_ctx)  # return files using menu schema model
-
-            for page in file_list:
-                pstatus = page.get('status')
-                purl = page.get('url')
-                menu_group = page.get('menu')  # parent level menu item
-                menu_parent = page.get('menu_parent')  # child level menu item
-                if pstatus == 'hidden' or (not menu_group and not menu_parent): continue
-                page['active'] = active_page == page.get('url')
-                if menu_group:
-                    pages[purl] = page
-                elif menu_parent:
-                    _ref = subpages.get(menu_parent)
-                    if not _ref:
-                        subpages[menu_parent] = [page]
-                    else:
-                        _ref.append(page)
-
-            if subpages:
-                for k, m in subpages.items():
-                    pmenu = pages.get(k)
-                    if not pmenu: continue
-                    pmenu.update({"sub_menu": m})
-
-        # site navigation
-        get_nav(app)
-        # Collect any plugins navigation
-        # if hasattr(app, 'Resolvers'):
-        #     for iplg_id, iplg in app.Resolvers.__dict__.items():
-        #         if not hasattr(iplg, 'app_extension') or not iplg.is_enabled: continue
-        #         get_nav(iplg)
-
-        return Collection(pages.values(), sortBy='order').groupedBy('menu')
-
-    @staticmethod
-    def tags(searchStr="", model="title,url,tag,tags"):
-        import re
-        """Attempts to return a dictionary of tags based on file propterties"""
-        try:
-            # passing a path of '/' will return all files. expensive operation here
-            from . import Site
-            allfiles = allFiles(Site.content_dirpath, model=model, post_process=False)
-            # tagerror = "Tag named `{}` was not found".format(searchStr)
-            tags_collection = {}
-            query_search_wordList = searchStr.lower().replace(' ', ',').split(',') if searchStr != '' else None
-
-            def tagContains(tagname):
-                """search exact match """
-                if searchStr:
-                    for term in query_search_wordList:
-                        # print(tagname+' <---> '+term)
-                        if not term in tagname:
-                            return False
-                    return True
-
-            if not query_search_wordList:
-                for fileObj in allfiles:
-                    fileTags = fileObj.data.get('tags', fileObj.data.get('tag'))
-                    if not fileTags: continue
-                    for queryWord in fileTags:
-                        queryWord = queryWord.strip()
-                        if not tags_collection.get(queryWord):
-                            tags_collection[queryWord] = [fileObj.data]
-                        else:
-                            tags_collection[queryWord].append(fileObj.data)
-                return tags_collection
+    def prev_next(self, input_file: Parsely):
+        """Returns the previous and next files relative to the input file"""
+        prv = None
+        nxt = None
+        pc = self.query(input_file.file_dirpath)
+        pc.collection = iter(pc.collection)
+        for cfile in pc.collection:
+            if cfile.file_status == 'hidden': continue
+            if cfile.file_path == input_file.file_path:
+                nxt = next(pc.collection, None)
+                break
             else:
-                for fileObj in allfiles:
-                    fileTags = fileObj.data.get('tags', [])
-                    fileTitle = fileObj.data.get('title', '').lower().split(' ')
-                    fileName = fileObj.file_name.lower().replace('-', ' ').replace('_', ' ').split(' ')
-                    wordList = list(itertools.chain(fileTags, fileTitle, fileName))
-                    url = fileObj.data.get('url')
-                    for queryWord in query_search_wordList:
-                        if tags_collection.get(url): continue
-                        if queryWord not in wordList: continue
-                        tags_collection.update({url: fileObj.data})
-                return list(tags_collection.values())
-        except Exception as e:
-            raise
+                prv = cfile
+        return dict_to_class({"next": nxt, "prev": prv})
+
+    def __init__(self, items: typing.Iterable, sort_key: str = None):
+        from sortedcontainers import SortedList
+        self._query_path = ''
+        key = lambda x: get_attr(x, sort_key or 'file_created_on')
+        self.collection = SortedList(items, key=key)
+
+    def find(self, value: any, from_attr: str = 'file_name'):
+        """Returns the first item where attr == value"""
+        return next((item for item in self.collection if getattr(item, from_attr, None) == value), None)
+
+    def where(self, attr, op="=", value=None):
+        """Returns a list of items where attr == value"""
+        if value is None:
+            # assume 'op' is actually the value if only two args were passed
+            value = op
+            op = "="
+
+        def match(item):
+            actual = get_attr(item, attr)
+            if op == "=":
+                return actual == value
+            elif op == "in" or op == "contains":
+                return actual in value if actual is not None else False
+            elif op == ">":
+                return actual > value
+            elif op == "<":
+                return actual < value
+            elif op == ">=":
+                return actual >= value
+            elif op == "<=":
+                return actual <= value
+            elif op == "!=":
+                return actual != value
+            return False
+        if isinstance(attr, typing.Callable): match = attr
+        return PyonirCollection(filter(match, list(self.collection)))
+
+    def paginate(self, start: int, end: int, reversed: bool = False):
+        """Returns a slice of the items list"""
+        sl = self.collection.islice(start, end, reverse=reversed) if end else self.collection
+        return sl #self.collection[start:end]
+
+    def group_by(self, key: str | typing.Callable):
+        """
+        Groups items by a given attribute or function.
+        If `key` is a string, it will group by that attribute.
+        If `key` is a function, it will call the function for each item.
+        """
+        from collections import defaultdict
+        grouped = defaultdict(list)
+
+        for item in self.collection:
+            k = key(item) if callable(key) else getattr(item, key, None)
+            grouped[k].append(item)
+
+        return dict(grouped)
+
+    def paginated_collection(self, query_params=None)-> ParselyCollection | None:
+        """Paginates a list into smaller segments based on curr_pg and display limit"""
+        if query_params is None: query_params = {}
+        from pyonir import Site
+        if not Site: return None
+        request: PyonirRequest = Site.TemplateEnvironment.globals['request']
+        if not hasattr(request, 'limit'): return None
+        req_pg = get_attr(request.query_params, 'pg') or 1
+        limit = query_params.get('limit', request.limit)
+        curr_pg = int(query_params.get('pg', req_pg)) or 1
+        sort_key = query_params.get('sort_key')
+        where_key = query_params.get('where')
+        if sort_key:
+            self.collection = SortedList(self.collection, lambda x: get_attr(x, sort_key))
+        if where_key:
+            where_key = [PyonirCollection.parse_params(ex) for ex in where_key.split(',')]
+            self.collection = self.where(**where_key[0])
+        force_all = limit=='*'
+
+        max_count = len(self.collection)
+        limit = 0 if force_all else int(limit)
+        page_num = 0 if force_all else int(curr_pg)
+        start = (page_num * limit) - limit
+        end = (limit * page_num)
+        pg = (max_count // limit) + (max_count % limit > 0) if limit > 0 else 0
+
+        pag_data = self.paginate(start=start, end=end, reversed=True) if not force_all else self.collection
+
+        return ParselyCollection(**{
+            'curr_page': page_num,
+            'page_nums': [n for n in range(1, pg + 1)] if pg else None,
+            'limit': limit,
+            'max_count': max_count,
+            'items': list(pag_data)
+        })
+
+    def __len__(self):
+        return self.collection._len
+
+    def __iter__(self):
+        return iter(self.collection)
+

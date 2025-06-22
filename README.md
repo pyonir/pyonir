@@ -4,15 +4,27 @@ A static website generator and flat file web framework written in Python.
 
 # Install
 
-From the pypi:
+From pypi:
 
 `pip install pyonir`
 
-From the github:
 
-`pip install pyonir` 
+# Create a project
 
+From the cli:
+execute `pyonir-create` 
+
+This will scafold a demo web application. or You may create a `main.py` file from an empty directory.
+
+```python
+import pyonir
+app = pyonir.init(__file__)
+
+app.run()
+```
 # Generate Static Site
+
+demo_app.generate_static_website()
 
 # Configure Content
 

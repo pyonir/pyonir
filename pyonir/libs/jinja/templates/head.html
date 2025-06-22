@@ -1,19 +1,18 @@
 {%- set site = configs -%}
-{%- set default_logo = site.logo if 'logo' in site else '' -%}
-{%- set pagedata = data if data else {"url": request.url, "status": "public"} -%}
-{%- set nofollow = pagedata and not pagedata.slug -%}
-{%- set canonical = pagedata.canonical if pagedata.canonical else request.raw_path -%}
+{%- set default_logo = site.logo if site.logo else '' -%}
+{%- set data = data if data else {"url": request.url, "status": "public"} -%}
+{%- set nofollow = data and not data.slug -%}
+{%- set canonical = data.canonical if data.canonical else request.raw_path -%}
 <meta charset="utf-8">
 <link rel="icon" href="/public/favicon.ico" type="image/x-icon">
 <link rel="canonical" href="{{request.host}}{{request.url}}"" />
-<title>{{ pagedata.title|title|safe }} {{ site.name | safe }}</title>
+<title>{{ data.title|title|safe }} {{ site.name | safe }}</title>
 {# <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=1.0, user-scalable=1"> #}
 <meta name="author" content="{{site.author|title or 'Pycasso CMS'}}" />
-<meta property="description" content="{{ pagedata.excerpt or site.description }}" />
+<meta property="description" content="{{ site.description }}" />
 <meta property="og:locale" content="en_US" />
-<meta property="og:type" content="{{pagedata.type}}" />
-<meta property="og:title" content="{{pagedata.title|title}}" />
-<meta property="og:description" content="{{ pagedata.excerpt or site.description }}" />
+<meta property="og:type" content="{{data.type}}" />
+<meta property="og:title" content="{{data.title|title}}" />
 <meta property="og:url" content="{{request.host}}{{request.url}}" />
 <meta property="og:site_name" content="{{ site.name }}" />
 <meta property="article:publisher" content="{{ site.author|title }}" />

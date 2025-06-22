@@ -1,0 +1,12 @@
+<p>🛍️Cart has {{cart_items | length}} items.</p>
+<ul>
+{% for item in cart_items %}
+<li>{{item.name}} - {{item.quantity}}
+<form action="/api/my-shop/remove_item" method="POST">
+<input type="hidden" name="redirect" value="{{request.raw_path}}">
+<input type="hidden" name="product_id" value="{{item.product_id}}">
+<button>X</button>
+</form>
+</li>
+{% endfor %}
+</ul>

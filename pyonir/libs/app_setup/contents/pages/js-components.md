@@ -1,5 +1,5 @@
 @filter.md:- content
-@filter.jinjag:- content
+@filter.jinja:- content
 title: Reactive javascript components
 menu.parent: /demos
 entries: $dir/pages/blogs/*

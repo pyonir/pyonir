@@ -1,1 +1,0 @@
-title: Pyonir Shop configurations

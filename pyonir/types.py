@@ -448,6 +448,7 @@ class PyonirBase:
     ASSETS_DIRNAME: str = "public" # url name for serving static assets css and js
     API_DIRNAME: str = "api" # directory for serving API endpoints and resolver routes
     PAGES_DIRNAME: str = "pages" # directory for serving HTML endpoints with file based routing
+    CONFIG_FILENAME: str = "app" # main application configuration file name within contents/configs directory
 
     # Application paths
     app_dirpath: str = '' # directory path to site's main.py file
@@ -472,6 +473,7 @@ class PyonirPlugin(PyonirBase):
         self.app_dirpath: str = os.path.dirname(app_entrypoint) # plugin directory path
         self.name: str = os.path.basename(self.app_dirpath) # web url to serve application pages
         self.routing_paths: set = set()
+        self.CONFIG_FILENAME = self.module
 
     @property
     def request_paths(self):
@@ -658,7 +660,11 @@ class PyonirApp(PyonirBase):
         self.TemplateEnvironment = TemplateEnvironment(self)
 
     def install_plugins(self, plugins: list):
+        is_configured = hasattr(self.configs, 'app') and hasattr(self.configs.app, 'enabled_plugins')
         for plugin in plugins:
+            plg_id = plugin.__name__
+            # if is_configured and plg_id not in self.configs.app.enabled_plugins: continue
+            print(f'Installing {plg_id} plugin')
             self.available_plugins.add(plugin(self))
         pass
 

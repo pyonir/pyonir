@@ -4,6 +4,6 @@ description: my site description
 author: Pablo Pycasso
 timezone: US/Eastern
 keywords:- cms, blog, web developers, web designers
-enabled_plugins:- pycasso_store
+enabled_plugins:- Ecommerce, Forms, Navigation
 ===
 Default site configurations

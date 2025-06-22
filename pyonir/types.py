@@ -95,12 +95,181 @@ class Parsely:
     data: dict
 
 
+class PyonirCollection:
+    SortedList = None
+    get_attr =  None
+    dict_to_class = None
+
+    def __init__(self, items: typing.Iterable, sort_key: str = None):
+        from sortedcontainers import SortedList
+        from pyonir.utilities import get_attr, dict_to_class
+        self.SortedList = SortedList
+        self.get_attr = get_attr
+        self.dict_to_class = dict_to_class
+
+        self._query_path = ''
+        key = lambda x: self.get_attr(x, sort_key or 'file_created_on')
+        self.collection = SortedList(items, key=key)
+
+    @staticmethod
+    def coerce_bool(value: str):
+        d = ['false', 'true']
+        try:
+            i = d.index(value.lower().strip())
+            return True if i else False
+        except ValueError as e:
+            return value.strip()
+
+    @staticmethod
+    def parse_params(param: str):
+        k, _, v = param.partition(':')
+        op = '='
+        is_eq = lambda x: x[1]==':'
+        if v.startswith('>'):
+            eqs = is_eq(v)
+            op = '>=' if eqs else '>'
+            v = v[1:] if not eqs else v[2:]
+        elif v.startswith('<'):
+            eqs = is_eq(v)
+            op = '<=' if eqs else '<'
+            v = v[1:] if not eqs else v[2:]
+            pass
+        else:
+            pass
+        # v = True if v.strip()=='true' else v.strip()
+        return {"attr": k.strip(), "op":op, "value":PyonirCollection.coerce_bool(v)}
+
+    @classmethod
+    def query(cls, query_path: str,
+             app_ctx: PyonirApp = None,
+             data_model: any = None,
+             include_only: str = None,
+             exclude_dirs: list[str] = None,
+             exclude_file: str = None,
+             force_all: bool = True,
+              sort_key: str = None):
+        """queries the file system for list of files"""
+        from pyonir.utilities import get_all_files_from_dir
+        gen_data = get_all_files_from_dir(query_path, app_ctx=app_ctx, entry_type=data_model, include_only=include_only,
+                                          exclude_dirs=exclude_dirs, exclude_file=exclude_file, force_all=force_all)
+        return cls(gen_data, sort_key=sort_key)
+
+    def prev_next(self, input_file: Parsely):
+        """Returns the previous and next files relative to the input file"""
+
+        prv = None
+        nxt = None
+        pc = self.query(input_file.file_dirpath)
+        pc.collection = iter(pc.collection)
+        for cfile in pc.collection:
+            if cfile.file_status == 'hidden': continue
+            if cfile.file_path == input_file.file_path:
+                nxt = next(pc.collection, None)
+                break
+            else:
+                prv = cfile
+        return self.dict_to_class({"next": nxt, "prev": prv})
+
+    def find(self, value: any, from_attr: str = 'file_name'):
+        """Returns the first item where attr == value"""
+        return next((item for item in self.collection if getattr(item, from_attr, None) == value), None)
+
+    def where(self, attr, op="=", value=None):
+        """Returns a list of items where attr == value"""
+        if value is None:
+            # assume 'op' is actually the value if only two args were passed
+            value = op
+            op = "="
+
+        def match(item):
+            actual = self.get_attr(item, attr)
+            if op == "=":
+                return actual == value
+            elif op == "in" or op == "contains":
+                return actual in value if actual is not None else False
+            elif op == ">":
+                return actual > value
+            elif op == "<":
+                return actual < value
+            elif op == ">=":
+                return actual >= value
+            elif op == "<=":
+                return actual <= value
+            elif op == "!=":
+                return actual != value
+            return False
+        if isinstance(attr, typing.Callable): match = attr
+        return PyonirCollection(filter(match, list(self.collection)))
+
+    def paginate(self, start: int, end: int, reversed: bool = False):
+        """Returns a slice of the items list"""
+        sl = self.collection.islice(start, end, reverse=reversed) if end else self.collection
+        return sl #self.collection[start:end]
+
+    def group_by(self, key: str | typing.Callable):
+        """
+        Groups items by a given attribute or function.
+        If `key` is a string, it will group by that attribute.
+        If `key` is a function, it will call the function for each item.
+        """
+        from collections import defaultdict
+        grouped = defaultdict(list)
+
+        for item in self.collection:
+            k = key(item) if callable(key) else getattr(item, key, None)
+            grouped[k].append(item)
+
+        return dict(grouped)
+
+    def paginated_collection(self, query_params=None)-> ParselyCollection | None:
+        """Paginates a list into smaller segments based on curr_pg and display limit"""
+        if query_params is None: query_params = {}
+        from pyonir import Site
+        if not Site: return None
+        request: PyonirRequest = Site.TemplateEnvironment.globals['request']
+        if not hasattr(request, 'limit'): return None
+        req_pg = self.get_attr(request.query_params, 'pg') or 1
+        limit = query_params.get('limit', request.limit)
+        curr_pg = int(query_params.get('pg', req_pg)) or 1
+        sort_key = query_params.get('sort_key')
+        where_key = query_params.get('where')
+        if sort_key:
+            self.collection = self.SortedList(self.collection, lambda x: self.get_attr(x, sort_key))
+        if where_key:
+            where_key = [PyonirCollection.parse_params(ex) for ex in where_key.split(',')]
+            self.collection = self.where(**where_key[0])
+        force_all = limit=='*'
+
+        max_count = len(self.collection)
+        limit = 0 if force_all else int(limit)
+        page_num = 0 if force_all else int(curr_pg)
+        start = (page_num * limit) - limit
+        end = (limit * page_num)
+        pg = (max_count // limit) + (max_count % limit > 0) if limit > 0 else 0
+
+        pag_data = self.paginate(start=start, end=end, reversed=True) if not force_all else self.collection
+
+        return ParselyCollection(**{
+            'curr_page': page_num,
+            'page_nums': [n for n in range(1, pg + 1)] if pg else None,
+            'limit': limit,
+            'max_count': max_count,
+            'items': list(pag_data)
+        })
+
+    def __len__(self):
+        return self.collection._len
+
+    def __iter__(self):
+        return iter(self.collection)
+
+
 @dataclass
 class Pagination:
     page_num: int = 1
     limit: int = 0
 
-#
+
 class PyonirRequest:
 
     def __init__(self, server_request: StarletteRequest):
@@ -137,7 +306,25 @@ class PyonirRequest:
 
         from pyonir import Site
         import json
-        from .utilities import secure_upload_filename
+
+        def secure_upload_filename(filename):
+            import re
+            # Strip leading and trailing whitespace from the filename
+            filename = filename.strip()
+
+            # Replace spaces with underscores
+            filename = filename.replace(' ', '_')
+
+            # Remove any remaining unsafe characters using a regular expression
+            # Allow only alphanumeric characters, underscores, hyphens, dots, and slashes
+            filename = re.sub(r'[^a-zA-Z0-9_.-]', '', filename)
+
+            # Ensure the filename doesn't contain multiple consecutive dots (.) or start with one
+            filename = re.sub(r'\.+', '.', filename).lstrip('.')
+
+            # Return the filename as lowercase for consistency
+            return filename.lower()
+
         try:
             try:
                 ajson = await self.server_request.json()
@@ -324,7 +511,7 @@ class PyonirPlugin(PyonirBase):
 
     @staticmethod
     def query_files(dir_path: str, app_ctx: tuple, model_type: any = None) -> list[Parsely]:
-        from pyonir.utilities import process_contents, PyonirCollection
+        from pyonir.utilities import process_contents
         # return PyonirCollection.query(dir_path, app_ctx, model_type)
         return process_contents(dir_path, app_ctx, model_type)
 
@@ -514,7 +701,6 @@ class PyonirApp(PyonirBase):
     def generate_static_website(self): pass
 
 
-
 class TemplateEnvironment(Environment):
 
     def __init__(self, app: PyonirApp):
@@ -601,7 +787,6 @@ class PyonirThemes:
 
     def get_available_themes(self) -> PyonirCollection | None:
         from pyonir import Site
-        from pyonir.utilities import PyonirCollection
 
         if not Site: return None
         fe_ctx = list(Site.app_ctx)
@@ -609,76 +794,3 @@ class PyonirThemes:
         pc = PyonirCollection.query(self.themes_dirpath, fe_ctx, include_only='README.md', data_model=Theme)
         return pc
 
-
-class IPlugin:
-    ID: str = 'some unique identifier'
-    endpoint_url: str = '' #default for any plugins that resolve contents
-    is_plugin: True
-    enabled: bool = True
-    hooks: PyonirHooks
-
-
-    def __init__(self, app: PyonirApp, abs_dirpath: str = None, install_boilerplate: bool = False):
-
-        self.abs_dirpath = os.path.dirname(abs_dirpath or __file__)
-        self.name = self.module
-        self.contents_dirpath = os.path.join(self.abs_dirpath, app.CONTENTS_DIRNAME)
-        self.pages_dirpath = os.path.join(self.contents_dirpath, app.PAGES_DIRNAME)
-        self.api_dirpath = os.path.join(self.contents_dirpath, app.API_DIRNAME)
-        self.templates_dirpath = os.path.join(self.abs_dirpath, app.TEMPLATES_DIRNAME)
-        self.ssg_dirpath = os.path.join(app.ssg_dirpath, self.endpoint_url[1:])
-        self.routing_paths: set = {self.pages_dirpath, self.api_dirpath, self.ssg_dirpath}
-        self.app_ctx = (self.name, self.endpoint_url, self.contents_dirpath, self.ssg_dirpath)
-        self.resolvers_dirpath = None
-
-    @property
-    def request_paths(self):
-        """Request context for route resolution"""
-        return self.endpoint_url, self.routing_paths
-
-    @property
-    def module(self):
-        """The plugin module directory name"""
-        return self.__module__.split('.').pop()
-
-    @property
-    def module_path(self):
-        """The plugin module directory path"""
-        return self.__module__
-
-    @staticmethod
-    def register_templates(dir_paths: list[str], app: PyonirApp):
-        """Registers additional paths for jinja templates"""
-        if not hasattr(app.TemplateEnvironment, 'loader'): return None
-        for path in dir_paths:
-            if path in app.TemplateEnvironment.loader.searchpath: continue
-            app.TemplateEnvironment.loader.searchpath.append(path)
-
-    @staticmethod
-    def install_directory(plugin_src_directory: str, site_destination_directory: str):
-        from pyonir.utilities import copy_assets
-        copy_assets(plugin_src_directory, site_destination_directory)
-
-    @staticmethod
-    def collect_dir_files(dir_path: str, app_ctx: tuple, file_type: any = None) -> list[Parsely]:
-        from pyonir.utilities import process_contents
-        return process_contents(dir_path, app_ctx, file_type)
-
-    @staticmethod
-    def collect_files(dir_path: str, app_ctx: tuple, file_type: any = None) -> typing.Generator:
-        from pyonir.utilities import allFiles
-        return allFiles(dir_path, app_ctx=app_ctx, entry_type=file_type)
-
-    @staticmethod
-    def uninstall(app):
-        """Uninstall plugin from system. this method will destroy any traces of the plugin and its files"""
-        pass
-
-
-    @staticmethod
-    def unregister_templates(dir_paths: list[str], app: PyonirApp):
-        """Removes jinja templates paths"""
-        if not hasattr(app.TemplateEnvironment, 'loader'): return None
-        for path in dir_paths:
-            if path in app.TemplateEnvironment.loader.searchpath: continue
-            app.TemplateEnvironment.loader.searchpath.remove(path)

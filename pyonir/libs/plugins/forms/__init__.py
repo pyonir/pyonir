@@ -2,7 +2,7 @@ import dataclasses
 from dataclasses import field
 from pyonir.parser import Parsely
 
-from pyonir.types import IPlugin, PyonirApp, os, PyonirRequest, PyonirPlugin
+from pyonir.types import PyonirApp, os, PyonirRequest, PyonirPlugin
 
 INPUT_ATTRIBUTES = tuple("accept,accept-charset,accesskey,action,align,allow,alt,async,autocapitalize,autocomplete,autofocus,autoplay,\
 page.file_namebackground,bgcolor,border,buffered,capture,challenge,charset,checked,cite,class,code,codebase,color,cols,colspan,content,\

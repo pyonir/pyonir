@@ -3,9 +3,8 @@ import os
 import typing
 from typing import Generator, Iterable, Mapping, get_origin, get_args, get_type_hints
 from collections.abc import Iterable as ABCIterable
-from sortedcontainers import SortedList
 
-from pyonir.types import PyonirApp, PyonirRequest, ParselyCollection, Parsely
+from pyonir.types import PyonirRequest
 
 
 def is_iterable(tp):
@@ -110,7 +109,7 @@ def process_contents(path, app_ctx=None, file_model: any = None):
 
     key = os.path.basename(path)
     # etype = Parsely  # ParselySchema if 'schemas' in path else Parsely
-    pgs = allFiles(path, app_ctx=app_ctx, entry_type=file_model)
+    pgs = get_all_files_from_dir(path, app_ctx=app_ctx, entry_type=file_model)
     res = type(key, (object,), {'_update': update, '_ctx': app_ctx})()
     for pg in pgs:
         name = getattr(pg, 'file_name', getattr(pg, 'name', None))
@@ -252,13 +251,13 @@ def sortBykey(listobj, sort_by_key="", limit="", reverse=True):
         return listobj
 
 
-def allFiles(abs_dirpath: str,
-             app_ctx: list = None,
-             entry_type: any = None,
-             include_only: str = None,
-             exclude_dirs: list[str] = None,
-             exclude_file: str = None,
-             force_all: bool = True) -> Generator:
+def get_all_files_from_dir(abs_dirpath: str,
+                           app_ctx: list = None,
+                           entry_type: any = None,
+                           include_only: str = None,
+                           exclude_dirs: list[str] = None,
+                           exclude_file: str = None,
+                           force_all: bool = True) -> Generator:
     """Returns a generator of files from a directory path"""
 
     from .parser import Page, Parsely, ParselyMedia
@@ -275,7 +274,7 @@ def allFiles(abs_dirpath: str,
         pf = Parsely(filepath, app_ctx)
         if ismedia:
             return cls_mapper(pf, ParselyMedia)
-        return cls_mapper(pf, entry_type or Page) #if entry_type else pf
+        return cls_mapper(pf, entry_type or Page)
 
 
     def is_public(parentdir, entry=None):
@@ -370,10 +369,10 @@ def copy_assets(src: str, dst: str, purge: bool = True):
 def json_serial(obj):
     """JSON serializer for nested objects not serializable by default jsonify"""
     from datetime import datetime
-    from .parser import Parsely, ParselyMedia
+    from .parser import Parsely
     if isinstance(obj, datetime):
         return obj.isoformat()
-    elif isinstance(obj, (Generator, PyonirCollection)):
+    elif isinstance(obj, Generator):
         return list(obj)
     elif isinstance(obj, Parsely):
         return obj.data
@@ -382,24 +381,6 @@ def json_serial(obj):
     else:
         return None if not hasattr(obj, '__dict__') else obj.__dict__
 
-
-def secure_upload_filename(filename):
-    import re
-    # Strip leading and trailing whitespace from the filename
-    filename = filename.strip()
-
-    # Replace spaces with underscores
-    filename = filename.replace(' ', '_')
-
-    # Remove any remaining unsafe characters using a regular expression
-    # Allow only alphanumeric characters, underscores, hyphens, dots, and slashes
-    filename = re.sub(r'[^a-zA-Z0-9_.-]', '', filename)
-
-    # Ensure the filename doesn't contain multiple consecutive dots (.) or start with one
-    filename = re.sub(r'\.+', '.', filename).lstrip('.')
-
-    # Return the filename as lowercase for consistency
-    return filename.lower()
 
 def load_modules_from(pkg_dirpath, as_list: bool = False)-> tuple[dict[str, object], dict[str, typing.Callable]]:
     loaded_mods = {} if not as_list else []
@@ -440,163 +421,3 @@ class pcolors:
     ENDC = '\033[0m'
     BOLD = '\033[1m'
     UNDERLINE = '\033[4m'
-
-
-class PyonirCollection:
-
-    @staticmethod
-    def coerce_bool(value: str):
-        d = ['false', 'true']
-        try:
-            i = d.index(value.lower().strip())
-            return True if i else False
-        except ValueError as e:
-            return value.strip()
-
-    @staticmethod
-    def parse_params(param: str):
-        k, _, v = param.partition(':')
-        op = '='
-        is_eq = lambda x: x[1]==':'
-        if v.startswith('>'):
-            eqs = is_eq(v)
-            op = '>=' if eqs else '>'
-            v = v[1:] if not eqs else v[2:]
-        elif v.startswith('<'):
-            eqs = is_eq(v)
-            op = '<=' if eqs else '<'
-            v = v[1:] if not eqs else v[2:]
-            pass
-        else:
-            pass
-        # v = True if v.strip()=='true' else v.strip()
-        return {"attr": k.strip(), "op":op, "value":PyonirCollection.coerce_bool(v)}
-
-    @classmethod
-    def query(cls, query_path: str,
-             app_ctx: PyonirApp = None,
-             data_model: any = None,
-             include_only: str = None,
-             exclude_dirs: list[str] = None,
-             exclude_file: str = None,
-             force_all: bool = True,
-              sort_key: str = None):
-        """queries the file system for list of files"""
-        gen_data = allFiles(query_path, app_ctx=app_ctx, entry_type=data_model, include_only=include_only,
-                            exclude_dirs=exclude_dirs, exclude_file=exclude_file, force_all=force_all)
-        return cls(gen_data, sort_key=sort_key)
-
-    def prev_next(self, input_file: Parsely):
-        """Returns the previous and next files relative to the input file"""
-        prv = None
-        nxt = None
-        pc = self.query(input_file.file_dirpath)
-        pc.collection = iter(pc.collection)
-        for cfile in pc.collection:
-            if cfile.file_status == 'hidden': continue
-            if cfile.file_path == input_file.file_path:
-                nxt = next(pc.collection, None)
-                break
-            else:
-                prv = cfile
-        return dict_to_class({"next": nxt, "prev": prv})
-
-    def __init__(self, items: typing.Iterable, sort_key: str = None):
-        from sortedcontainers import SortedList
-        self._query_path = ''
-        key = lambda x: get_attr(x, sort_key or 'file_created_on')
-        self.collection = SortedList(items, key=key)
-
-    def find(self, value: any, from_attr: str = 'file_name'):
-        """Returns the first item where attr == value"""
-        return next((item for item in self.collection if getattr(item, from_attr, None) == value), None)
-
-    def where(self, attr, op="=", value=None):
-        """Returns a list of items where attr == value"""
-        if value is None:
-            # assume 'op' is actually the value if only two args were passed
-            value = op
-            op = "="
-
-        def match(item):
-            actual = get_attr(item, attr)
-            if op == "=":
-                return actual == value
-            elif op == "in" or op == "contains":
-                return actual in value if actual is not None else False
-            elif op == ">":
-                return actual > value
-            elif op == "<":
-                return actual < value
-            elif op == ">=":
-                return actual >= value
-            elif op == "<=":
-                return actual <= value
-            elif op == "!=":
-                return actual != value
-            return False
-        if isinstance(attr, typing.Callable): match = attr
-        return PyonirCollection(filter(match, list(self.collection)))
-
-    def paginate(self, start: int, end: int, reversed: bool = False):
-        """Returns a slice of the items list"""
-        sl = self.collection.islice(start, end, reverse=reversed) if end else self.collection
-        return sl #self.collection[start:end]
-
-    def group_by(self, key: str | typing.Callable):
-        """
-        Groups items by a given attribute or function.
-        If `key` is a string, it will group by that attribute.
-        If `key` is a function, it will call the function for each item.
-        """
-        from collections import defaultdict
-        grouped = defaultdict(list)
-
-        for item in self.collection:
-            k = key(item) if callable(key) else getattr(item, key, None)
-            grouped[k].append(item)
-
-        return dict(grouped)
-
-    def paginated_collection(self, query_params=None)-> ParselyCollection | None:
-        """Paginates a list into smaller segments based on curr_pg and display limit"""
-        if query_params is None: query_params = {}
-        from pyonir import Site
-        if not Site: return None
-        request: PyonirRequest = Site.TemplateEnvironment.globals['request']
-        if not hasattr(request, 'limit'): return None
-        req_pg = get_attr(request.query_params, 'pg') or 1
-        limit = query_params.get('limit', request.limit)
-        curr_pg = int(query_params.get('pg', req_pg)) or 1
-        sort_key = query_params.get('sort_key')
-        where_key = query_params.get('where')
-        if sort_key:
-            self.collection = SortedList(self.collection, lambda x: get_attr(x, sort_key))
-        if where_key:
-            where_key = [PyonirCollection.parse_params(ex) for ex in where_key.split(',')]
-            self.collection = self.where(**where_key[0])
-        force_all = limit=='*'
-
-        max_count = len(self.collection)
-        limit = 0 if force_all else int(limit)
-        page_num = 0 if force_all else int(curr_pg)
-        start = (page_num * limit) - limit
-        end = (limit * page_num)
-        pg = (max_count // limit) + (max_count % limit > 0) if limit > 0 else 0
-
-        pag_data = self.paginate(start=start, end=end, reversed=True) if not force_all else self.collection
-
-        return ParselyCollection(**{
-            'curr_page': page_num,
-            'page_nums': [n for n in range(1, pg + 1)] if pg else None,
-            'limit': limit,
-            'max_count': max_count,
-            'items': list(pag_data)
-        })
-
-    def __len__(self):
-        return self.collection._len
-
-    def __iter__(self):
-        return iter(self.collection)
-

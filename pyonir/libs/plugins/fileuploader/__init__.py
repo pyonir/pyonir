@@ -1,4 +1,4 @@
-from pyonir.types import IPlugin, PyonirApp, PyonirPlugin
+from pyonir.types import PyonirApp, PyonirPlugin
 import os
 
 class FileUploader(PyonirPlugin):

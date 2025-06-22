@@ -2,8 +2,7 @@ import dataclasses, os
 from typing import List, Optional
 from pyonir.libs.plugins.ecommerce import Ecommerce
 from pyonir.libs.plugins.ecommerce.backend.models import Product, CartItem
-from pyonir.types import PyonirRequest, PyonirApp
-from pyonir.utilities import PyonirCollection
+from pyonir.types import PyonirRequest, PyonirApp, PyonirCollection
 
 Id: str = ''
 Qty: int = 0

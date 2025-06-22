@@ -1,14 +1,9 @@
 import os, pytz, re, json
-import typing
 from datetime import datetime
 from dataclasses import dataclass, field
-from typing import Any, Optional, Generator
 
-from PIL.ImageFile import ImageFile
-
-from .types import PyonirRequest, ParselyCollection
-from .utilities import get_attr, allFiles, deserialize_datestr, create_file, \
-    remove_html_tags, dict_to_class, get_module, PyonirCollection, cls_mapper
+from .types import PyonirRequest, ParselyCollection, PyonirCollection
+from .utilities import get_attr, get_all_files_from_dir, deserialize_datestr, create_file, get_module, cls_mapper
 
 ALLOWED_CONTENT_EXTENSIONS = ('prs', 'md', 'json', 'yaml')
 IGNORE_FILES = ('.vscode', '.vs', '.DS_Store', '__pycache__', '.git', '.', '_', '<', '>', '(', ')', '$', '!', '._')
@@ -80,6 +75,11 @@ class Page:
     file_name: str = ''
     file_path: str = ''
     contents_relpath: str = ''
+
+    def to_json(self) -> dict:
+        """Json serializable repr"""
+        return {k:v for k,v in self.__dict__.items() if k[0]!='_' and k!='app_ctx'}
+
 
 
 @dataclass
@@ -175,7 +175,7 @@ class ParselyMedia:
         from pyonir import Site
         if self.group != Site.UPLOADS_DIRNAME: self.group = f'{Site.UPLOADS_DIRNAME}/{self.group}'
         thumbs_dir = os.path.join(self.file_dirpath, self.group, Site.UPLOADS_THUMBNAIL_DIRNAME)
-        files = allFiles(str(thumbs_dir), app_ctx=self.app_ctx)
+        files = get_all_files_from_dir(str(thumbs_dir), app_ctx=self.app_ctx)
         target_name = self.file_name
         thumbs = {}
         # filter files based on name
@@ -318,6 +318,10 @@ class Parsely:
 
     def map_to_model(self, model):
         return cls_mapper(self, model)
+
+    def to_json(self) -> dict:
+        """Json serializable repr"""
+        return self.data
 
     def apply_filters(self):
         """Applies filter methods to data attributes"""

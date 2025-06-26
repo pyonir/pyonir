@@ -4,7 +4,7 @@ import typing
 from typing import Generator, Iterable, Mapping, get_origin, get_args, get_type_hints
 from collections.abc import Iterable as ABCIterable
 
-from pyonir.types import PyonirRequest
+from pyonir.types import PyonirRequest, PyonirSchema
 
 
 def is_iterable(tp):
@@ -35,21 +35,24 @@ def is_custom_class(t):
     return t.__init__.__annotations__ #isinstance(t, type) and not t.__module__ == "builtins"
 
 def cls_mapper(file_obj: any, cls: typing.Callable, from_request: PyonirRequest = None):
-    params = get_type_hints(cls)
+    if hasattr(cls, '__skip_parsely_deserialization__'): return file_obj
+    param_type_map = get_type_hints(cls)
+    is_generic = cls.__name__ == 'GenericQueryModel'
     if is_scalar_type(cls):
         return cls(file_obj)
-    if not params: return file_obj
+    if is_generic:
+        print('isgeneric', file_obj.file_name)
     mapper_keys = cls._mapper if hasattr(cls, '_mapper') else {}
     data = get_attr(file_obj, 'data') or {}
     _parsely_data_key = '.'.join(['data', get_attr(cls, '_mapper_key') or cls.__name__.lower()])
     kdata = get_attr(file_obj, _parsely_data_key)
     if kdata: data.update(**kdata)
     cls_args = {}
-    res = None
+    res = cls() if is_generic else None
     if hasattr(cls, 'from_dict'): # allows manual mapping of class instance
         return cls.from_dict(file_obj)
 
-    for param_name, param_type in params.items():
+    for param_name, param_type in param_type_map.items():
         try:
             mapper_key = get_attr(mapper_keys, param_name) or param_name
             param_value = get_attr(data, mapper_key) or get_attr(file_obj, mapper_key)
@@ -76,21 +79,22 @@ def cls_mapper(file_obj: any, cls: typing.Callable, from_request: PyonirRequest 
                 cls_args[param_name] = param_value if is_typed or is_instance else param_type(param_value)
         except Exception as e:
             raise
-    try:
-        if not from_request: res = cls(**cls_args)
-    except Exception as e:
-        raise
     if from_request: return cls_args
+    if not from_request and param_type_map: res = cls(**cls_args)
     # assign all other non-model attributes
-    if hasattr(cls, '_mapper_merge'): # auto sets properties from file obj to class instance
+    if is_generic or hasattr(cls, '_mapper_merge'):
         for key, value in data.items():
+            if not param_type_map and not hasattr(cls, key): continue # assumes a GenericQueryModel was provided
             if isinstance(getattr(cls, key, None), property): continue
-            if params.get(key) or key[0]=='_': continue
+            if param_type_map.get(key) or key[0]=='_': continue
             setattr(res, key, value)
 
-    if hasattr(file_obj, 'file_created_on'):
-        setattr(res, '@model', cls.__name__)
-        setattr(res, 'file_created_on', get_attr(file_obj, 'file_created_on'))
+    # if hasattr(file_obj, 'file_created_on'):
+    setattr(res, '@model', cls.__name__)
+    for attr in PyonirSchema.default_file_attributes:
+        v = get_attr(file_obj, attr)
+        if v is None: continue
+        setattr(res, attr, v)
 
     return res
 
@@ -108,13 +112,11 @@ def process_contents(path, app_ctx=None, file_model: any = None):
         pass
 
     key = os.path.basename(path)
-    # etype = Parsely  # ParselySchema if 'schemas' in path else Parsely
+    res = type(key, (object,), {})() # generic map
     pgs = get_all_files_from_dir(path, app_ctx=app_ctx, entry_type=file_model)
-    res = type(key, (object,), {'_update': update, '_ctx': app_ctx})()
     for pg in pgs:
-        name = getattr(pg, 'file_name', getattr(pg, 'name', None))
+        name = getattr(pg, 'file_name')
         setattr(res, name, pg)
-        # setattr(res, name, pg if file_model else dict_to_class({**pg.data, '_path': pg.file_path}, name))
     return res
 
 
@@ -137,6 +139,7 @@ def dict_to_class(data: dict, name: str = 'T'):
 
     # Assign dictionary keys as attributes of the instance
     for key, value in data.items():
+        if isinstance(getattr(cls, key, None), property): continue
         setattr(instance, key, value)
 
     return instance
@@ -271,10 +274,11 @@ def get_all_files_from_dir(abs_dirpath: str,
         if entry_type == 'path':
             return filepath
         ismedia = not filepath.endswith(ALLOWED_CONTENT_EXTENSIONS)
-        pf = Parsely(filepath, app_ctx)
+        generic_model = entry_type if entry_type and entry_type.__name__=='GenericQueryModel' else None
+        pf = Parsely(filepath, app_ctx, generic_model)
         if ismedia:
             return cls_mapper(pf, ParselyMedia)
-        return cls_mapper(pf, entry_type or Page)
+        return cls_mapper(pf, entry_type or Page ) if entry_type or pf.is_page else pf.map_to_model(None)
 
 
     def is_public(parentdir, entry=None):
@@ -409,6 +413,10 @@ def get_module(pkg_path: str, callable_name: str) -> tuple[any, typing.Callable]
 def generate_id():
     import uuid
     return str(uuid.uuid1())
+
+def generate_base64_id(value):
+    import base64
+    return base64.b64encode(value.encode('utf-8'))
 
 class pcolors:
     RESET = '\033[0m'

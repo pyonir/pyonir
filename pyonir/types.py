@@ -1,7 +1,8 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
-import typing, os
+import typing, os, sqlite3
 from enum import Enum
+from typing import Any, List, Optional, Tuple, Dict
 
 from jinja2 import Environment
 from starlette.applications import Starlette
@@ -35,6 +36,8 @@ AppCtx: list[ModuleName, RoutePath, AppContentsPath, AppSSGPath] = []
 AppRequestPaths: tuple[RoutePath, AppPaths] = '',''
 
 class PyonirSchema:
+    default_file_attributes = ['file_name','file_path','file_dirname','file_data_type','file_ctx','file_created_on']
+
     """Schema class enables validation when model class initializes"""
     # Schemas configs
     # PROTECTED_FIELD_PREFIX = '@'
@@ -56,6 +59,12 @@ class PyonirSchema:
     def __post_init__(self):
         self._validation_errors = []
         self.validate()
+
+    @staticmethod
+    def generic_query_model(model_fields: str):
+        if not model_fields: return None
+        schema_defaults = {k.strip(): None for k in PyonirSchema.default_file_attributes+model_fields.split(',')}
+        return type('GenericQueryModel', (object,), schema_defaults)
 
 @dataclass
 class PyonirOptions:
@@ -79,20 +88,23 @@ class ParselyCollection:
     items: list['Parsely'] = field(default_factory=list)
 
 class Parsely:
-    app_ctx: tuple
+    resolver: callable | None
+    app_ctx: AppCtx # application context for file
     file_path: str
-    file_dirpath: str
-    contents_relpath: str
-    file_ctx: str # application context for file
-    file_dir: str
-    file_type: str
-    file_name: str
-    file_ext: str
-    file_relpath: str
-    file_contents: str
-    file_lines: str
-    file_line_count: str
+    file_dirpath: str # path to files contents directory
+    file_contents: str # contents of a file
+    file_contents_dirpath: str # contents directory path used when querying refs
     data: dict
+    schema: any
+    is_page: bool
+    is_home: bool # is home page of site
+    file_ctx: str # the application context name
+    file_dirname: str # nearest parent directory for file
+    file_data_type: str # data type based on root contents directory name
+    file_name: str # the file name
+    file_ext: str # the file extenstion
+    file_ssg_api_dirpath: str # the files static generated api endpoint
+    file_ssg_html_dirpath: str # the files static generated html endpoint
 
 
 class PyonirCollection:
@@ -109,7 +121,11 @@ class PyonirCollection:
 
         self._query_path = ''
         key = lambda x: self.get_attr(x, sort_key or 'file_created_on')
-        self.collection = SortedList(items, key=key)
+        try:
+            # l = list(items)
+            self.collection = SortedList(items, key=key)
+        except Exception as e:
+            raise
 
     @staticmethod
     def coerce_bool(value: str):
@@ -176,14 +192,18 @@ class PyonirCollection:
 
     def where(self, attr, op="=", value=None):
         """Returns a list of items where attr == value"""
-        if value is None:
-            # assume 'op' is actually the value if only two args were passed
-            value = op
-            op = "="
+        # if value is None:
+        #     # assume 'op' is actually the value if only two args were passed
+        #     value = op
+        #     op = "="
 
         def match(item):
             actual = self.get_attr(item, attr)
-            if op == "=":
+            if not hasattr(item, attr):
+                return False
+            if actual and not value:
+                return True # checking only if item has an attribute
+            elif op == "=":
                 return actual == value
             elif op == "in" or op == "contains":
                 return actual in value if actual is not None else False
@@ -465,6 +485,49 @@ class PyonirBase:
         """The application module directory name"""
         return self.__module__.split('.').pop()
 
+
+class DBManager:
+    def __init__(self, db_path: str):
+        self.db_path = db_path
+
+    def _connect(self):
+        return sqlite3.connect(self.db_path)
+
+    def execute(self, query: str, params: Optional[Tuple[Any, ...]] = None) -> None:
+        with self._connect() as conn:
+            cur = conn.cursor()
+            cur.execute(query, params or ())
+            conn.commit()
+
+    def fetch_one(self, query: str, params: Optional[Tuple[Any, ...]] = None) -> Optional[Tuple]:
+        with self._connect() as conn:
+            cur = conn.cursor()
+            cur.execute(query, params or ())
+            return cur.fetchone()
+
+    def fetch_all(self, query: str, params: Optional[Tuple[Any, ...]] = None) -> List[Tuple]:
+        with self._connect() as conn:
+            cur = conn.cursor()
+            cur.execute(query, params or ())
+            return cur.fetchall()
+
+    def insert(self, table: str, data: Dict[str, Any]) -> None:
+        columns = ', '.join(data.keys())
+        placeholders = ', '.join(['?'] * len(data))
+        values = tuple(data.values())
+        query = f"INSERT INTO {table} ({columns}) VALUES ({placeholders})"
+        self.execute(query, values)
+
+    def update(self, table: str, data: Dict[str, Any], where: str, where_params: Tuple) -> None:
+        set_clause = ', '.join([f"{col} = ?" for col in data])
+        query = f"UPDATE {table} SET {set_clause} WHERE {where}"
+        self.execute(query, tuple(data.values()) + where_params)
+
+    def delete(self, table: str, where: str, where_params: Tuple) -> None:
+        query = f"DELETE FROM {table} WHERE {where}"
+        self.execute(query, where_params)
+
+
 class PyonirPlugin(PyonirBase):
 
     def __init__(self, app: PyonirApp, app_entrypoint: str = None):
@@ -474,6 +537,7 @@ class PyonirPlugin(PyonirBase):
         self.name: str = os.path.basename(self.app_dirpath) # web url to serve application pages
         self.routing_paths: set = set()
         self.CONFIG_FILENAME = self.module
+        self.available_models = {}
 
     @property
     def request_paths(self):
@@ -510,6 +574,12 @@ class PyonirPlugin(PyonirBase):
         for path in dir_paths:
             if path in self.app.TemplateEnvironment.loader.searchpath: continue
             self.app.TemplateEnvironment.loader.searchpath.append(path)
+
+    def insert(self, file_path: str, contents: dict) -> Parsely:
+        """Creates a new file"""
+        from pyonir import Parsely
+        contents = Parsely.serializer(contents) if isinstance(contents, dict) else contents
+        return Parsely.create_file(file_path, contents, app_ctx=self.app_ctx)
 
     @staticmethod
     def query_files(dir_path: str, app_ctx: tuple, model_type: any = None) -> list[Parsely]:

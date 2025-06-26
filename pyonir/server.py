@@ -240,9 +240,8 @@ def init_pyonir_endpoints(app: PyonirApp):
     for r, static_abspath in ((app.ASSETS_ROUTE, app_theme.static_dirpath), (app.UPLOADS_ROUTE, app.uploads_dirpath)):
         if not os.path.exists(static_abspath): continue
         add_route(None, r, static_path=static_abspath)
-    # add_route(pyonir_form_handler, "/api/form", methods=['POST'])
-    # add_route(pyonir_sse_handler, "/syssse", sse=True)
-    # add_route(pyonir_ws_handler, "/sysws", ws=True)
+
+    add_route(pyonir_ws_handler, "/sysws", ws=True)
     add_route(pyonir_index, "/", methods='*')
     add_route(pyonir_index, "/{path:path}", methods='*')
 
@@ -363,15 +362,12 @@ def add_route(dec_func: typing.Callable,
         if callable(route_func):
             is_async = inspect.iscoroutinefunction(route_func)
             # is_asyncgen = inspect.isasyncgenfunction(route_func)
-            # route = Site.server.url_map.get(route_func.__name__, {})
-            # route_params = {k: v for k, v in route.get('params',route_func.__annotations__).items() if k!='return'}
-            # full context for mapping route parameters by type annotation
+
             default_args = dict(typing.get_type_hints(route_func))
             default_args.update(**(pyonir_request.path_params))
             default_args.update(**pyonir_request.query_params.__dict__)
             default_args.update(**pyonir_request.form)
             args = cls_mapper(default_args, route_func, from_request=pyonir_request)
-            # args = {key: request_mapper(key, value, route_func, pyonir_request) for key, value in default_args.items() if key in route_params}
             pyonir_request.router_args = args
 
             # Resolve route decorator methods
@@ -396,7 +392,8 @@ def add_route(dec_func: typing.Callable,
             return Site.server.serve_redirect(pyonir_request.redirect)
 
         return build_response(pyonir_request)
-
+    dec_wrapper.__name__ = dec_func.__name__
+    dec_wrapper.__doc__ = dec_func.__doc__
     Site.server.add_route(path, dec_wrapper, methods=methods)
 
 
@@ -488,6 +485,12 @@ def generate_nginx_conf(app: PyonirApp):
 
     create_file(app.app_nginx_conf_filepath, nginxconf, False)
 
+def gather_file_based_routing(app: PyonirApp):
+    from pyonir.types import PyonirCollection, PyonirSchema
+    router_pages = PyonirCollection.query(app.pages_dirpath, app_ctx=app.app_ctx,
+                                          include_only="index.md")
+    router_pages = list(router_pages.where('@routes'))
+    pass
 
 def start_uvicorn_server(app: PyonirApp, endpoints: 'Endpoints'):
     """Starts the webserver"""
@@ -506,9 +509,9 @@ def start_uvicorn_server(app: PyonirApp, endpoints: 'Endpoints'):
         uvicorn_options['uds'] = app.app_socket_filename
 
     # Initialize routers
+    gather_file_based_routing(app)
     register_endpoints(endpoints)
     init_pyonir_endpoints(app)
-    # init_controllers(self)
     print(f"/************** ASGI APP SERVER RUNNING on {'http' if app.is_dev else 'sock'} ****************/")
     print(f"\
     \n\t- App env: {'DEV' if app.is_dev else 'PROD'}\

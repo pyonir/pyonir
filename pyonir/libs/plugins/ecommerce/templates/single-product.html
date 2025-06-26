@@ -1,16 +1,34 @@
 
 {% block content %}
 {% set product = page.product %}
+<style>
+    product form {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    }
+</style>
 <product>
     <product-image>
         <img src="{{product.images[0]}}" alt="">
     </product-image>
     <product-title>{{product.name}}</product-title>
     <product-price>${{product.price}}</product-price>
-    <form action="/api/my-shop/add_to_cart" method="POST">
+    <form action="/api/my-shop/add_to_cart" method="POST" class="product-form">
         <input type="hidden" name="redirect" value="{{request.raw_path}}">
         <input type="hidden" name="product_id" value="{{product.product_id}}">
         <input type="number" name="quantity" value="1">
+        {% if product.variations %}
+        {% for vtype, variations in product.variations.items() %}
+        <label for="{{vtype}}">{{vtype | title}}</label>
+        <select name="attributes.{{vtype}}" id="{{vtype}}">
+            <option value="">Available a {{vtype}}</option>
+            {% for variation in variations %}
+            <option value="{{variation.name}}">{{variation.name | title}}</option>
+            {% endfor %}
+        </select>
+        {% endfor %}
+        {% endif %}
         <button>Add To Cart</button>
     </form>
 </product>

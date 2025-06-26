@@ -21,18 +21,41 @@ class ProductService:
 
         # Setup variation dirpaths
         self.variations_dirpath = os.path.join(ecommerce_app.contents_dirpath, 'variations')
+        self.product_variant_dirpath = os.path.join(ecommerce_app.contents_dirpath, 'product_variants')
         self.app_variations_dirpath = os.path.join(app_ecommerce_contents_dirpath, 'variations')
+        self.app_product_variant_dirpath = os.path.join(app_ecommerce_contents_dirpath, 'product_variants')
+
+        self.all_products = self.shop_app.query_files(
+            self.products_dirpath,
+            self.shop_app.app_ctx,
+            model_type=Product
+        )
+
+    def generate_product_variant(self, product_id: str) -> Optional[Product]:
+        product = getattr(self.all_products, product_id)
+        if product:
+            variant_id, variant_data, skus = product.generate_variants()
+            self.add_product_variant(variant_id, variant_data)
+            return skus
+
+    def add_product(self, product_id: str, product_data: dict) -> str:
+        """
+        Add a new product to the product catalog.
+        """
+        new_product_path = os.path.join(self.products_dirpath, product_id)
+        new_product = self.shop_app.insert(new_product_path, product_data)
+        print(f'New product created! {product_id}')
+        return f'New product created! {product_id}'
 
 
-    def add_product(self, product_id: str, name: str, price: float, description: str) -> str:
+    def add_product_variant(self,  variant_id: str, variant_data: dict = None) -> str:
         """
-        Add a new product to the catalog.
+        Add a new product variant into the inventory catalog.
         """
-        # product = Product(product_id, name, price, stock)
-        # print(f'New product created! {product.name}')
-        # return f'New product created! {product.name}'
-        print(f'New product created! {name}')
-        return f'New product created! {name}'
+        new_product_variant_path = os.path.join(self.product_variant_dirpath, variant_id)+'.md'
+        new_product = self.shop_app.insert(new_product_variant_path, variant_data)
+        print(f'New product variant created! {variant_id}')
+        return f'New product variant created for {variant_id}!'
 
 
     def remove_product(self, product_id: str) -> None:
@@ -54,7 +77,13 @@ class ProductService:
         Returns:
             List[Product]: A list of product instances.
         """
-        pass
+        self.all_products = self.shop_app.query_files(
+            self.products_dirpath,
+            self.shop_app.app_ctx,
+            model_type=Product
+        )
+        products = list(self.all_products.__dict__.values())
+        return products
 
     def get_product(self, product_id: str) -> Optional[Product]:
         """
@@ -63,11 +92,67 @@ class ProductService:
         Returns:
             Product or None: The product instance if found, else None.
         """
-        all_products = self.shop_app.collect_dir_files(self.shop_app.app_products_dirpath, self.shop_app.files_ctx)
-        return getattr(all_products, product_id)
-        # product = Product(product_id, 'fooname', 7, 'just a demo drink')
-        # return product
+        product = getattr(self.all_products, product_id)
+        self.generate_product_variant(product.product_id)
+        return product
 
+class InventoryService:
+
+    def __init__(self, ecommerce_app: Ecommerce, iapp: PyonirApp):
+        # build alternate path for contents and templates
+        """
+        Initialize an inventory store to manage product stock levels.
+        """
+        self.shop_app = ecommerce_app
+        self.inventory_dirpath = os.path.join(ecommerce_app.contents_dirpath, 'inventory')
+        pass
+
+    def add_stock(self, product_id: str, quantity: int) -> None:
+        """
+        Add new stock for a given product.
+
+        Parameters:
+        - product_id: The ID of the product.
+        - quantity: Number of units to add.
+        """
+        pass
+
+    def reduce_stock(self, product_id: str, quantity: int) -> None:
+        """
+        Deduct a specific quantity of stock for a product.
+
+        Parameters:
+        - product_id: The ID of the product.
+        - quantity: Number of units to deduct.
+        """
+        pass
+
+    def get_stock(self, product_id: str) -> int:
+        """
+        Get the current stock level for a product.
+
+        Returns:
+        - int: Current quantity in stock.
+        """
+        pass
+
+    def is_in_stock(self, product_id: str, required_quantity: int) -> bool:
+        """
+        Check whether the required quantity is available for a product.
+
+        Returns:
+        - bool: True if enough stock exists, False otherwise.
+        """
+        pass
+
+    def list_stock_levels(self) -> dict:
+        """
+        Return a dictionary mapping product IDs to their current stock levels.
+
+        Returns:
+        - dict: {product_id: stock_quantity}
+        """
+        pass
 
 class UserService:
     def __init__(self, ecommerce_app: Ecommerce, iapp: PyonirApp = None): self.shop_app = ecommerce_app

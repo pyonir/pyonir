@@ -1,7 +1,7 @@
-form.title:File Uploader Plugin
+form.title: File Uploader Plugin
 form.type: media
-form.action:/api/demo-uploads
-form.method:POST
+form.action: /api/demo-uploads
+form.method: POST
 form.inputs:-
     label: Gallery Folder
     type: text

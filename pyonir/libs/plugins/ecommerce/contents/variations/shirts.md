@@ -11,7 +11,7 @@ shirts:-
     name: jersey
     cost: 5
     -
-    name: tank tops/sleeveless
+    name: tank tops
     cost: 2
 
     

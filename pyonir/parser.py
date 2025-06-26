@@ -2,8 +2,8 @@ import os, pytz, re, json
 from datetime import datetime
 from dataclasses import dataclass, field
 
-from .types import PyonirRequest, ParselyCollection, PyonirCollection
-from .utilities import get_attr, get_all_files_from_dir, deserialize_datestr, create_file, get_module, cls_mapper
+from .types import PyonirRequest, ParselyCollection, PyonirCollection, PyonirSchema
+from .utilities import dict_to_class, get_attr, get_all_files_from_dir, deserialize_datestr, create_file, get_module, cls_mapper
 
 ALLOWED_CONTENT_EXTENSIONS = ('prs', 'md', 'json', 'yaml')
 IGNORE_FILES = ('.vscode', '.vs', '.DS_Store', '__pycache__', '.git', '.', '_', '<', '>', '(', ')', '$', '!', '._')
@@ -11,9 +11,9 @@ IGNORE_FILES = ('.vscode', '.vs', '.DS_Store', '__pycache__', '.git', '.', '_', 
 REG_ILN_LIST = r'([-$@\s*=\w.]+)(\:-)(.*)'
 REG_MAP_LST = r'(^[-$@\s*=\w.]+)(\:[`:`-]?)(.*)'
 REG_METH_ARGS = r"\(([^)]*)\)"
-DICT_DELIM = ":"
+DICT_DELIM = ": "
 LST_DLM = ":-"
-STR_DLM = ":`"
+STR_DLM = ":` "
 ILN_DCT_DLM = ":: "
 BLOCK_PREFIX_STR = "==="
 LOOKUP_EMBED_PREFIX = '$'
@@ -191,16 +191,11 @@ class Parsely:
     """Parsely is a static file parser"""
     _Filters = {'md': parse_markdown}  # Global filters that modify scalar values
 
-    def process_ctx(self, app_ctx):
-        ctx_dir, ctx_url, ctx_dirpath, ctx_staticpath = app_ctx
-        _, _, content_dirpath = self.file_path.partition(ctx_dirpath)
-        file_name, file_ext = os.path.splitext(os.path.basename(content_dirpath))
-        content_dirpath = content_dirpath.lstrip(os.path.sep).rstrip(file_ext)
-        return ctx_url, ctx_dir, ctx_dirpath, ctx_staticpath, content_dirpath, file_name, file_ext
-
-    def __init__(self, abspth: str, app_ctx=None):
+    def __init__(self, abspth: str, app_ctx=None, generic_query_model = None):
         from pyonir import Site
         assert abspth is not None, f"Parsely was not provided. {abspth} is not a valid string!"
+        __skip_parsely_deserialization__ = generic_query_model and hasattr(generic_query_model, '__skip_parsely_deserialization__')
+        self._generic_query_model = generic_query_model # when available this property will only process values in model
         self._cursor = None
         self._blob_keys = []
         self.resolver = None
@@ -216,9 +211,9 @@ class Parsely:
         self.schema = None
         ctx_url, ctx_name, ctx_dirpath, ctx_staticpath, contents_relpath, file_name, file_ext = self.process_ctx(app_ctx)
         content_type, *content_subs = os.path.dirname(contents_relpath).split(os.path.sep) # directory at root of contents scope
-        is_page = ctx_url=='' and content_type in (Site.PAGES_DIRNAME, Site.API_DIRNAME)
-
+        is_page = content_type in (Site.PAGES_DIRNAME, Site.API_DIRNAME)
         self.file_contents_dirpath =  ctx_dirpath # contents directory path used when querying refs
+        self.is_page = is_page
         self.is_home = is_page and contents_relpath == f'{Site.PAGES_DIRNAME}/index'
         self.file_ctx = ctx_name # the application context name
         self.file_dirname = os.path.basename(self.file_dirpath) # nearest parent directory for file
@@ -226,18 +221,17 @@ class Parsely:
         self.file_name = file_name
         self.file_ext = file_ext.lstrip('.')
 
-        # page attributes
         surl = re.sub(fr'\b{Site.PAGES_DIRNAME}/\b|\bindex\b', '', contents_relpath)
-        slug = f'{ctx_url}/{surl}'.lstrip('/').lower()
+        slug = f'{ctx_url}/{surl}'.lstrip('/').rstrip('/').lower()
         url = '/' if self.is_home else '/' + slug
-        # if self.is_home: print(ctx_name, contents_relpath, slug)
-
-        self.data['url']  = url
-        self.data['slug'] = slug
-        self.data['tags'] = content_subs
+        # page attributes
+        if is_page:
+            self.data['url']  = url
+            self.data['slug'] = slug
+            self.data['tags'] = content_subs
         self.file_ssg_api_dirpath = os.path.join(ctx_staticpath, 'api', slug)
         self.file_ssg_html_dirpath = os.path.join(ctx_staticpath, slug)
-
+        if __skip_parsely_deserialization__: return
         self.deserializer()
         self.apply_filters()
 
@@ -275,7 +269,14 @@ class Parsely:
     @property
     def canonical(self):
         from pyonir import Site
-        return f"{Site.origin}{self.data.get('url')}"
+        return f"{Site.origin}{self.data.get('url')}" if Site else None
+
+    def process_ctx(self, app_ctx):
+        ctx_dir, ctx_url, ctx_dirpath, ctx_staticpath = app_ctx
+        _, _, content_dirpath = self.file_path.partition(ctx_dirpath)
+        file_name, file_ext = os.path.splitext(os.path.basename(content_dirpath))
+        content_dirpath = content_dirpath.lstrip(os.path.sep).rstrip(file_ext)
+        return ctx_url, ctx_dir, ctx_dirpath, ctx_staticpath, content_dirpath, file_name, file_ext
 
     def set_taxonomy(self) -> list[str] | None:
         if not self.file_exists: return None
@@ -317,6 +318,9 @@ class Parsely:
         }
 
     def map_to_model(self, model):
+        if not model:
+            file_props = {k: v for k,v in self.__dict__.items() if k in PyonirSchema.default_file_attributes}
+            return dict_to_class({**self.data, **file_props, '@model': 'GenericQueryModel'}, self.file_data_type)
         return cls_mapper(self, model)
 
     def to_json(self) -> dict:
@@ -359,22 +363,24 @@ class Parsely:
 
         pkg = resolver_path.split('.')
         meth_name = pkg.pop()
-        isplugin: PyonirPlugin = list(filter(lambda p: p.module == pkg[0], Site.available_plugins))
-        if len(isplugin): isplugin = isplugin[0]
-        if isplugin:
-            pkg.pop(0)
-            resolver = get_attr(isplugin, resolver_path)
-            if not resolver:
-                mod_path = os.path.join(isplugin.resolvers_dirpath, *pkg)+'.py'
-                module, resolver = get_module(mod_path, meth_name)
-        elif pkg[0] == 'pyonir':
+        is_system = pkg[0] == 'pyonir'
+        if is_system:
             mod_path = os.path.join(Site.pyonir_path,'server.py')
             module, resolver = get_module(mod_path, meth_name)
             # resolver = get_attr(Site.server.resolvers, resolver_path)
         else:
-            pkg_path = os.path.join(Site.backend_dirpath, *pkg) + '.py'
-            if not os.path.exists(pkg_path): pkg_path = os.path.join(Site.backend_dirpath, *pkg, '__init__.py')
-            module, resolver = get_module(pkg_path, meth_name)
+            isplugin: PyonirPlugin = list(filter(lambda p: p.module == pkg[0], Site.available_plugins))
+            if len(isplugin): isplugin = isplugin[0]
+            if isplugin:
+                pkg.pop(0)
+                resolver = get_attr(isplugin, resolver_path)
+                if not resolver:
+                    mod_path = os.path.join(isplugin.resolvers_dirpath, *pkg)+'.py'
+                    module, resolver = get_module(mod_path, meth_name)
+            else:
+                pkg_path = os.path.join(Site.backend_dirpath, *pkg) + '.py'
+                if not os.path.exists(pkg_path): pkg_path = os.path.join(Site.backend_dirpath, *pkg, '__init__.py')
+                module, resolver = get_module(pkg_path, meth_name)
         request.type = resolver_obj.get('headers', {}).get('accept', request.type)
         self.resolver = resolver
 
@@ -422,7 +428,8 @@ class Parsely:
                         ma = re.search(REG_METH_ARGS, ln_frag)
                         methArgs = ma.group(1)
                         ln_frag = ln_frag.replace(ma.group(), '')
-
+                    if ln_frag.endswith(DICT_DELIM.strip()):
+                        return (ln_frag[:-1], DICT_DELIM, "") + (methArgs,)
                     iln_delim = [x for x in (
                         (ln_frag.find(STR_DLM), STR_DLM),
                         (ln_frag.find(LST_DLM), LST_DLM),
@@ -449,7 +456,10 @@ class Parsely:
                         self.update_nested(None, _c, pv)
                     parsed_val = _c or pv
 
-            return parsed_key, val_type, self.process_value_type(parsed_val), methargs
+            skip_line = hasattr(self._generic_query_model, parsed_key) if parsed_key and self._generic_query_model else None
+            parsed_val = self.process_value_type(parsed_val) if not skip_line else parsed_val
+
+            return parsed_key, val_type, parsed_val, methargs
 
         def get_container_type(delim):
             if LST_DLM == delim:
@@ -554,18 +564,21 @@ class Parsely:
 
             def parse_ref_to_files(filepath, as_dir=0):
                 # use proper app context for path reference outside of scope is always the root level
-                if as_dir:
+                # Ref parameters with model will return a generic model to represent the data value
+                generic_query_model = PyonirSchema.generic_query_model(generic_model_properties)
 
+                if as_dir:
                     file_gen = PyonirCollection.query(filepath,
                                         app_ctx=self.app_ctx,
                                         force_all=return_all_files,
+                                        data_model=generic_query_model,
                                         exclude_file=self.file_name + '.' + self.file_ext)
-                    return file_gen.paginated_collection(query_params)
-
-                rtn_key = has_attr_path or 'data'
-                p = Parsely(filepath, self.app_ctx)
-                d = get_attr(p, rtn_key) or p
-                EmbeddedTypes[filepath] = d
+                    d = file_gen.paginated_collection(query_params)
+                else:
+                    rtn_key = has_attr_path or 'data'
+                    p = Parsely(filepath, self.app_ctx)
+                    d = get_attr(p, rtn_key) or p
+                # EmbeddedTypes[filepath] = d
                 return d
 
             cvaluestr = valuestr.strip()
@@ -586,6 +599,7 @@ class Parsely:
                 query_params = dict(map(lambda x: x.split("="), query_params.split('&')) if query_params else '')
                 use_rel = valuestr.startswith('./')
                 return_all_files = valuestr.endswith('/*')
+                generic_model_properties = query_params.get('model')
                 valuestr = valuestr.replace('../', '').replace('/*', '')
                 dir_root = self.file_contents_dirpath if not use_rel else self.file_dirpath
                 # dir_root = os.path.dirname(self.file_dirpath) if self.file_ctx and use_rel else self.file_dirpath
@@ -595,8 +609,7 @@ class Parsely:
                         'ISSUE': f'FileNotFound while processing {cvaluestr}',
                         'SOLUTION': f'Make sure the `{lookup_fpath}` file exists. Note that only valid md and json files can be processed.'
                     })
-                if os.path.isdir(lookup_fpath): return parse_ref_to_files(lookup_fpath, 1)
-                return EmbeddedTypes.get(lookup_fpath, parse_ref_to_files(lookup_fpath))
+                return EmbeddedTypes.get(lookup_fpath, parse_ref_to_files(lookup_fpath, os.path.isdir(lookup_fpath)))
 
         return valuestr
 
@@ -770,21 +783,26 @@ class Parsely:
         res.data = input_src
         return res
 
+    @classmethod
+    def create_file(cls, file_path: str, contents: dict, app_ctx: tuple) -> 'Parsely':
+        """Creates new file on filesystem"""
+        dir_path = os.path.dirname(file_path)
+        is_json = file_path.endswith('json')
+        if dir_path and not os.path.exists(dir_path):
+            os.makedirs(dir_path)
+        new_file = create_file(
+            file_path,
+            contents,
+            is_json=is_json,
+            mode='w+')
+        new_parsely_file = cls(file_path, app_ctx) if new_file else None
+        return new_parsely_file
+
     def throw_error(self, message: dict):
         msg = {
             'ERROR': f'{self.file_path} found an error on line {self._cursor}',
             'LINE': f'{self.file_lines[self._cursor]}', **message}
         return msg
-
-    # def set_schema(self, schema_name: str | None = None):
-    #     """Set Schema and schema model for file type or schema_name argument"""
-    #     from pyonir import Site
-    #     schema_path = os.path.join(Site.schemas_dirpath, (schema_name or self.file_type) + '.md')
-    #     # schema = Schema(schema_path, self.app_ctx)
-    #     pass
-    #     # if schema.file_exists:
-    #     #     self.schema = schema
-    #     #     self.schema.map_input_to_model(self)
 
     def refresh_data(self):
         """Parses file and update data values"""

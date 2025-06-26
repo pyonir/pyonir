@@ -4,7 +4,7 @@
 <products-listing>
 {% for item in page.entries.items %}
 <product>
-<a href="?product_id={{item.file_name}}">
+<a href="?product_id={{item.product_id}}">
     <product-image>
         <img src="{{item.images[0]}}" alt="">
     </product-image>

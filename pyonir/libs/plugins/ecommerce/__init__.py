@@ -11,12 +11,14 @@ class Ecommerce(PyonirPlugin):
         """
         Initialize the online shop and compose service modules.
         """
-        from pyonir.libs.plugins.ecommerce.backend.services import ProductService, UserService, CartService, OrderService, PaymentService
+        from pyonir.libs.plugins.ecommerce.backend.services import InventoryService, ProductService, UserService, CartService, OrderService, PaymentService
+        from pyonir.libs.plugins.ecommerce.backend.models import Product
         self.FRONTEND_DIRNAME = 'templates'
         super().__init__(app, __file__)
 
         # Setup services
         self.productService = ProductService(self, app)
+        self.inventoryService = InventoryService(self, app)
         self.userService = UserService(self, app)
         self.cartService = CartService(self, app)
         self.orderService = OrderService(self, app)
@@ -24,7 +26,7 @@ class Ecommerce(PyonirPlugin):
         app.TemplateEnvironment.add_filter(babelmoney)
 
         plugin_template_paths = [self.frontend_dirpath]
-        should_install_locally = self.__name__ in app.configs.app.enabled_plugins
+        should_install_locally = None #self.__class__.__name__ in app.configs.app.enabled_plugins
 
 
         if should_install_locally:
@@ -50,6 +52,9 @@ class Ecommerce(PyonirPlugin):
 
         # Register plugin template directory paths
         self.register_templates(plugin_template_paths)
+        # app.available_models.update({
+        #     "Product": Product
+        # })
 
     async def on_request(self, request: PyonirRequest, app: PyonirApp):
         if request.method == 'POST': return

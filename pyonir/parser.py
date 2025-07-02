@@ -275,7 +275,7 @@ class Parsely:
         ctx_dir, ctx_url, ctx_dirpath, ctx_staticpath = app_ctx
         _, _, content_dirpath = self.file_path.partition(ctx_dirpath)
         file_name, file_ext = os.path.splitext(os.path.basename(content_dirpath))
-        content_dirpath = content_dirpath.lstrip(os.path.sep).rstrip(file_ext)
+        content_dirpath = content_dirpath.lstrip(os.path.sep).replace(file_ext,'')
         return ctx_url, ctx_dir, ctx_dirpath, ctx_staticpath, content_dirpath, file_name, file_ext
 
     def set_taxonomy(self) -> list[str] | None:
@@ -572,7 +572,8 @@ class Parsely:
                                         app_ctx=self.app_ctx,
                                         force_all=return_all_files,
                                         data_model=generic_query_model,
-                                        exclude_file=self.file_name + '.' + self.file_ext)
+                                        # Ignore files with same name and index files
+                                        exclude_file=(self.file_name + '.' + self.file_ext, 'index.md'))
                     d = file_gen.paginated_collection(query_params)
                 else:
                     rtn_key = has_attr_path or 'data'
@@ -587,13 +588,12 @@ class Parsely:
             has_dir_ref = valuestr.startswith(LOOKUP_DIR_PREFIX)
             if '{{' in valuestr:
                 valuestr = self._Filters['jinja'](valuestr, self.data)
-            if has_file_ref:
-                return get_attr(self, valuestr)
-            elif has_dir_ref:
+            if valuestr.startswith('$') and '{' in valuestr:
+                valuestr = self._Filters['pyformat'](valuestr[1:] if not has_dir_ref else valuestr, self.__dict__)
+            if has_dir_ref:
                 query_params = valuestr.split("?").pop() if "?" in valuestr else False
                 has_attr_path = valuestr.split("#")[-1] if "#" in valuestr else ''
                 valuestr = valuestr.replace(f"{LOOKUP_DIR_PREFIX}/", "") \
-                    .replace(f"{LOOKUP_FILE_PREFIX}/", "") \
                     .replace(f"?{query_params}", "") \
                     .replace(f'#{has_attr_path}', '')
                 query_params = dict(map(lambda x: x.split("="), query_params.split('&')) if query_params else '')
@@ -611,7 +611,7 @@ class Parsely:
                     })
                 return EmbeddedTypes.get(lookup_fpath, parse_ref_to_files(lookup_fpath, os.path.isdir(lookup_fpath)))
 
-        return valuestr
+        return valuestr.lstrip('$')
 
     @staticmethod
     def serializer(json_map: any, namespace: list = [], inline_mode: bool = False, filter_params=None) -> str:

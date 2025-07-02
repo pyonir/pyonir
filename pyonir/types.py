@@ -103,6 +103,7 @@ class Parsely:
     file_data_type: str # data type based on root contents directory name
     file_name: str # the file name
     file_ext: str # the file extenstion
+    file_exists: bool # determines if file exists on filesystem
     file_ssg_api_dirpath: str # the files static generated api endpoint
     file_ssg_html_dirpath: str # the files static generated html endpoint
 
@@ -161,7 +162,7 @@ class PyonirCollection:
              data_model: any = None,
              include_only: str = None,
              exclude_dirs: list[str] = None,
-             exclude_file: str = None,
+             exclude_file: list[str] = None,
              force_all: bool = True,
               sort_key: str = None):
         """queries the file system for list of files"""
@@ -301,7 +302,7 @@ class PyonirRequest:
         self.raw_path = "/".join(str(self.server_request.url).split(str(self.server_request.base_url)))
         self.method = self.server_request.method
         self.path = self.server_request.url.path
-        self.path_params = self.server_request.path_params
+        self.path_params = dict(self.server_request.path_params)
         self.url = f"{self.path}"
         self.slug = self.path.lstrip('/').rstrip('/')
         self.query_params = self.get_params(self.server_request.url.query)
@@ -375,10 +376,9 @@ class PyonirRequest:
     def redirect(self):
         return self.form.get('redirect', self.form.get('redirect_to'))
 
-    def derive_status_code(self, is_system_control: bool):
+    def derive_status_code(self, is_router_method: bool):
         """Create status code for web request based on a file's availability, status_code property"""
-        file_code = self.file.data.get('status_code', 200)
-        self.status_code = 404 if not self.file.file_exists else file_code
+        self.status_code = 200 if self.file.file_exists or is_router_method else 404
         # return file_code if self.file and self.file.file_exists or not is_system_control else 404
 
     def render_error(self):
@@ -613,6 +613,7 @@ class PyonirApp(PyonirBase):
         self.SESSION_KEY = f"pyonir_{self.app_name}"
         self.configs = None
         Parsely._Filters['jinja'] = self.parse_jinja
+        Parsely._Filters['pyformat'] = self.parse_format
 
     @property
     def request_paths(self) -> AppRequestPaths:
@@ -760,14 +761,17 @@ class PyonirApp(PyonirBase):
         from pyonir.libs.plugins.forms import Forms
         from pyonir.libs.plugins.navigation import Navigation
         from pyonir.libs.plugins.fileuploader import FileUploader
-        from pyonir.utilities import process_contents
+        from pyonir.utilities import process_contents, load_env
         if plugins is None:
             plugins = [Ecommerce, Forms, Navigation, FileUploader]
         from .server import (setup_starlette_server, start_uvicorn_server,)
+
         # Initialize Server instance
         self.server = setup_starlette_server(self)
         # Initialize Application settings and templates
         self.configs = process_contents(os.path.join(self.contents_dirpath, self.CONFIGS_DIRNAME), self.app_ctx)
+        envopts = load_env(os.path.join(self.app_dirpath, '.env'))
+        setattr(self.configs, 'env', envopts)
         self.setup_templates()
         self.install_plugins(plugins)
 

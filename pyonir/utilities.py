@@ -89,12 +89,12 @@ def cls_mapper(file_obj: any, cls: typing.Callable, from_request: PyonirRequest 
             if param_type_map.get(key) or key[0]=='_': continue
             setattr(res, key, value)
 
-    # if hasattr(file_obj, 'file_created_on'):
-    setattr(res, '@model', cls.__name__)
-    for attr in PyonirSchema.default_file_attributes:
-        v = get_attr(file_obj, attr)
-        if v is None: continue
-        setattr(res, attr, v)
+    if res and hasattr(file_obj,'is_page') and file_obj.is_page:
+        setattr(res, '@model', cls.__name__)
+        for attr in PyonirSchema.default_file_attributes:
+            v = get_attr(file_obj, attr)
+            if v is None: continue
+            setattr(res, attr, v)
 
     return res
 
@@ -266,7 +266,7 @@ def get_all_files_from_dir(abs_dirpath: str,
     from .parser import Page, Parsely, ParselyMedia
     from .parser import ALLOWED_CONTENT_EXTENSIONS, IGNORE_FILES
     if abs_dirpath in (exclude_dirs or []): return []
-
+    if exclude_file is None: exclude_file = []
     _, _, pages_dirpath, _ = app_ctx
 
     def get_datatype(parentdir, rel_filepath):
@@ -305,7 +305,7 @@ def get_all_files_from_dir(abs_dirpath: str,
 
         for filename in files:
             include_only_file = (include_only and filename != include_only)
-            if filename == exclude_file or include_only_file: continue
+            if filename in exclude_file or include_only_file: continue
             if not force_all and not filename.endswith(ALLOWED_CONTENT_EXTENSIONS): continue
             if not is_public(parentdir, filename) or filename in IGNORE_FILES: continue
             yield get_datatype(parentdir, filename)
@@ -376,7 +376,7 @@ def json_serial(obj):
     from .parser import Parsely
     if isinstance(obj, datetime):
         return obj.isoformat()
-    elif isinstance(obj, Generator):
+    elif isinstance(obj, Generator) or hasattr(obj, 'mapping'):
         return list(obj)
     elif isinstance(obj, Parsely):
         return obj.data
@@ -417,6 +417,39 @@ def generate_id():
 def generate_base64_id(value):
     import base64
     return base64.b64encode(value.encode('utf-8'))
+
+def load_env(path=".env") -> object:
+    from collections import defaultdict
+
+    def set_nested(d, keys, value):
+        """Helper to set value in nested dictionary using dot-separated keys."""
+        for key in keys[:-1]:
+            d = d.setdefault(key, {})
+        d[keys[-1]] = value
+
+    env_data = defaultdict(dict)
+
+    with open(path) as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if "=" not in line:
+                continue
+
+            key, value = line.split("=", 1)
+            key = key.strip()
+            value = value.strip()
+
+            # Set in os.environ (flat)
+            os.environ.setdefault(key, value)
+
+            # Set in nested dict (structured)
+            keys = key.split(".")
+            set_nested(env_data, keys, value)
+
+    return dict_to_class(env_data, 'env')
+
 
 class pcolors:
     RESET = '\033[0m'

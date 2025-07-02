@@ -219,19 +219,10 @@ def url_for(name, attr='path'):
     return urlmap.get(name, {}).get(attr)
 
 
-def register_endpoints(endpoints: 'Endpoints'):
+def init_app_endpoints(endpoints: 'Endpoints'):
     for endpoint, routes in endpoints:
         for path, func, methods, *opts in routes:
-            args = opts[0] if opts else {}
-            kwargs = {'models': {}}
-            for k, v in args.items():
-                if k in ('ws', 'sse', 'static_path'):
-                    kwargs[k] = v
-                kwargs['models'].update({k: v})
-            if isinstance(path, list):
-                mount = path.pop(0)
-            else:
-                add_route(func, f'{endpoint}{path}', methods, **kwargs)
+            _add_route(func, f'{endpoint}{path}', methods, *opts)
             pass
 
 
@@ -239,11 +230,11 @@ def init_pyonir_endpoints(app: PyonirApp):
     app_theme = app.TemplateEnvironment.themes.active_theme
     for r, static_abspath in ((app.ASSETS_ROUTE, app_theme.static_dirpath), (app.UPLOADS_ROUTE, app.uploads_dirpath)):
         if not os.path.exists(static_abspath): continue
-        add_route(None, r, static_path=static_abspath)
+        _add_route(None, r, static_path=static_abspath)
 
-    add_route(pyonir_ws_handler, "/sysws", ws=True)
-    add_route(pyonir_index, "/", methods='*')
-    add_route(pyonir_index, "/{path:path}", methods='*')
+    _add_route(pyonir_ws_handler, "/sysws", ws=True)
+    _add_route(pyonir_index, "/", methods='*')
+    _add_route(pyonir_index, "/{path:path}", methods='*')
 
 
 # def get_params(url):
@@ -266,12 +257,21 @@ def process_sse(data: dict) -> str:
     return sse_payload + "\n"
 
 
-def serve_favicon(app):
+def serve_favicon(app: PyonirApp):
     from starlette.responses import FileResponse
-    return FileResponse(os.path.join(app.theme_static_dirpath,'favicon.ico'), 200)
+    return FileResponse(os.path.join(app.TemplateEnvironment.themes.active_theme.static_dirpath,'favicon.ico'), 200)
 
+def route(dec_func: typing.Callable | None,
+               path: str = '',
+               methods=None,
+               models: dict = None,
+               auth: bool = None,
+               ws: bool = None,
+               sse: bool = None,
+               static_path: str = None) -> typing.Callable | None:
+    return _add_route(dec_func, path, methods, models, auth, ws, sse, static_path)
 
-def add_route(dec_func: typing.Callable,
+def _add_route(dec_func: typing.Callable | None,
                path: str = '',
                methods=None,
                models: dict = None,
@@ -303,7 +303,7 @@ def add_route(dec_func: typing.Callable,
     route_path = path.split('/{')[0]
     name = route_name
     endpoint_route = path.split('/', 1)[0]
-    is_pyonir_default = dec_func.__name__ == 'pyonir_index'
+    default_system_router = dec_func.__name__ == 'pyonir_index'
     req_models = Site.server.url_map.get(route_name, {}).get('models') or {}
     if models:
         for req_param, req_model in models.items():
@@ -339,7 +339,7 @@ def add_route(dec_func: typing.Callable,
         return Site.server.add_websocket_route(path, dec_func, dec_func.__name__)
 
     async def dec_wrapper(star_req):
-        from pyonir.parser import Parsely, Page
+        from pyonir.parser import Parsely
         if star_req.url.path == '/favicon.ico': return serve_favicon(Site)
         # Resolve page file route
         app_ctx, req_filepath = resolve_path_to_file(star_req.url.path, Site)
@@ -351,7 +351,7 @@ def add_route(dec_func: typing.Callable,
         pyonir_request.is_api = pyonir_request.parts and pyonir_request.parts[0] == Site.API_DIRNAME
 
         # Query Flat File Page from request
-        req_file = Parsely(req_filepath, app_ctx.app_ctx)
+        req_file = Parsely(req_filepath or '', app_ctx.app_ctx)
         pyonir_request.file = req_file
 
         # Preprocess resolver endpoint from file
@@ -364,7 +364,7 @@ def add_route(dec_func: typing.Callable,
             # is_asyncgen = inspect.isasyncgenfunction(route_func)
 
             default_args = dict(typing.get_type_hints(route_func))
-            default_args.update(**(pyonir_request.path_params))
+            default_args.update(**pyonir_request.path_params)
             default_args.update(**pyonir_request.query_params.__dict__)
             default_args.update(**pyonir_request.form)
             args = cls_mapper(default_args, route_func, from_request=pyonir_request)
@@ -381,7 +381,7 @@ def add_route(dec_func: typing.Callable,
             await Site.run_async_plugins(PyonirHooks.ON_REQUEST, pyonir_request)
 
             # Finalize response output
-            pyonir_request.derive_status_code(is_pyonir_default)
+            pyonir_request.derive_status_code(Site.server.url_map.get(route_func.__name__) and not default_system_router)
             if pyonir_request.path not in Site.server.sse_routes + Site.server.ws_routes:
                 pyonir_request.server_response = await req_file.process_response(pyonir_request)
 
@@ -510,7 +510,7 @@ def start_uvicorn_server(app: PyonirApp, endpoints: 'Endpoints'):
 
     # Initialize routers
     gather_file_based_routing(app)
-    register_endpoints(endpoints)
+    init_app_endpoints(endpoints)
     init_pyonir_endpoints(app)
     print(f"/************** ASGI APP SERVER RUNNING on {'http' if app.is_dev else 'sock'} ****************/")
     print(f"\

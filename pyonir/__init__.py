@@ -3,7 +3,7 @@ import os, sys
 from pyonir import utilities
 from pyonir.parser import Parsely
 from pyonir.types import PyonirHooks, PyonirOptions, TemplateEnvironment, PyonirRequest, PyonirApp
-from pyonir.utilities import dict_to_class, get_attr, process_contents
+from pyonir.utilities import dict_to_class, get_attr, process_contents, load_env
 
 # Pyonir settings
 PYONIR_DIRPATH = os.path.abspath(os.path.dirname(__file__))

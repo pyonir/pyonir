@@ -1,5 +1,6 @@
 import os
 
+from pyonir import process_contents
 from pyonir.types import PyonirApp, PyonirRequest, PyonirPlugin
 from .backend.filters import babelmoney
 
@@ -13,6 +14,7 @@ class Ecommerce(PyonirPlugin):
         """
         from pyonir.libs.plugins.ecommerce.backend.services import InventoryService, ProductService, UserService, CartService, OrderService, PaymentService
         from pyonir.libs.plugins.ecommerce.backend.models import Product
+        from pyonir.server import route
         self.FRONTEND_DIRNAME = 'templates'
         super().__init__(app, __file__)
 
@@ -23,6 +25,7 @@ class Ecommerce(PyonirPlugin):
         self.cartService = CartService(self, app)
         self.orderService = OrderService(self, app)
         self.paymentService = PaymentService(self, app)
+        self.configs = process_contents(os.path.join(self.contents_dirpath), app_ctx=self.app_ctx)
         app.TemplateEnvironment.add_filter(babelmoney)
 
         plugin_template_paths = [self.frontend_dirpath]
@@ -52,6 +55,7 @@ class Ecommerce(PyonirPlugin):
 
         # Register plugin template directory paths
         self.register_templates(plugin_template_paths)
+        route(None, f'/public/{self.name}', static_path=str(os.path.join(self.frontend_dirpath, 'static')))
         # app.available_models.update({
         #     "Product": Product
         # })

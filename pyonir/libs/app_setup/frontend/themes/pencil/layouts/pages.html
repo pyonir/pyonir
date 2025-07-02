@@ -27,8 +27,8 @@
         </figcaption>
     </figure>
     {% endfor %}
-    <script>
-    async function deleteImg(event){
+<script>
+    async function deleteImg(event) {
         const itemId = event.target.getAttribute('data-id');
         const response = await fetch(`/api/demo-uploads?file_id=${itemId}`, {
             method: 'DELETE',

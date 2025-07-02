@@ -34,11 +34,17 @@ class Product:
     variations: dict[str, list[ProductVariation]] = field(default_factory=dict)
     images: list[str] = field(default_factory=list)
     file_name: str = ''
+    inventory: dict = field(default_factory=dict)
 
     @property
     def sku(self) -> str:
         from pyonir.utilities import generate_base64_id
         return generate_base64_id(self.file_name).decode("utf-8")
+
+    @staticmethod
+    def generate_variant_sku(attributes: list) -> str:
+        if not attributes: return ''
+        return ",".join(attributes).replace(" ",'-')
 
     def generate_variants(self) -> tuple[str, dict, list]:
         """Generates product variants based on configured variations on product"""
@@ -53,7 +59,7 @@ class Product:
         for combo in option_combinations:
             variation_values = [str(val.name) for val in combo]
             sku_cost = sum(getattr(val,'cost', 0) for val in combo)
-            variant_value = ",".join(variation_values).replace(" ", "-")
+            variant_value = Product.generate_variant_sku(variation_values)
             variant_sku = f"{product_code}|{variant_value}"
             # zip(variation_names, variation_values)
             skus.append(variant_sku)
@@ -123,8 +129,8 @@ class Order:
     transaction_id: str
     status: str  # e.g., 'pending', 'shipped', 'delivered', 'cancelled'
     gateway: str  # e.g, 'paypal', 'stripe', 'square'
-    checkout_url: str
-    order_created: str
+    # checkout_url: str
+    # order_created: str
     subtotal: float
     tax_total: float
     shipping_total: float

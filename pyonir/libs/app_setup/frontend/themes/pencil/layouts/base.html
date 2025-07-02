@@ -5,6 +5,7 @@
         {% block head %}{{system.head(data=page)}}{% endblock %}
         <!--  CSS -->
         <link rel="stylesheet" href="{{url_for('public')}}/css/pencil.css">
+        <link rel="stylesheet" href="{{url_for('public')}}/ecommerce/css/cart.css">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Courier+Prime:ital,wght@0,400;0,700;1,400;1,700&display=swap" rel="stylesheet">
@@ -16,6 +17,7 @@
             <link rel="stylesheet" href="{{ ASSET_URL }}"> 
         {% endassets %} #}
         <!--  js -->
+         {{page.head and page.head.js}}
     </head>
      <style>
          .courier-prime-regular {
@@ -63,6 +65,7 @@ body, html {
 
     <body class="{% block bodyclass %}home {% endblock %} courier-prime-regular">
         <header id="header" class="row">
+        {% block header_nav %}
             <nav id="navigation" class="menu inline">
                 <ul class="menu center">
                     {% set active_page = request.path %}
@@ -78,6 +81,7 @@ body, html {
                     {% endfor %}
                 </ul>
             </nav>
+        {% endblock %}
         </header>
 
         <div id="content" class="row"> 
@@ -97,4 +101,5 @@ body, html {
 {% block js %}
 {% yield 'js' %}
 {% endblock %}
+
 </html>

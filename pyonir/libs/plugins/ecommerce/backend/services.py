@@ -1,6 +1,7 @@
 import dataclasses, os
 from typing import List, Optional
 from pyonir.libs.plugins.ecommerce import Ecommerce
+from pyonir.libs.plugins.ecommerce.backend.gateways import PayPalClient
 from pyonir.libs.plugins.ecommerce.backend.models import Product, CartItem
 from pyonir.types import PyonirRequest, PyonirApp, PyonirCollection
 
@@ -171,17 +172,18 @@ class CartService:
         self.shop_app = ecommerce_app
         self.productService = ecommerce_app.productService
 
-    async def add_to_cart(self, product_id: str, quantity: int, request: PyonirRequest) -> [CartItem]:
+    async def add_to_cart(self, request: PyonirRequest, product_id: str, quantity: int, attributes: list = []) -> [CartItem]:
         """
         Add a specified quantity of a product to the user's shopping cart.
         """
-        new_item = [product_id, quantity]
+        attributes = Product.generate_variant_sku(attributes)
+        new_item = [product_id, quantity, attributes]
         curr_cart: Items = request.server_request.session.get(self.session_key, [])
-        has_item = [[id, qt] for id, qt in curr_cart if id == product_id] if curr_cart else 0
+        has_item = [[id, qt, attrs] for id, qt, attrs in curr_cart if id == product_id and  attrs == attributes] if curr_cart else 0
         if has_item:
             has_item = has_item.pop(0)
             curr_cart.remove(has_item)
-            new_item = [product_id, quantity + has_item[1]]
+            new_item = [product_id, quantity + has_item[1], attributes]
         curr_cart.append(new_item)
         request.server_request.session[self.session_key] = curr_cart
         print('cartService', curr_cart)
@@ -192,7 +194,7 @@ class CartService:
         Remove a product from the user's shopping cart.
         """
         curr_cart: [CartItem] = request.server_request.session.get(self.session_key, [])
-        has_item = [[id, qty] for id, qty in curr_cart if id == product_id]
+        has_item = [[id, qty, attrs] for id, qty, attrs in curr_cart if id == product_id]
         if has_item:
             curr_cart.remove(has_item.pop(0))
             request.server_request.session[self.session_key] = curr_cart
@@ -205,34 +207,34 @@ class CartService:
         Returns:
             List[Product]: A list of product instances in the cart.
         """
-        # list[product_id, product_qty]
         cart_products: list = request.server_request.session.get(self.session_key, [])
-        cart_ids = [pid for pid, qty in cart_products]
+        cart_items = []
+        for pid, qty, attrs in cart_products:
+            product = getattr(self.productService.all_products, pid)
+            cart_item = CartItem(**product.__dict__)
+            cart_item.quantity = qty
+            cart_item.attributes = attrs.split(',') if attrs else []
+            if attrs and cart_item.inventory:
+                cart_item.stock = cart_item.inventory.get(attrs,{}).get('stock')
+            cart_items.append(cart_item)
 
-        def filter_fn(item):
-            if not item.product_id in cart_ids: return
-            item_qty = next((qty for pid,qty in cart_products if item.product_id == pid), None)
-            item.quantity = item_qty
-            return item
+        return cart_items
 
-        if cart_products:
-            all_products = PyonirCollection.query(self.productService.products_dirpath,
-                                                  app_ctx=self.shop_app.app_ctx, data_model=CartItem)
-            product_list = all_products.where(filter_fn)
-            # product_list = all_products.where('product_id','in',[pid for pid, qty in cart_products])
-            return product_list
-        return []
 
 class OrderService:
-    def __init__(self, ecommerce_app: Ecommerce, iapp: PyonirApp=None): self.shop_app = ecommerce_app
+    def __init__(self, ecommerce_app: Ecommerce, iapp: PyonirApp=None):
+        from .gateways.PayPalClient import PayPalClient
+        self.shop_app = ecommerce_app
+        self.paypalService: PayPalClient = PayPalClient(client_secret='', client_id='', sandbox=True)
 
-    def checkout(self, user_id: str) -> str:
+    def checkout(self, order: dict) -> str:
         """
         Process the user's cart for checkout.
 
         Returns:
             str: A generated order ID upon successful checkout.
         """
+        self.paypalService.create_order()
         pass
 
     def view_order_history(self, user_id: str) -> List[str]:

@@ -86,7 +86,7 @@ button.show-cart:after {
   width: 20px;
   height: 20px;
   line-height: 19px;
-  left: 0;
+  left: -20px;
 }
 #cart.canvas-left .show-cart{left:0;}
 #cart.canvas-right .show-cart{right:0;}
@@ -94,10 +94,11 @@ button.show-cart {
   background: transparent;
   color: #121212;
   border: 0;
-  padding: 18px;
+  padding: 0px;
   font-size: 23px;
   position: fixed;
   top: 6px;
+  left: 20px;
   z-index: 99;
   text-decoration: none;
   transition: all .3s ease;

@@ -23,7 +23,7 @@
         {%- for entry in page.entries.items %}
         <li class="list-item" each="entry in filteredItems" index="{{loop.index0}}">
             <div class="head">
-                <a class="title" href="{{entry.url}}">{{loop.index}}.
+                <a class="title" href="{{entry.url}}"><iml js="i+1">{{loop.index}}</iml>.
                     <iml js="highlight(entry.title)" html>{{entry.title}}</iml>
                 </a>
                 <div class="date">{{entry.date.strftime('%a, %B %d')}}</div>
@@ -43,7 +43,7 @@
         {%- endfor %}
     </ul>
 </div>
-{% pull 'js' %}
+
 <script type="importmap">
   {
     "imports": { "optiml": "http://localhost:3000/index.js" }
@@ -53,7 +53,7 @@
 <script type="module">
 // import {render} from "/public/js/optiml.min.js";
 import {render} from "optiml";
- function highlight(txt){
+function highlight(txt){
     const char = listingComponent.state.filter;
     if(!char) return txt;
     const regex = new RegExp(String.raw`${char}`,'g');
@@ -63,11 +63,15 @@ function filterSearch(evt, state, app){
     state.filter = evt.target.value;
     app._update()
 }
-const state = { colors: ['red','green','blue'], filter: '', highlight, filterSearch,
+const state = {
+    colors: ['red','green','blue'],
+    filter: '',
+    highlight,
+    filterSearch,
     get filteredItems(){
         return this.filter ? this.entries.items.filter(x=> x.title.toLowerCase().indexOf(this.filter.toLowerCase()) > -1) : [...this.entries.items];
     }
- };
+};
 state.entries = {{page.entries | asjson }}
 
 const actions = {
@@ -82,7 +86,7 @@ const actions = {
 }
 render(listingComponent, {state, actions});
 </script>
-{% endpull %}
+
 <style>
     .hlt {
     background: yellow;

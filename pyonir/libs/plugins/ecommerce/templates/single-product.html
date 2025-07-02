@@ -8,6 +8,7 @@
     gap: 1rem;
     }
 </style>
+
 <product>
     <product-image>
         <img src="{{product.images[0]}}" alt="">
@@ -21,7 +22,7 @@
         {% if product.variations %}
         {% for vtype, variations in product.variations.items() %}
         <label for="{{vtype}}">{{vtype | title}}</label>
-        <select name="attributes.{{vtype}}" id="{{vtype}}">
+        <select name="attributes" id="{{vtype}}">
             <option value="">Available a {{vtype}}</option>
             {% for variation in variations %}
             <option value="{{variation.name}}">{{variation.name | title}}</option>
@@ -33,4 +34,5 @@
     </form>
 </product>
 <a href="{{request.url}}">Back</a>
+
 {% endblock %}

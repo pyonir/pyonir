@@ -2,6 +2,12 @@
 <ul>
 {% for item in cart_items %}
 <li>{{item.name}} - {{item.quantity}}
+    <span style="display: block">{{item.stock}} items in stock</span>
+    <ol>
+{% for atr in item.attributes %}
+        <li>{{atr}}</li>
+{% endfor %}
+    </ol>
 <form action="/api/my-shop/remove_item" method="POST">
 <input type="hidden" name="redirect" value="{{request.raw_path}}">
 <input type="hidden" name="product_id" value="{{item.product_id}}">

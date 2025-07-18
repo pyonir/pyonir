@@ -100,38 +100,6 @@ async def pyonir_sse_handler(request: PyonirRequest) -> typing.AsyncGenerator:
         res = process_sse(last_client)
         yield res
 
-# def pyonir_file_delete(request: PyonirRequest):
-#     """Deletes a file located in the uploads directory"""
-#     from pyonir import Site
-#     from pyonir.parser import ParselyMedia
-#     # redirect = getattr(request.query_params,'redirect') + '?success=true'
-#     docpath: str = os.path.join(Site.uploads_dirpath, getattr(request.query_params,'file_id'))
-#     doc = ParselyMedia(docpath, Site.app_ctx)
-#     return doc
-#     # if img.file_exists:
-#     #     os.remove(doc)
-#     #     for _, timg in img.thumbnails.items():
-#     #         os.remove(timg.abspath)
-#     # return {"redirect": redirect}
-#
-# async def pyonir_file_upload(request: PyonirRequest):
-#     """File upload handler"""
-#     from pyonir.parser import ParselyMedia
-#     from pyonir import Site
-#     folder_name = request.form.get('foldername','')
-#     uploads = []
-#     for doc in request.files:
-#         parselyMedia = await ParselyMedia.save_upload(doc, os.path.join(Site.uploads_dirpath, folder_name), Site.app_ctx)
-#         parselyMedia.resize()
-#         uploads.append(parselyMedia.name)
-#     request.server_request.session[request.form.get('form_id','__forms__')] = {"uploads": uploads, "count": len(uploads)}
-#     return uploads
-
-# async def pyonir_form_handler(request: PyonirRequest):
-#     """General form handler"""
-#     # print('New Form submission', request.form)
-#     request.server_request.session[request.form.get('form_id','__forms__')] = request.form
-#     return request.form
 
 async def pyonir_docs_handler(request: PyonirRequest):
     """Documentation for every endpoint by pyonir"""
@@ -140,23 +108,6 @@ async def pyonir_docs_handler(request: PyonirRequest):
 def pyonir_index(request: PyonirRequest):
     """Catch all routes for all web request"""
     pass
-
-# def mapper(value, cls):
-#     is_mapable = not isinstance(value, (str, bool, float, int))
-#     if isinstance(value, list):
-#         return [mapper(list_value, cls) for list_value in value]
-#     return cls(**value) if is_mapable else cls(value)
-#
-# def request_mapper(param_name: str, param_value: any, resolver: callable, request: PyonirRequest):
-#     resolver_params = resolver.__annotations__
-#     param_cls = resolver_params.get(param_name)
-#     if param_value == PyonirRequest: return request
-#     if not param_cls: return f'{param_name} is not a parameter of {resolver.__name__}'
-#     if param_cls == param_value: return param_cls(**request.form) # attempt pass form value as kwargs
-#     try:
-#         return mapper(param_value, param_cls[0] if isinstance(param_cls, list) else param_cls)
-#     except Exception as e:
-#         raise ValueError(f'{param_name} has a value of {param_value} is not a valid type {type(param_cls).__name__}')
 
 
 def setup_starlette_server(iapp: PyonirApp) -> PyonirServer:
@@ -236,16 +187,6 @@ def init_pyonir_endpoints(app: PyonirApp):
     _add_route(pyonir_index, "/", methods='*')
     _add_route(pyonir_index, "/{path:path}", methods='*')
 
-
-# def get_params(url):
-#     import urllib
-#     from pyonir.utilities import dict_to_class
-#     args = {params.split('=')[0]: urllib.parse.unquote(params.split("=").pop()) for params in
-#             url.split('&') if params != ''}
-#     if args.get('model'): del args['model']
-#     return dict_to_class(args, 'query_params')
-
-
 def process_sse(data: dict) -> str:
     """Formats a string and an event name in order to follow the event stream convention.
     'event: Jackson 5\\ndata: {"abc": 123}\\n\\n'
@@ -269,6 +210,8 @@ def route(dec_func: typing.Callable | None,
                ws: bool = None,
                sse: bool = None,
                static_path: str = None) -> typing.Callable | None:
+    if dec_func is None and static_path is None:
+        dec_func = pyonir_index
     return _add_route(dec_func, path, methods, models, auth, ws, sse, static_path)
 
 def _add_route(dec_func: typing.Callable | None,
@@ -350,13 +293,16 @@ def _add_route(dec_func: typing.Callable | None,
         Site.TemplateEnvironment.globals['request'] = pyonir_request
         pyonir_request.is_api = pyonir_request.parts and pyonir_request.parts[0] == Site.API_DIRNAME
 
-        # Query Flat File Page from request
+        # Query File system for Page from request
         req_file = Parsely(req_filepath or '', app_ctx.app_ctx)
         pyonir_request.file = req_file
 
-        # Preprocess resolver endpoint from file
+        # Preprocess routes or resolver endpoint from file
+        await req_file.process_route(pyonir_request, app_ctx)
         await req_file.process_resolver(pyonir_request)
         route_func = dec_func if not req_file.resolver else req_file.resolver
+        if req_file.route and callable(req_file.route):
+            route_func = req_file.route
 
         # Get router endpoint from map
         if callable(route_func):
@@ -373,15 +319,19 @@ def _add_route(dec_func: typing.Callable | None,
             # Resolve route decorator methods
             pyonir_request.server_response = await route_func(**args) if is_async else route_func(**args)
 
+            # Update dynamic routes urls
+            # if req_file.route:
+            #     req_file.data.update({"url": pyonir_request.url, "slug": pyonir_request.slug})
+
         else:
-            pyonir_request.server_response = req_file.resolver
+            pyonir_request.server_response = req_file.resolver or req_file.route
         try:
 
             # Execute plugins hooks initial request
+            pyonir_request.derive_status_code(Site.server.url_map.get(route_func.__name__) and not default_system_router)
             await Site.run_async_plugins(PyonirHooks.ON_REQUEST, pyonir_request)
 
             # Finalize response output
-            pyonir_request.derive_status_code(Site.server.url_map.get(route_func.__name__) and not default_system_router)
             if pyonir_request.path not in Site.server.sse_routes + Site.server.ws_routes:
                 pyonir_request.server_response = await req_file.process_response(pyonir_request)
 
@@ -439,12 +389,14 @@ def resolve_path_to_file(path_str: str, app: PyonirApp, skip_vanity: bool = Fals
     is_home = path_str == '/'
     if not is_home and hasattr(app, 'available_plugins'):
         for plg in app.available_plugins:
-            if not hasattr(plg, 'request_paths'): continue
+            if not hasattr(plg, 'request_paths') or not plg.endpoint: continue
             plg, path_result = resolve_path_to_file(path_str, plg)
             if path_result: break
         if path_result: return plg, path_result
 
     ctx_route, ctx_paths = app.request_paths
+    check_wildcard = ctx_route!='/' and (path_str.startswith(ctx_route) or path_str.replace('/api','').startswith(ctx_route))
+    # ctx_route = ctx_route.replace('/*','')
     ctx_slug = ctx_route[1:]
     path_slug = path_str[1:]
     reqst_path = [p for p in path_slug.split('/') if p not in ('api', ctx_slug)]
@@ -459,7 +411,9 @@ def resolve_path_to_file(path_str: str, app: PyonirApp, skip_vanity: bool = Fals
             path_result = pp
             break
         if path_result: break
-
+    if path_result is None and check_wildcard:
+        dynamic_paths = [os.path.join(app.pages_dirpath, *reqst_path[:i],"index.md") for i in range(len(reqst_path), -1, -1) if os.path.exists(os.path.join(app.pages_dirpath, *reqst_path[:i],"index.md"))]
+        path_result = dynamic_paths[0]
     return app, path_result
 
 

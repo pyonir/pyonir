@@ -1,10 +1,11 @@
 
-{% block content %}
-<h4>Hello Ecommerce product-listing plugin</h4>
+
+<h4>Ecommerce product-listing plugin</h4>
 <products-listing>
 {% for item in page.entries.items %}
 <product>
-<a href="?product_id={{item.product_id}}">
+<a href="{{url_for('ecommerce.products')}}/{{item.product_id}}">
+<!--<a href="?product_id={{item.product_id}}">-->
     <product-image>
         <img src="{{item.images[0]}}" alt="">
     </product-image>
@@ -12,6 +13,7 @@
     <product-price>${{ item.price}}</product-price>
 </a>
 </product>
+{% else %}
+    no entries
 {% endfor %}
 </products-listing>
-{% endblock %}

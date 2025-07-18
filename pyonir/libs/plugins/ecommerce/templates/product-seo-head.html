@@ -1,0 +1,56 @@
+<!-- Essential Meta Tags -->
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Buy {{product.name}} Online | {{brandName}} | Best Prices</title>
+<meta name="description" content="{{product.name}} by {{brandName}} – available now at the best price. Fast shipping, secure checkout, and customer reviews." />
+<meta name="keywords" content="{{product.name}}, buy {{product.name}}, {{brandName}}, online store, eCommerce" />
+<meta name="robots" content="index, follow" />
+
+<!-- Canonical URL -->
+<link rel="canonical" href="https://www.example.com/products/{{product-slug}}" />
+
+<!-- Open Graph Meta Tags (Facebook, LinkedIn, etc.) -->
+<meta property="og:type" content="product" />
+<meta property="og:title" content="{{product.name}} - Buy Online at Best Price" />
+<meta property="og:description" content="Buy {{product.name}} now with fast shipping and secure checkout. Limited stock available!" />
+<meta property="og:image" content="https://www.example.com/images/{{product-image}}.jpg" />
+<meta property="og:url" content="https://www.example.com/products/{{product-slug}}" />
+<meta property="og:site_name" content="Your Store Name" />
+
+<!-- Twitter Card -->
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="{{product.name}} – Available Now!" />
+<meta name="twitter:description" content="Shop {{product.name}} with fast delivery and easy returns." />
+<meta name="twitter:image" content="https://www.example.com/images/{{product-image}}.jpg" />
+<meta name="twitter:site" content="@YourStoreHandle" />
+
+<!-- Favicon & App Icons -->
+<link rel="icon" href="/favicon.ico" />
+<link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+<link rel="manifest" href="/site.webmanifest" />
+
+<!-- Structured Data (Schema.org: Product) -->
+<script type="application/ld+json">
+{
+"@context": "https://schema.org/",
+"@type": "Product",
+"name": "{{product.name}}",
+"image": [
+  "https://www.example.com/images/{{product-image}}.jpg"
+],
+"description": "{{shortDescription}}",
+"sku": "{{sku}}",
+"brand": {
+  "@type": "Brand",
+  "name": "{{brandName}}"
+},
+"offers": {
+  "@type": "Offer",
+  "url": "https://www.example.com/products/{{product-slug}}",
+  "priceCurrency": "USD",
+  "price": "{{price}}",
+  "availability": "https://schema.org/{{availability}}",
+  "itemCondition": "https://schema.org/NewCondition"
+}
+}
+</script>

@@ -1,5 +1,5 @@
 name: Pencil theme
-author: Pablo Pycasso
+author: Pablo Pyonir
 static: public
 ===
 # Frontend

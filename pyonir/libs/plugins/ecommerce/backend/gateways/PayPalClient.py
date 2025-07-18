@@ -1,6 +1,7 @@
 import requests
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
+
 
 @dataclass
 class IAmount:
@@ -43,6 +44,12 @@ class PayPalClient:
 
     Docs: https://developer.paypal.com/docs/api/orders/v2/
     """
+    LIVE_IPN =  'https://ipnpb.paypal.com/cgi-bin/webscr' #(for live IPNs)
+    LIVE_API_URL = 'https://api.paypal.com'
+    LIVE_WEB_URL = 'https://www.paypal.com'
+    SANDBOX_API_URL = 'https://api.sandbox.paypal.com'
+    SANDBOX_WEB_URL = 'https://www.sandbox.paypal.com'
+    SANDBOX_IPN = 'https://ipnpb.sandbox.paypal.com/cgi-bin/webscr' #(for Sandbox IPNs)
 
     def __init__(self, client_id: str, client_secret: str, sandbox: bool = True):
         """
@@ -82,24 +89,20 @@ class PayPalClient:
             "Content-Type": "application/json",
         }
 
-    def create_order(
+    def create_checkout(
         self,
-        amount: str,
-        currency: str = "USD",
         return_url: Optional[str] = None,
         cancel_url: Optional[str] = None,
-        custom_units: Optional[list] = None,
+        purchase_units: Optional[list] = None,
         intent: str = "CAPTURE",
-    ) -> Dict[str, Any]:
+    ) -> Tuple[bool, Dict[str, Any]]:
         """
         Create a new PayPal order.
 
         Args:
-            amount (str): Order total (e.g. "19.99").
-            currency (str): ISO currency code (default: "USD").
             return_url (Optional[str]): Where to send user after approval.
             cancel_url (Optional[str]): Where to send user if they cancel.
-            custom_units (Optional[list]): Full purchase_units override.
+            purchase_units (Optional[list]): Full purchase_units override.
             intent (str): Either 'CAPTURE' or 'AUTHORIZE'.
 
         Returns:
@@ -109,15 +112,13 @@ class PayPalClient:
         """
         body = {
             "intent": intent,
-            "purchase_units": custom_units if custom_units else [
-                {"amount": {"value": amount, "currency_code": currency}}
-            ]
+            "purchase_units": purchase_units
         }
 
         if return_url or cancel_url:
             body["application_context"] = {
-                "return_url": return_url or "https://example.com/return",
-                "cancel_url": cancel_url or "https://example.com/cancel",
+                "return_url": return_url,
+                "cancel_url": cancel_url,
                 "user_action": "PAY_NOW"
             }
 
@@ -126,8 +127,21 @@ class PayPalClient:
             headers=self._headers(),
             json=body
         )
-        response.raise_for_status()
-        return response.json()
+        print(response.text)
+        res = response.json()
+        order_status = res.get('status')
+        if order_status == 'CREATED':
+            order_id = res.get('id')
+            checkout_url = f"{self.SANDBOX_WEB_URL}/checkoutnow?token={order_id}"
+            return True, {
+                "status": order_status,
+                "order_id": order_id,
+                "checkout_page_url": checkout_url,
+                "order_items": purchase_units
+            }
+        self._get_access_token()
+        return False, {"error": res}
+
 
     def capture_order(self, order_id: str) -> Dict[str, Any]:
         """
@@ -144,9 +158,9 @@ class PayPalClient:
         response = requests.post(
             f"{self.base}/v2/checkout/orders/{order_id}/capture",
             headers=self._headers()
-        )
-        response.raise_for_status()
-        return response.json()
+        ).json()
+        print(response)
+        return response
 
     @staticmethod
     def get_approval_link(order: Dict[str, Any]) -> Optional[str]:

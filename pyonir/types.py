@@ -63,8 +63,14 @@ class PyonirSchema:
     @staticmethod
     def generic_query_model(model_fields: str):
         if not model_fields: return None
-        schema_defaults = {k.strip(): None for k in PyonirSchema.default_file_attributes+model_fields.split(',')}
-        return type('GenericQueryModel', (object,), schema_defaults)
+        mapper = {}
+        params = {"_mapper": mapper}
+        for k in PyonirSchema.default_file_attributes+model_fields.split(','):
+            if ':' in k:
+                k,_, src = k.partition(':')
+                mapper[k] = src
+            params[k] = None
+        return type('GenericQueryModel', (object,), params)
 
 @dataclass
 class PyonirOptions:
@@ -89,6 +95,7 @@ class ParselyCollection:
 
 class Parsely:
     resolver: callable | None
+    route: callable | None
     app_ctx: AppCtx # application context for file
     file_path: str
     file_dirpath: str # path to files contents directory
@@ -123,7 +130,7 @@ class PyonirCollection:
         self._query_path = ''
         key = lambda x: self.get_attr(x, sort_key or 'file_created_on')
         try:
-            # l = list(items)
+            items = list(items)
             self.collection = SortedList(items, key=key)
         except Exception as e:
             raise
@@ -438,7 +445,7 @@ class PyonirServer(Starlette):
 class PyonirBase:
     """Pyonir Base Application Configs"""
     pyonir_path: str = os.path.dirname(__file__)
-    endpoint: str = ''
+    endpoint: str | None = None
     # Default config settings
     EXTENSIONS = {"file": ".md", "settings": ".json"}
     THUMBNAIL_DEFAULT = (230, 350)
@@ -485,62 +492,47 @@ class PyonirBase:
         """The application module directory name"""
         return self.__module__.split('.').pop()
 
+    @staticmethod
+    def generate_resolvers(cls: callable, output_dirpath: str, namespace: str):
+        """Automatically generate api endpoints from service class."""
+        import textwrap
+        from pyonir.utilities import create_file
 
-class DBManager:
-    def __init__(self, db_path: str):
-        self.db_path = db_path
-
-    def _connect(self):
-        return sqlite3.connect(self.db_path)
-
-    def execute(self, query: str, params: Optional[Tuple[Any, ...]] = None) -> None:
-        with self._connect() as conn:
-            cur = conn.cursor()
-            cur.execute(query, params or ())
-            conn.commit()
-
-    def fetch_one(self, query: str, params: Optional[Tuple[Any, ...]] = None) -> Optional[Tuple]:
-        with self._connect() as conn:
-            cur = conn.cursor()
-            cur.execute(query, params or ())
-            return cur.fetchone()
-
-    def fetch_all(self, query: str, params: Optional[Tuple[Any, ...]] = None) -> List[Tuple]:
-        with self._connect() as conn:
-            cur = conn.cursor()
-            cur.execute(query, params or ())
-            return cur.fetchall()
-
-    def insert(self, table: str, data: Dict[str, Any]) -> None:
-        columns = ', '.join(data.keys())
-        placeholders = ', '.join(['?'] * len(data))
-        values = tuple(data.values())
-        query = f"INSERT INTO {table} ({columns}) VALUES ({placeholders})"
-        self.execute(query, values)
-
-    def update(self, table: str, data: Dict[str, Any], where: str, where_params: Tuple) -> None:
-        set_clause = ', '.join([f"{col} = ?" for col in data])
-        query = f"UPDATE {table} SET {set_clause} WHERE {where}"
-        self.execute(query, tuple(data.values()) + where_params)
-
-    def delete(self, table: str, where: str, where_params: Tuple) -> None:
-        query = f"DELETE FROM {table} WHERE {where}"
-        self.execute(query, where_params)
+        resolver_template = textwrap.dedent("""\
+        @resolvers:
+            GET.call: {call_path}
+        ===
+        {docs}
+        """).strip()
+        name = cls.__class__.__name__
+        endpoint_meths = [a for a in dir(cls) if not a.startswith('_') and hasattr(getattr(cls, a), '__call__')]
+        formatted_cls_name = name[0].lower()+name[1:]
+        print(f"Generating {name} API endpoint definitions for:")
+        for meth_name in endpoint_meths:
+            file_path = os.path.join(output_dirpath, meth_name+'.md')
+            if os.path.exists(file_path): continue
+            meth: callable = getattr(cls, meth_name)
+            namespace_instance_path = f"{namespace}.{formatted_cls_name}.{meth_name}"
+            docs = textwrap.dedent(meth.__doc__).strip() if meth.__doc__ else ''
+            m_temp = resolver_template.format(call_path=namespace_instance_path, docs=docs)
+            create_file(file_path, m_temp)
+            print(f"\t{meth_name} at {file_path}")
 
 
 class PyonirPlugin(PyonirBase):
 
     def __init__(self, app: PyonirApp, app_entrypoint: str = None):
+        self._app_ctx = None
         self.app: PyonirApp = app
         self.app_entrypoint: str = app_entrypoint # plugin application initializing file
         self.app_dirpath: str = os.path.dirname(app_entrypoint) # plugin directory path
         self.name: str = os.path.basename(self.app_dirpath) # web url to serve application pages
-        self.routing_paths: set = set()
+        self.routing_paths = list()
         self.CONFIG_FILENAME = self.module
         self.available_models = {}
 
     @property
-    def request_paths(self):
+    def request_paths(self) -> AppRequestPaths:
         """Request context for route resolution"""
         return self.endpoint, self.routing_paths
 
@@ -566,14 +558,23 @@ class PyonirPlugin(PyonirBase):
 
     @property
     def app_ctx(self) -> AppCtx:
-        return [self.name, self.endpoint, self.contents_dirpath, self.ssg_dirpath]
+        return self._app_ctx or [self.name, self.endpoint, self.contents_dirpath, self.ssg_dirpath]
+
+    def register_routing_dirpaths(self, dir_paths: list):
+        """Registers a new pages directory path for resolving web based request"""
+        for path in dir_paths:
+            self.routing_paths.insert(0, path)
+        pass
 
     def register_templates(self, dir_paths: list):
-        """Registers additional paths for jinja templates"""
+        """Registers additional paths for jinja templates. Templates will load in order of priority."""
+        from jinja2 import FileSystemLoader
+
         if not hasattr(self.app.TemplateEnvironment, 'loader'): return None
         for path in dir_paths:
-            if path in self.app.TemplateEnvironment.loader.searchpath: continue
-            self.app.TemplateEnvironment.loader.searchpath.append(path)
+            if path in self.app.TemplateEnvironment.loader.loaders: continue
+            self.app.TemplateEnvironment.loader.loaders.insert(0, FileSystemLoader(path))
+        pass
 
     def insert(self, file_path: str, contents: dict) -> Parsely:
         """Creates a new file"""
@@ -596,6 +597,7 @@ class PyonirApp(PyonirBase):
     """Pyonir Application"""
 
     # Application data structures
+    endpoint = '/'
     server: PyonirServer = None
     TemplateEnvironment: TemplateEnvironment = None
     available_plugins: set = set()
@@ -613,11 +615,11 @@ class PyonirApp(PyonirBase):
         self.SESSION_KEY = f"pyonir_{self.app_name}"
         self.configs = None
         Parsely._Filters['jinja'] = self.parse_jinja
-        Parsely._Filters['pyformat'] = self.parse_format
+        Parsely._Filters['pyformat'] = self.parse_pyformat
 
     @property
     def request_paths(self) -> AppRequestPaths:
-        return {self.endpoint, (self.pages_dirpath, self.api_dirpath)}
+        return [self.endpoint, (self.pages_dirpath, self.api_dirpath)]
 
     @property
     def nginx_config_filepath(self):
@@ -716,16 +718,19 @@ class PyonirApp(PyonirBase):
         try:
             return self.TemplateEnvironment.from_string(string).render(configs=self.configs, **context)
         except Exception as e:
-            print(str(e), string)
-            # return string
-            raise
+            print(str(e))
+            return string
+            # raise
 
-    def parse_format(self, string, context=None) -> str:
+    def parse_pyformat(self, string, context=None) -> str:
         """Formats python template string"""
-        ctx = self.TemplateEnvironment.globals
-        if context is not None: ctx.update(**context)
-        if not self.TemplateEnvironment: return string
-        return string.format(**ctx)
+        ctx = self.TemplateEnvironment.globals if self.TemplateEnvironment else {}
+        try:
+            if context is not None: ctx.update(context)
+            return string.format(**ctx)
+        except Exception as e:
+            print('parse_pyformat', e)
+            return string
 
     def setup_templates(self):
         self.TemplateEnvironment = TemplateEnvironment(self)
@@ -784,7 +789,7 @@ class PyonirApp(PyonirBase):
 class TemplateEnvironment(Environment):
 
     def __init__(self, app: PyonirApp):
-        from jinja2 import FileSystemLoader
+        from jinja2 import FileSystemLoader, ChoiceLoader
         from webassets import Environment as AssetsEnvironment
         from pyonir import PYONIR_JINJA_TEMPLATES_DIRPATH, PYONIR_JINJA_FILTERS_DIRPATH, PYONIR_JINJA_EXTS_DIRPATH
         from webassets.ext.jinja2 import AssetsExtension
@@ -792,7 +797,8 @@ class TemplateEnvironment(Environment):
 
         self.themes = PyonirThemes(os.path.join(app.frontend_dirpath, PyonirApp.THEMES_DIRNAME))
 
-        jinja_template_paths = FileSystemLoader([self.themes.active_theme.jinja_template_path, PYONIR_JINJA_TEMPLATES_DIRPATH])
+        jinja_template_paths = ChoiceLoader([FileSystemLoader(self.themes.active_theme.jinja_template_path),
+                                             FileSystemLoader(PYONIR_JINJA_TEMPLATES_DIRPATH)])
         sys_filters = load_modules_from(PYONIR_JINJA_FILTERS_DIRPATH)
         app_filters = load_modules_from(app.jinja_filters_dirpath)
         installed_extensions = load_modules_from(PYONIR_JINJA_EXTS_DIRPATH, True)

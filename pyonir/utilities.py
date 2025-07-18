@@ -1,7 +1,7 @@
 from __future__ import annotations
 import os
 import typing
-from typing import Generator, Iterable, Mapping, get_origin, get_args, get_type_hints
+from typing import Union, Generator, Iterable, Mapping, get_origin, get_args, get_type_hints
 from collections.abc import Iterable as ABCIterable
 
 from pyonir.types import PyonirRequest, PyonirSchema
@@ -34,26 +34,31 @@ def is_scalar_type(tp) -> bool:
 def is_custom_class(t):
     return t.__init__.__annotations__ #isinstance(t, type) and not t.__module__ == "builtins"
 
-def cls_mapper(file_obj: any, cls: typing.Callable, from_request: PyonirRequest = None):
-    if hasattr(cls, '__skip_parsely_deserialization__'): return file_obj
-    param_type_map = get_type_hints(cls)
-    is_generic = cls.__name__ == 'GenericQueryModel'
-    if is_scalar_type(cls):
-        return cls(file_obj)
-    if is_generic:
-        print('isgeneric', file_obj.file_name)
-    mapper_keys = cls._mapper if hasattr(cls, '_mapper') else {}
-    data = get_attr(file_obj, 'data') or {}
-    _parsely_data_key = '.'.join(['data', get_attr(cls, '_mapper_key') or cls.__name__.lower()])
-    kdata = get_attr(file_obj, _parsely_data_key)
-    if kdata: data.update(**kdata)
-    cls_args = {}
-    res = cls() if is_generic else None
-    if hasattr(cls, 'from_dict'): # allows manual mapping of class instance
-        return cls.from_dict(file_obj)
+def is_optional_type(t):
+    if get_origin(t) is not Union: return t
+    return [arg for arg in get_args(t) if arg is not type(None)][0]
 
-    for param_name, param_type in param_type_map.items():
-        try:
+def cls_mapper(file_obj: any, cls: typing.Callable, from_request: PyonirRequest = None):
+    param_name, param_type, param_value = ['','','']
+    try:
+        if hasattr(cls, '__skip_parsely_deserialization__'): return file_obj
+        param_type_map = get_type_hints(cls)
+        is_generic = cls.__name__ == 'GenericQueryModel'
+        if is_scalar_type(cls):
+            return cls(file_obj)
+        if is_generic:
+            print('isgeneric', file_obj.file_name, file_obj.file_data_type)
+        mapper_keys = cls._mapper if hasattr(cls, '_mapper') else {}
+        data = get_attr(file_obj, 'data') or {}
+        _parsely_data_key = '.'.join(['data', get_attr(cls, '_mapper_key') or cls.__name__.lower()])
+        kdata = get_attr(file_obj, _parsely_data_key)
+        if kdata: data.update(**kdata)
+        cls_args = {}
+        res = cls() if is_generic else None
+        if hasattr(cls, 'from_dict'): # allows manual mapping of class instance
+            return cls.from_dict(file_obj)
+        for param_name, param_type in param_type_map.items():
+            param_type = is_optional_type(param_type)
             mapper_key = get_attr(mapper_keys, param_name) or param_name
             param_value = get_attr(data, mapper_key) or get_attr(file_obj, mapper_key)
             if param_type == PyonirRequest and from_request:
@@ -73,28 +78,30 @@ def cls_mapper(file_obj: any, cls: typing.Callable, from_request: PyonirRequest 
             else:
                 is_instance = param_value == param_type
                 is_typed = isinstance(param_value, param_type)
-                # is_typed = isinstance(param_value, type(param_value)) or not isinstance(param_value, param_type)
                 if is_instance and from_request:
-                    param_value = cls_mapper(from_request.form, param_type) #param_type(**from_request.form)
+                    param_value = cls_mapper(from_request.form, param_type)
                 cls_args[param_name] = param_value if is_typed or is_instance else param_type(param_value)
-        except Exception as e:
-            raise
-    if from_request: return cls_args
-    if not from_request and param_type_map: res = cls(**cls_args)
-    # assign all other non-model attributes
-    if is_generic or hasattr(cls, '_mapper_merge'):
-        for key, value in data.items():
-            if not param_type_map and not hasattr(cls, key): continue # assumes a GenericQueryModel was provided
-            if isinstance(getattr(cls, key, None), property): continue
-            if param_type_map.get(key) or key[0]=='_': continue
-            setattr(res, key, value)
 
-    if res and hasattr(file_obj,'is_page') and file_obj.is_page:
-        setattr(res, '@model', cls.__name__)
-        for attr in PyonirSchema.default_file_attributes:
-            v = get_attr(file_obj, attr)
-            if v is None: continue
-            setattr(res, attr, v)
+        if from_request: return cls_args
+        if not from_request and param_type_map: res = cls(**cls_args)
+        # setattr(res, '@model', cls.__name__)
+
+        if is_generic:
+            # lookup values for class instance
+            for key in cls.__dict__.keys():
+                if key[0]=='_': continue
+                value = get_attr(data, key) or get_attr(file_obj, key)
+                setattr(res, key, value)
+        if hasattr(cls, '_mapper_merge'):
+            # Sets non class attributes onto the model instance
+            for key, value in data.items():
+                if isinstance(getattr(cls, key, None), property): continue # skip active attributes
+                if param_type_map.get(key) or key[0]=='_': continue # skip private attributes
+                setattr(res, key, value)
+
+    except Exception as e:
+        print(f"Cls Mapper failed to create a {cls.__name__} instance due to map '{param_name}' parameter wasn't a type of {param_type} : {type(param_value)}")
+        raise
 
     return res
 
@@ -140,6 +147,8 @@ def dict_to_class(data: dict, name: str = 'T'):
     # Assign dictionary keys as attributes of the instance
     for key, value in data.items():
         if isinstance(getattr(cls, key, None), property): continue
+        # if isinstance(value, dict):
+        #     value = dict_to_class(value, key)
         setattr(instance, key, value)
 
     return instance
@@ -263,8 +272,7 @@ def get_all_files_from_dir(abs_dirpath: str,
                            force_all: bool = True) -> Generator:
     """Returns a generator of files from a directory path"""
 
-    from .parser import Page, Parsely, ParselyMedia
-    from .parser import ALLOWED_CONTENT_EXTENSIONS, IGNORE_FILES
+    from pyonir.parser import ALLOWED_CONTENT_EXTENSIONS, IGNORE_FILES,Page, Parsely, ParselyMedia
     if abs_dirpath in (exclude_dirs or []): return []
     if exclude_file is None: exclude_file = []
     _, _, pages_dirpath, _ = app_ctx

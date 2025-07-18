@@ -1,6 +1,8 @@
 from dataclasses import dataclass, field
 from typing import List, Optional, Dict
 
+from pyonir.types import AppCtx
+
 
 @dataclass
 class ProductVariation:
@@ -31,7 +33,7 @@ class Product:
     price: float
     stock: int = 0
     description: str = ''
-    variations: dict[str, list[ProductVariation]] = field(default_factory=dict)
+    variations: Optional[dict[str, list[ProductVariation]]] = field(default_factory=dict)
     images: list[str] = field(default_factory=list)
     file_name: str = ''
     inventory: dict = field(default_factory=dict)
@@ -115,9 +117,9 @@ class Customer:
     Represents a customer
     """
     email: str
-    phone: str
     first_name: str
     last_name: str
+    phone: str = ''
 
 
 @dataclass
@@ -125,16 +127,28 @@ class Order:
     """
     Represents an order placed by a customer
     """
-    customer_id: str
-    transaction_id: str
+    order_id: str
     status: str  # e.g., 'pending', 'shipped', 'delivered', 'cancelled'
     gateway: str  # e.g, 'paypal', 'stripe', 'square'
-    # checkout_url: str
-    # order_created: str
-    subtotal: float
-    tax_total: float
-    shipping_total: float
-    discount_total: float
-    currency_code: str
     order_items: list
-    shipping: Shipping
+    shipping: dict = field(default_factory=dict)
+    customer: Customer = field(default_factory=dict)
+    currency_code: str = 'USD'
+    subtotal: float = 0
+    tax_total: float = 0
+    shipping_total: float = 0
+    discount_total: float = 0
+    file_name: str = ''
+
+    @staticmethod
+    def from_file(file_path: str, app_ctx: AppCtx):
+        from pyonir.utilities import get_all_files_from_dir
+        return get_all_files_from_dir(file_path, app_ctx, entry_type=Order)
+
+    def save(self, orders_dirpath) -> bool:
+        """Saves an order to the filesystem in json format"""
+        if not self.order_id: return False
+        import os
+        from pyonir.utilities import create_file
+        filename = str(self.order_id)
+        return create_file(os.path.join(orders_dirpath,self.gateway, filename+".json"), self.__dict__, True)

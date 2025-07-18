@@ -1,0 +1,35 @@
+
+/* Card layout near bottom ("Recommended from Medium" section) */
+.recommended-section {
+  display: grid;
+  gap: 24px;
+  max-width: 700px;
+  margin: 0 auto;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+}
+
+.recommended-card {
+  display: flex;
+  text-decoration: none;
+  color: inherit;
+  border-bottom: 1px solid #eee;
+  padding-bottom: 16px;
+  font-family: "Charter", Georgia, serif;
+  font-size: 16px;
+  line-height: 1.5;
+}
+.recommended-card .title {
+  font-size: 18px;
+  line-height: 1.4;
+  font-weight: 600;
+}
+.recommended-card .subtitle {
+  font-size: 16px;
+  line-height: 1.5;
+  color: #555;
+}
+.recommended-card .meta {
+  font-size: 14px;
+  line-height: 1.4;
+  color: #888;
+}

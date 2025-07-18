@@ -1,0 +1,31 @@
+/* =============== BUTTONS ELEMENTS ==================== */
+
+.btn{
+  border:1px solid #323437;
+  color: initial;
+  background-color:white;
+  padding: .5em 1.5em;
+  display:block;
+  cursor:pointer;
+  border-radius: 4px;
+}
+.btn:hover{
+  border-color:#323437;
+  color:#323437;
+}
+
+.btn.btn-reverse,.btn:hover {
+  background:#323437;
+  color:white;
+}
+.btn.btn-reverse:hover{
+  background-color:white;
+  color:#323437;
+}
+.btn-lg{
+  font-size: 2rem;
+}
+.btn-sm{
+  font-size: 1rem;
+}
+

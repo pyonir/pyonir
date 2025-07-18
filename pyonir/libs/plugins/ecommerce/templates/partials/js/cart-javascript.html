@@ -1,0 +1,104 @@
+
+<hypercart
+    settings.cart_name="Pyonir Ecommerce Cart"
+    settings.gateway="paypal"
+    settings.checkout_url="/api/my-shop/create_checkout"
+    showDiscount="false"
+    showShipping="false"
+    showCart="false"
+></hypercart>
+
+<script type="module">
+    import {render} from "optiml";
+    import Cart from "http://localhost:3000/src/components/HyperCart.js";
+    const EcommerceCart = await render(Cart);
+    const return_url = location.origin+'/api/my-shop/create_order';
+    class Money {
+        value;
+        currency_code = 'USD'
+        breakdown;
+        shipping;
+        handling;
+        discount;
+        constructor(value, currency){
+            this.value = value;
+            this.currency_code = currency;
+            this.breakdown = {item_total: {value, currency_code: currency}, currency_code: currency}
+        }
+    }
+    class PayPalOrder{
+        purchase_units = [];
+        intent = "CAPTURE";
+        return_url = return_url;
+        cancel_url = location.origin+'/my-shop/cancel';
+        constructor (items) {
+            let total = 0;
+            // this.reference_id = Date.now().toString();
+            const purchase_items = items.map((item) => {
+                // console.log(item)
+                total += (item.price * item.qty)
+                return {
+                    name: item.name,
+                    unit_amount: {value: item.price, currency_code: "USD"},
+                    quantity: item.qty,
+                    description: Object.values(item.attributes).join(','),
+                    category: "PHYSICAL_GOODS",
+                    sku: item.sku,
+                    url: item.url,
+                    image_url: item.img
+                }
+            });
+            this.purchase_units = [{
+                invoice_id:  Date.now().toString(),
+                amount: new Money(total, 'USD'),
+                items: purchase_items
+            }]
+        }
+    }
+
+    class SquareOrder {
+        line_items;
+        order_idempotency_key;
+        checkout_idempotency_key;
+        redirect_url = return_url;
+        constructor(items) {
+            this.line_items = items.map(item=> ({
+                name: item.name,
+                base_price_money: {amount: item.price, currency: 'USD'},
+                quantity: item.qty.toString(),
+                // discounts: 0,
+                // variation_name: item.sku,
+                // note: '',
+            }))
+        }
+    }
+    EcommerceCart.actions.checkoutCart = (e, state, app) => {
+        const paypalOrder = new PayPalOrder(state.items);
+        const squareOrder = new SquareOrder(state.items);
+        state.order = state.settings.gateway==='square' ? squareOrder : paypalOrder;
+        fetch(state.settings.checkout_url+`?gateway=${state.settings.gateway}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({order: state.order})
+        })
+        .then(response => {
+          if (!response.ok) {
+            throw new Error('Network response was not ok');
+          }
+          return response.json(); // or response.text(), etc.
+        })
+        .then(({data}) => {
+          console.log('Success:', data);
+          console.log('cart response', data)
+            if(data.checkout_page_url){
+                window.location.href = data.checkout_page_url;
+            }
+        })
+        .catch(error => {
+          console.error('Error:', error);
+        });
+    }
+    console.log([EcommerceCart])
+</script>

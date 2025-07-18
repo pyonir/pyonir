@@ -2,102 +2,55 @@
 
 <html lang="en">
      <head>
-        {% block head %}{{system.head(data=page)}}{% endblock %}
-        <!--  CSS -->
-        <link rel="stylesheet" href="{{url_for('public')}}/css/pencil.css">
-        <link rel="stylesheet" href="{{url_for('public')}}/ecommerce/css/cart.css">
+{% block head %}
+{{system.head(data=page)}}
+<!--  CSS -->
+<link rel="stylesheet" href="{{url_for('public')}}/css/pencil.css">
+<link rel="stylesheet" href="{{url_for('public')}}/ecommerce/css/cart.css">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Courier+Prime:ital,wght@0,400;0,700;1,400;1,700&display=swap" rel="stylesheet">
-
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Courier+Prime:wght@400;700&family=Hanken+Grotesk:ital,wght@0,100..900;1,100..900&display=swap" rel="stylesheet">
-        {# {% assets "css/hyper.css", filters='cssmin', output='css/compact.min.css'%} 
-            <link rel="stylesheet" href="{{ ASSET_URL }}"> 
-        {% endassets %} #}
-        <!--  js -->
-         {{page.head and page.head.js}}
-    </head>
-     <style>
-         .courier-prime-regular {
-  font-family: "Courier Prime", serif;
-  font-weight: 400;
-  font-style: normal;
-}
 
-.courier-prime-bold {
-  font-family: "Courier Prime", serif;
-  font-weight: 700;
-  font-style: normal;
-}
+{% endblock %}
+     </head>
 
-.courier-prime-regular-italic {
-  font-family: "Courier Prime", serif;
-  font-weight: 400;
-  font-style: italic;
-}
+<body class="courier-prime-regular">
+    <header id="header" class="row">
+    {% block header_nav %}
+        <nav id="navigation" class="menu inline">
+            <ul class="menu center">
+                {% set active_page = request.path %}
+                {% for page in navigation.primary %}
+                    <li class="{{'active' if active_page == page.url else ''}}">
+                        <a href="{{page.url}}">{{page.title}}{{page.menu_icon}}</a>
+                        <ul class="sub-menu">
+                        {% for subpage in page.sub_menus %}
+                            <li><a href="{{subpage.url}}">{{subpage.name}}</a></li>
+                        {% endfor %}
+                        </ul>
+                    </li>
+                {% endfor %}
+            </ul>
+        </nav>
+    {% endblock %}
+    </header>
 
-.courier-prime-bold-italic {
-  font-family: "Courier Prime", serif;
-  font-weight: 700;
-  font-style: italic;
-}
-/*// <weight>: Use a value from 300 to 700*/
-/*// <uniquifier>: Use a unique and descriptive class name*/
-
-.hanken-grotesk-regular {
-  font-family: "Hanken Grotesk", serif;
-  font-optical-sizing: auto;
-  font-weight: 600;
-  font-style: normal;
-}
-.hanken-grotesk-bold {
-  font-family: "Hanken Grotesk", serif;
-  font-optical-sizing: auto;
-  font-weight: 900;
-  font-style: normal;
-}
-body, html {
-    overscroll-behavior-y: none; /* Prevents both vertical and horizontal overscroll */
-}
-     </style>
-
-    <body class="{% block bodyclass %}home {% endblock %} courier-prime-regular">
-        <header id="header" class="row">
-        {% block header_nav %}
-            <nav id="navigation" class="menu inline">
-                <ul class="menu center">
-                    {% set active_page = request.path %}
-                    {% for page in navigation.primary %}
-                        <li class="{{'active' if active_page == page.url else ''}}">
-                            <a href="{{page.url}}">{{page.title}}{{page.menu_icon}}</a>
-                            <ul class="sub-menu">
-                            {% for subpage in page.sub_menus %}
-                                <li><a href="{{subpage.url}}">{{subpage.name}}</a></li>
-                            {% endfor %}
-                            </ul>
-                        </li>
-                    {% endfor %}
-                </ul>
-            </nav>
+    <div id="content" class="row">
+        <div class="content-body">
+        {% block content %}
+        <h1 style="text-align: center;">{{page.title}}</h1>
+        {{ page.content | safe }}
         {% endblock %}
-        </header>
-
-        <div id="content" class="row"> 
-            <div class="content-body">
-            {% block content %}
-            <h1 style="text-align: center;">{{page.title}}</h1>
-            {{ page.content | safe }}
-            {% endblock %} 
-            </div>
         </div>
+    </div>
 
 
-        <footer>
-            <div class="credits text-center">Pencil Theme Powered by Pyonir</div>
-        </footer>
-    </body>
+    <footer>
+        <div class="credits text-center">Pencil Theme Powered by Pyonir</div>
+    </footer>
+</body>
+
 {% block js %}
 {% yield 'js' %}
 {% endblock %}

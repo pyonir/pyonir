@@ -1,0 +1,27 @@
+<form action="/api/my-shop/add_to_cart" method="POST" class="product-form">
+    <h1>{{product.name}}</h1>
+    <h4>${{product.price}}</h4>
+    {{page.url}}
+    <product-variations>
+        <input type="hidden" name="redirect" value="{{request.raw_path}}">
+        <input type="hidden" name="product_id" value="{{product.product_id}}">
+        <product-quantity>
+            <button onclick="event.preventDefault(); pqty.value = Number(pqty.value)-1;">-</button>
+            <input id="pqty" type="text" min="1" name="quantity" value="1">
+            <button onclick="event.preventDefault(); pqty.value = Number(pqty.value)+1;">+</button>
+        </product-quantity>
+        {% if product.variations %}
+        {% for vtype, variations in product.variations.items() %}
+        <label for="{{vtype}}">{{vtype | title}}
+        <select name="attributes" id="{{vtype}}">
+            <option value="">Available a {{vtype}}</option>
+            {% for variation in variations %}
+            <option value="{{variation.name}}">{{variation.name | title}}</option>
+            {% endfor %}
+        </select>
+        </label>
+        {% endfor %}
+        {% endif %}
+        <button>Add To Cart</button>
+    </product-variations>
+</form>

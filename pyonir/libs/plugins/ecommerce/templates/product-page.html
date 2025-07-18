@@ -1,0 +1,11 @@
+{% block content %}
+{% set product = page.product %}
+<grid>
+    <column>
+        {% include 'partials/product-gallery.html' %}
+    </column>
+    <column>
+        {% include 'partials/product-info.html' %}
+    </column>
+</grid>
+{% endblock %}

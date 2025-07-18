@@ -1,0 +1,99 @@
+/* =============== FORM ELEMENTS ==================== */
+label{position: relative; display: inline-block;}
+input[type="text"],
+input[type="submit"],
+input[type="number"],
+input[type="tel"],
+input[type="color"],
+select
+{background: white;}
+input.form-input,
+textarea,
+select.form-input
+{background: #fff;background-image: none;border: .1rem solid #323437;border-radius: .2rem;/* color: #50596c; */display: block;font-size: 1.4rem;line-height: 2rem;outline: none;padding: .5rem .8rem;position: relative;transition: all .2s ease;width: 100%;margin: 0;}
+.form-input:focus {
+  border-color: #1b8ef4;
+  box-shadow: 0 0 0 .2rem rgba(87, 100, 198, .15);
+}
+.form-input::-webkit-input-placeholder {
+  color: #acb3c2;
+}
+.form-input::-moz-placeholder {
+  color: #acb3c2;
+}
+.form-input:-ms-input-placeholder {
+  color: #acb3c2;
+}
+.form-input::placeholder {
+  color: #acb3c2;
+}
+.form-row{padding-bottom: 1rem;}
+.form-row:not([class*="col"]) {
+    clear:both;
+}
+.error_msg.hide{
+  display:block;
+  font-size:11px;
+  color:#ec7d7d;
+}
+label[data-tooltip]:hover:before{
+    opacity: 1;
+    transform: translate(-12%,-.2rem);
+}
+label[data-tooltip]:before{
+  background: rgba(69,77,93,.9);
+  border-radius: .1rem;
+  bottom: 100%;
+  color: #fff;
+  content: attr(data-tooltip);
+  display: block;
+  font-size: 1.2rem;
+  left: 50%;
+  max-width: 320px;
+  opacity: 0;
+  overflow: hidden;
+  padding: .5rem 1.4rem;
+  pointer-events: none;position: absolute;
+  text-overflow: ellipsis;
+  transform: translate(-12%,.4rem);
+  transition: all .2s ease;white-space: pre;z-index: 300;}
+
+label.radio input[type="radio"] + .form-icon{
+    content: '';
+    display: inline-block;
+    background: white;
+    border-radius: 100%;
+    padding: .5rem;
+    vertical-align: middle;
+    position: relative;
+    margin-right: 5px;
+    border: 2px solid #e0e0e0;
+}
+label.checkbox input[type="checkbox"] + .form-icon{
+    content: '';
+    display: inline-block;
+    background: white;
+    padding: .5rem;
+    vertical-align: middle;
+    position: relative;
+    margin-right: 5px;
+    border: 2px solid #e0e0e0;
+}
+label.checkbox input[type="checkbox"]:checked + .form-icon,
+label.radio input[type="radio"]:checked + .form-icon{
+  padding:.2rem;
+  border-width:5px;
+  border-color:#1b8ef4;
+  background-color:#1b8ef4;
+}
+
+label.input-form-label {
+    display: block;
+    padding: .6em 0;
+    width: 100%;
+}
+
+label.radio input.form-radio,
+label.checkbox input.form-checkbox {
+    display: none;
+}

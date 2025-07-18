@@ -23,7 +23,7 @@
         {%- for entry in page.entries.items %}
         <li class="list-item" each="entry in filteredItems" index="{{loop.index0}}">
             <div class="head">
-                <a class="title" href="{{entry.url}}"><iml js="i+1">{{loop.index}}</iml>.
+                <a class="title" href="{{entry.url}}" attrs="{href: entry.url}"><iml js="i+1">{{loop.index}}</iml>.
                     <iml js="highlight(entry.title)" html>{{entry.title}}</iml>
                 </a>
                 <div class="date">{{entry.date.strftime('%a, %B %d')}}</div>
@@ -32,10 +32,10 @@
                 from: {{entry.author}}
                 <ul>
                     {%- for color in ['red','green','blue'] %}
-                    <li class="colors" each="color in colors" index="{{loop.index0}}">
+                    <small class="color-chips" each="color in colors" index="{{loop.index0}}">
                         <iml js="i+1">{{loop.index}}.</iml> <iml js="(color)">{{color}}</iml>
                         <button attrs onclick="{deleteColor}">X</button>
-                    </li>
+                    </small>
                     {% endfor %}
                 </ul>
             </div>
@@ -43,13 +43,11 @@
         {%- endfor %}
     </ul>
 </div>
-
 <script type="importmap">
   {
     "imports": { "optiml": "http://localhost:3000/index.js" }
   }
 </script>
-
 <script type="module">
 // import {render} from "/public/js/optiml.min.js";
 import {render} from "optiml";
@@ -72,8 +70,7 @@ const state = {
         return this.filter ? this.entries.items.filter(x=> x.title.toLowerCase().indexOf(this.filter.toLowerCase()) > -1) : [...this.entries.items];
     }
 };
-state.entries = {{page.entries | asjson }}
-
+state.entries = {{page.entries | asjson }};
 const actions = {
     deleteColor(evt, {color, i}, state){
         state.colors.splice(i, 1)
@@ -86,12 +83,18 @@ const actions = {
 }
 render(listingComponent, {state, actions});
 </script>
-
 <style>
     .hlt {
     background: yellow;
     color: black;
 }
+    .color-chips {
+        background-color: #1b8ef4;
+        padding: .564rem;
+        border-radius: 5px;
+        margin:.564rem;
+        display: inline-block;
+    }
     #listingComponent {
         background: #212121;
         color: white;
@@ -107,7 +110,7 @@ render(listingComponent, {state, actions});
         }
 
         .scrollable-list {
-            max-height: 300px;
+            /*max-height: 300px;*/
             overflow-y: scroll;
             overflow-x: hidden;
         }

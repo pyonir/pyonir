@@ -1,0 +1,21 @@
+<product-image>
+    <img src="{{product.images[0]}}" alt="">
+</product-image>
+<product-gallery>
+<!--    list of product images -->
+    {% for img in product.images %}
+    <img src="{{img}}" alt="">
+    {% endfor %}
+</product-gallery>
+<style>
+    product-gallery {
+    display: flex;
+    gap: 1rem;
+    padding: 1rem;
+}
+
+product-gallery img {
+    max-width: 3rem;
+    border-radius: 10px;
+}
+</style>

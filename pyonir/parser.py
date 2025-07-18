@@ -3,7 +3,8 @@ from datetime import datetime
 from dataclasses import dataclass, field
 
 from .types import PyonirRequest, ParselyCollection, PyonirCollection, PyonirSchema
-from .utilities import dict_to_class, get_attr, get_all_files_from_dir, deserialize_datestr, create_file, get_module, cls_mapper
+from .utilities import dict_to_class, get_attr, get_all_files_from_dir, deserialize_datestr, create_file, get_module, \
+    cls_mapper
 
 ALLOWED_CONTENT_EXTENSIONS = ('prs', 'md', 'json', 'yaml')
 IGNORE_FILES = ('.vscode', '.vs', '.DS_Store', '__pycache__', '.git', '.', '_', '<', '>', '(', ')', '$', '!', '._')
@@ -65,7 +66,6 @@ class Page:
     date: datetime = None
     category: str = ''
     template: str = ''
-    order: int = 0
     title: str = ''
     content: str = ''
     slug: str = ''
@@ -74,6 +74,7 @@ class Page:
     gallery: dict = None
     file_name: str = ''
     file_path: str = ''
+    file_created_on: datetime = None
     contents_relpath: str = ''
 
     def to_json(self) -> dict:
@@ -85,12 +86,12 @@ class Page:
 @dataclass
 class ParselyMedia:
     name: str
-    group: str
     url: str
     width: int
     height: int
     file_size: int
     thumbnails: dict = field(default_factory=dict)
+    group: str = ''
     slug: str = ''
     is_thumb: bool = False
     captions: str = ''
@@ -101,6 +102,7 @@ class ParselyMedia:
     file_path: str = ''
     file_dirpath: str = ''
     file_exists: bool = False
+    file_created_on: datetime = None
     _sizes: list = field(default_factory=list)
 
     def open_image(self):
@@ -112,7 +114,8 @@ class ParselyMedia:
 
     def to_json(self) -> dict:
         """Json serializable repr"""
-        return {k:v for k,v in self.__dict__.items() if k[0]!='_' and k!='app_ctx'}
+        from pyonir.utilities import json_serial
+        return {k:json_serial(v) for k,v in self.__dict__.items() if k[0]!='_' and k!='app_ctx'}
 
     @staticmethod
     def createImagefolders(folderpath: str):
@@ -199,6 +202,7 @@ class Parsely:
         self._cursor = None
         self._blob_keys = []
         self.resolver = None
+        self.route = None
         self.app_ctx = app_ctx # application context for file
         self.file_path = abspth
         self.file_dirpath = os.path.dirname(abspth) # path to files contents directory
@@ -214,7 +218,7 @@ class Parsely:
         is_page = content_type in (Site.PAGES_DIRNAME, Site.API_DIRNAME)
         self.file_contents_dirpath =  ctx_dirpath # contents directory path used when querying refs
         self.is_page = is_page
-        self.is_home = is_page and contents_relpath == f'{Site.PAGES_DIRNAME}/index'
+        self.is_home = ctx_url=='' and is_page and contents_relpath == f'{Site.PAGES_DIRNAME}/index'
         self.file_ctx = ctx_name # the application context name
         self.file_dirname = os.path.basename(self.file_dirpath) # nearest parent directory for file
         self.file_data_type = content_type
@@ -289,13 +293,13 @@ class Parsely:
         if self.file_ext.endswith(ALLOWED_CONTENT_EXTENSIONS): return
         from PIL import Image
         from pyonir import Site
-        group = self.file_dirname.split(f'{Site.UPLOADS_DIRNAME}{os.path.sep}', 1).pop()
-        # name = self.data.get('name')
+        group = self.file_dirpath.split(f'{Site.UPLOADS_DIRNAME}{os.path.sep}', 1).pop()
+        group_name = group.split(os.path.sep)[0]
         image_name, *image_captions = self.file_name.replace('.' + self.file_ext, '').split(IMG_FILENAME_DELIM)
         formatted_name = re.sub(r'[^a-zA-Z0-9]+', ' ', image_name).title()
         formated_caption = "".join(image_captions or formatted_name).title()
-        _url = self.data.get('url')+'.'+self.file_ext
-        _slug = self.data.get('slug')
+        _slug = f"{Site.UPLOADS_ROUTE}/{group}/{image_name}.{self.file_ext}"
+        _url = f"{_slug}"
         is_thumb = Site.UPLOADS_THUMBNAIL_DIRNAME in self.file_dirname
         full_url = _slug.replace(Site.UPLOADS_THUMBNAIL_DIRNAME + '/', '').split('--')[0] + f".{self.file_ext}" \
             if is_thumb else _url
@@ -310,7 +314,7 @@ class Parsely:
             'slug': _slug,
             'name': formatted_name,
             'full_url': full_url,
-            'group': group,
+            'group': group_name,
             'is_thumb': is_thumb,
             'captions': formated_caption,
             'width':width, 'height': height,
@@ -347,23 +351,21 @@ class Parsely:
             self.data = req.render_error() if not req.form and not req.server_response else req.server_response
         else:
             if req.type == JSON_RES:
-                # self.map_to_model(self.model)
                 return self.output_json(req.server_response)
         return self.output_html(req) if req.type in (TEXT_RES, '*/*') else self.output_json() \
             if req.type == JSON_RES else req.server_response
 
-    async def process_resolver(self, request: PyonirRequest):
+    # @staticmethod
+    async def _access_module(self, resolver_path: str) -> tuple:
         from pyonir import Site
         from pyonir.types import PyonirPlugin
-        resolver_obj = self.data.get(RESOLVER_KEY, {}).get(request.method)
-        if not resolver_obj: return
-        resolver_path = resolver_obj.get('call')
-
-        if not resolver_path: return
-
+        if resolver_path.startswith(LOOKUP_DIR_PREFIX):
+            return None, self.process_value_type(resolver_path)
         pkg = resolver_path.split('.')
         meth_name = pkg.pop()
         is_system = pkg[0] == 'pyonir'
+        module, resolver = None, None
+
         if is_system:
             mod_path = os.path.join(Site.pyonir_path,'server.py')
             module, resolver = get_module(mod_path, meth_name)
@@ -374,14 +376,65 @@ class Parsely:
             if isplugin:
                 pkg.pop(0)
                 resolver = get_attr(isplugin, resolver_path)
-                if not resolver:
+                if not resolver and hasattr(isplugin, 'resolvers_dirpath'):
                     mod_path = os.path.join(isplugin.resolvers_dirpath, *pkg)+'.py'
                     module, resolver = get_module(mod_path, meth_name)
             else:
                 pkg_path = os.path.join(Site.backend_dirpath, *pkg) + '.py'
                 if not os.path.exists(pkg_path): pkg_path = os.path.join(Site.backend_dirpath, *pkg, '__init__.py')
                 module, resolver = get_module(pkg_path, meth_name)
+        return module, resolver
+
+    async def process_route(self, pyonir_request: PyonirRequest, app: 'PyonirApp'):
+        """Processes dynamic routes from @routes property"""
+        routes_obj: dict | None = self.data.get('@routes')
+        _slug = self.data.get('slug')
+        if not routes_obj or _slug == pyonir_request.slug: return None
+        from starlette.routing import compile_path
+        base_url = "/".join(pyonir_request.parts[0:pyonir_request.parts.index(_slug)+1])
+        path = pyonir_request.path
+        route_value = None
+        match = None
+        for r in routes_obj.keys():
+            if match: break
+            relpath = f"/{base_url}{r}"
+            path_regex, path_format, *args = compile_path(relpath)
+            match = path_regex.match(path)
+            if match:
+                pyonir_request.path_params.update(match.groupdict())
+                value = routes_obj[r]
+                key = None
+                if isinstance(value, dict):
+                    key, value = tuple(value.items())[0]
+                if isinstance(value, str):
+                    _, route_value = await self._access_module(value)
+                if key: # only functions and files in pages can be returned. keyed values are added to requested page data
+                    self.data[key] = route_value or value
+                if not callable(route_value) and not key:
+                    print('@routes must return a callable or a file from the pages directory')
+        if match or route_value:
+            self.route = route_value
+            self.data.update({"url": pyonir_request.url, "slug": pyonir_request.slug})
+        else:
+            # When no matching route spec is found we return an error page
+            pyonir_request.file.file_path = ''
+
+    async def process_resolver(self, request: PyonirRequest):
+        """Resolves dynamic data from external methods"""
+        resolver_obj = self.data.get(RESOLVER_KEY, {}).get(request.method)
+        if not resolver_obj: return
+        resolver_path = resolver_obj.get('call')
+        resolver_args = resolver_obj.get('args')
+        resolver_redirect = resolver_obj.get('redirect')
+
+        if not resolver_path: return
+        module, resolver = await self._access_module(resolver_path)
+
         request.type = resolver_obj.get('headers', {}).get('accept', request.type)
+        if resolver and resolver_args:
+            request.form.update(resolver_args)
+        if resolver and resolver_redirect:
+            request.form['redirect'] = resolver_redirect
         self.resolver = resolver
 
     def deserializer(self):
@@ -602,17 +655,38 @@ class Parsely:
                 generic_model_properties = query_params.get('model')
                 valuestr = valuestr.replace('../', '').replace('/*', '')
                 dir_root = self.file_contents_dirpath if not use_rel else self.file_dirpath
-                # dir_root = os.path.dirname(self.file_dirpath) if self.file_ctx and use_rel else self.file_dirpath
                 lookup_fpath = os.path.join(dir_root, *valuestr.split("/"))
                 if not os.path.exists(lookup_fpath):
-                    return self.throw_error({
+                    print({
                         'ISSUE': f'FileNotFound while processing {cvaluestr}',
                         'SOLUTION': f'Make sure the `{lookup_fpath}` file exists. Note that only valid md and json files can be processed.'
                     })
+                    return cvaluestr
                 return EmbeddedTypes.get(lookup_fpath, parse_ref_to_files(lookup_fpath, os.path.isdir(lookup_fpath)))
 
         return valuestr.lstrip('$')
 
+    # def parse_reference(self, line_value: str):
+    #     query_params = line_value.split("?").pop() if "?" in line_value else False
+    #     has_attr_path = line_value.split("#")[-1] if "#" in line_value else ''
+    #     line_value = line_value.replace(f"{LOOKUP_DIR_PREFIX}/", "") \
+    #     .replace(f"?{query_params}", "") \
+    #     .replace(f'#{has_attr_path}', '')
+    #     query_params = dict(map(lambda x: x.split("="), query_params.split('&')) if query_params else '')
+    #     use_rel = line_value.startswith('./')
+    #     return_all_files = line_value.endswith('/*')
+    #     generic_model_properties = query_params.get('model')
+    #     line_value = line_value.replace('../', '').replace('/*', '')
+    #     dir_root = self.file_contents_dirpath if not use_rel else self.file_dirpath
+    #     lookup_fpath = os.path.join(dir_root, *line_value.split("/"))
+    #     if not os.path.exists(lookup_fpath):
+    #         print({
+    #         'ISSUE': f'FileNotFound while processing {line_value}',
+    #         'SOLUTION': f'Make sure the `{lookup_fpath}` file exists. Note that only valid md and json files can be processed.'
+    #         })
+    #         return line_value
+    #     return EmbeddedTypes.get(lookup_fpath, parse_ref_to_files(lookup_fpath, os.path.isdir(lookup_fpath)))
+    #
     @staticmethod
     def serializer(json_map: any, namespace: list = [], inline_mode: bool = False, filter_params=None) -> str:
         """Converts json string into parsely string"""
@@ -825,9 +899,10 @@ class Parsely:
     def output_html(self, req: PyonirRequest):
         """Renders and html output"""
         from pyonir import Site
+        page = self.map_to_model(Page)
         Site.TemplateEnvironment.globals['prevNext'] = self.prev_next
-        Site.TemplateEnvironment.globals['page'] = self.map_to_model(Page)
-        html = Site.TemplateEnvironment.get_template(self.template).render()
+        Site.TemplateEnvironment.globals['page'] = page
+        html = Site.TemplateEnvironment.get_template(page.template).render()
         Site.TemplateEnvironment.block_pull_cache.clear()
         return html
 

@@ -12,7 +12,7 @@ class Menu:
     parent: str = ''
     icon: str = ''
     img: str = ''
-    order: int = 0
+    rank: int = 0
     subtitle: str = ''
     dom_class: str = ''
     status: str = ''
@@ -80,5 +80,5 @@ class Navigation(PyonirPlugin):
                 if not pmenu: continue
                 pmenu.sub_menus = m
 
-        res = PyonirCollection(menus.values(), sort_key='order').group_by('group')
+        res = PyonirCollection(menus.values(), sort_key='rank').group_by('group')
         self.menus[app.name] = res

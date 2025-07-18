@@ -20,11 +20,12 @@ async def upload_file(request: PyonirRequest):
     """Uploads a document"""
 
     from pyonir import Site
+    session_key = request.form.get('form_id','__forms__')
     folder_name = request.form.get('foldername')
     uploads = []
     for doc in request.files:
         parselyMedia = await ParselyMedia.save_upload(doc, os.path.join(Site.uploads_dirpath, folder_name), Site.app_ctx)
         parselyMedia.resize()
         uploads.append(parselyMedia.to_json())
-    request.server_request.session[request.form.get('form_id','__forms__')] = {"uploads": uploads, "count": len(uploads)}
+    request.server_request.session[session_key] = {"uploads": uploads, "count": len(uploads)}
     return uploads

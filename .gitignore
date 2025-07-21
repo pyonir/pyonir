@@ -9,6 +9,7 @@ venv/
 .venv/
 .env/
 /pyonir/libs/app_setup/.env
+/pyonir/libs/app_setup/static_site
 pip-wheel-metadata/
 
 # IntelliJ / PyCharm project files

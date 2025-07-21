@@ -41,6 +41,9 @@ class Navigation(PyonirPlugin):
         if curr_nav and not refresh_nav: return None
         self.active_page = request.path
         self.build_navigation(app)
+        self.add_menus_to_environment(app)
+
+    def add_menus_to_environment(self, app: PyonirApp):
         app.TemplateEnvironment.globals['navigation'] = self.menus.get(app.name)
 
 

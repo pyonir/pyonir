@@ -285,29 +285,29 @@ def _add_route(dec_func: typing.Callable | None,
         from pyonir.parser import Parsely
         if star_req.url.path == '/favicon.ico': return serve_favicon(Site)
         # Resolve page file route
-        app_ctx, req_filepath = resolve_path_to_file(star_req.url.path, Site)
         pyonir_request: PyonirRequest = PyonirRequest(star_req)
         await pyonir_request.process_request_data()
+        # app_ctx, req_filepath = resolve_path_to_file(star_req.url.path, Site)
 
         # Update template global
         Site.TemplateEnvironment.globals['request'] = pyonir_request
         pyonir_request.is_api = pyonir_request.parts and pyonir_request.parts[0] == Site.API_DIRNAME
 
         # Query File system for Page from request
-        req_file = Parsely(req_filepath or '', app_ctx.app_ctx)
+        app_ctx, req_file = pyonir_request.resolve_request_to_file(star_req.url.path, Site)
+        # req_file = Parsely(req_filepath or '', app_ctx.app_ctx)
         pyonir_request.file = req_file
 
         # Preprocess routes or resolver endpoint from file
         await req_file.process_route(pyonir_request, app_ctx)
         await req_file.process_resolver(pyonir_request)
         route_func = dec_func if not req_file.resolver else req_file.resolver
-        if req_file.route and callable(req_file.route):
-            route_func = req_file.route
+        # if req_file.route and callable(req_file.route):
+        #     route_func = req_file.route
 
         # Get router endpoint from map
         if callable(route_func):
             is_async = inspect.iscoroutinefunction(route_func)
-            # is_asyncgen = inspect.isasyncgenfunction(route_func)
 
             default_args = dict(typing.get_type_hints(route_func))
             default_args.update(**pyonir_request.path_params)
@@ -318,10 +318,6 @@ def _add_route(dec_func: typing.Callable | None,
 
             # Resolve route decorator methods
             pyonir_request.server_response = await route_func(**args) if is_async else route_func(**args)
-
-            # Update dynamic routes urls
-            # if req_file.route:
-            #     req_file.data.update({"url": pyonir_request.url, "slug": pyonir_request.slug})
 
         else:
             pyonir_request.server_response = req_file.resolver or req_file.route
@@ -342,6 +338,7 @@ def _add_route(dec_func: typing.Callable | None,
             return Site.server.serve_redirect(pyonir_request.redirect)
 
         return build_response(pyonir_request)
+
     dec_wrapper.__name__ = dec_func.__name__
     dec_wrapper.__doc__ = dec_func.__doc__
     Site.server.add_route(path, dec_wrapper, methods=methods)
@@ -429,9 +426,9 @@ def generate_nginx_conf(app: PyonirApp):
         site_dirpath=app.app_dirpath,
         site_logs_dirpath=app.logs_dirpath,
         app_socket_filepath=app.unix_socket_filepath,
-        site_assets_route='/public',
+        site_assets_route=app.ASSETS_ROUTE,
         site_theme_assets_dirpath=app.TemplateEnvironment.themes.active_theme.static_dirpath,
-        site_uploads_route='/uploads',
+        site_uploads_route=app.UPLOADS_ROUTE,
         site_uploads_dirpath=app.uploads_dirpath,
         site_ssg_dirpath=app.ssg_dirpath,
         custom_nginx_locations=get_attr(app.configs, 'nginx_locations')
@@ -439,12 +436,12 @@ def generate_nginx_conf(app: PyonirApp):
 
     create_file(app.app_nginx_conf_filepath, nginxconf, False)
 
-def gather_file_based_routing(app: PyonirApp):
-    from pyonir.types import PyonirCollection, PyonirSchema
-    router_pages = PyonirCollection.query(app.pages_dirpath, app_ctx=app.app_ctx,
-                                          include_only="index.md")
-    router_pages = list(router_pages.where('@routes'))
-    pass
+# def gather_file_based_routing(app: PyonirApp):
+#     from pyonir.types import PyonirCollection, PyonirSchema
+#     router_pages = PyonirCollection.query(app.pages_dirpath, app_ctx=app.app_ctx,
+#                                           include_only="index.md")
+#     router_pages = list(router_pages.where('@routes'))
+#     pass
 
 def start_uvicorn_server(app: PyonirApp, endpoints: 'Endpoints'):
     """Starts the webserver"""
@@ -463,7 +460,7 @@ def start_uvicorn_server(app: PyonirApp, endpoints: 'Endpoints'):
         uvicorn_options['uds'] = app.app_socket_filename
 
     # Initialize routers
-    gather_file_based_routing(app)
+    # gather_file_based_routing(app)
     init_app_endpoints(endpoints)
     init_pyonir_endpoints(app)
     print(f"/************** ASGI APP SERVER RUNNING on {'http' if app.is_dev else 'sock'} ****************/")

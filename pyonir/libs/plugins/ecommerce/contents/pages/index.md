@@ -2,9 +2,6 @@ title: Shop Home
 menu.group: primary
 entries: $dir/../products?model=name,url,price,images,product_id
 template: ecommerce-home.html
-@routes:
-    /products/{product_id:str}: ecommerce.productService.get_product_page
-    /products/tags/{product_tag:str}: entries: $dir/../products
 === head.js
 <script type="importmap">
 {

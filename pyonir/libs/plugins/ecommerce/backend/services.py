@@ -113,10 +113,10 @@ class ProductService:
             self.generate_product_variant(product.product_id)
         return product
 
-    def get_product_page(self, product_id: str, req: PyonirRequest) -> dict[str, Product]:
-        """Returns a product as a page for UI display"""
-        product = self.get_product(product_id)
-        req.file.data.update({"product": product})
+    # def get_product_page(self, product_id: str, req: PyonirRequest) -> dict[str, Product]:
+    #     """Returns a product as a page for UI display"""
+    #     product = self.get_product(product_id)
+    #     req.file.data.update({"product": product})
 
 
 class InventoryService:

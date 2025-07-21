@@ -15,4 +15,4 @@ demo_app = pyonir.init(__file__)
 # demo_app.generate_static_website()
 
 # Run server
-demo_app.run(endpoints=endpoints)
+demo_app.run(routes=endpoints)

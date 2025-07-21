@@ -23,7 +23,7 @@ RoutePath: str = str()
 RouteFunction: callable = callable
 RouteMethods: list[str] = []
 PyonirRoute: [RoutePath, RouteFunction, RouteMethods] = []
-PyonirEndpoints: [(RoutePath, [PyonirRoute])] = []
+PyonirRouters: [(RoutePath, [PyonirRoute])] = []
 
 AppName: str = str()
 ModuleName: str = str()
@@ -36,7 +36,7 @@ AppCtx: list[ModuleName, RoutePath, AppContentsPath, AppSSGPath] = []
 AppRequestPaths: tuple[RoutePath, AppPaths] = '',''
 
 class PyonirSchema:
-    default_file_attributes = ['file_name','file_path','file_dirname','file_data_type','file_ctx','file_created_on']
+    # default_file_attributes = ['file_name','file_path','file_dirname','file_data_type','file_ctx','file_created_on']
 
     """Schema class enables validation when model class initializes"""
     # Schemas configs
@@ -65,7 +65,7 @@ class PyonirSchema:
         if not model_fields: return None
         mapper = {}
         params = {"_mapper": mapper}
-        for k in PyonirSchema.default_file_attributes+model_fields.split(','):
+        for k in Parsely.default_file_attributes+model_fields.split(','):
             if ':' in k:
                 k,_, src = k.partition(':')
                 mapper[k] = src
@@ -94,6 +94,7 @@ class ParselyCollection:
     items: list['Parsely'] = field(default_factory=list)
 
 class Parsely:
+    default_file_attributes = ['file_name','file_path','file_dirname','file_data_type','file_ctx','file_created_on']
     resolver: callable | None
     route: callable | None
     app_ctx: AppCtx # application context for file
@@ -113,6 +114,15 @@ class Parsely:
     file_exists: bool # determines if file exists on filesystem
     file_ssg_api_dirpath: str # the files static generated api endpoint
     file_ssg_html_dirpath: str # the files static generated html endpoint
+
+    async def process_route(self, pyonir_request, app_ctx):
+        pass
+
+    async def process_resolver(self, pyonir_request):
+        pass
+
+    async def process_response(self, pyonir_request):
+        pass
 
 
 class PyonirCollection:
@@ -329,6 +339,10 @@ class PyonirRequest:
         self.type: TEXT_RES | JSON_RES | EVENT_RES = self.headers.get('accept')
         self.status_code: int = 200
 
+    @property
+    def redirect(self):
+        return self.form.get('redirect', self.form.get('redirect_to'))
+
     async def process_request_data(self):
         """Get form data and file upload contents from request"""
 
@@ -379,14 +393,9 @@ class PyonirRequest:
         except Exception as e:
             raise
 
-    @property
-    def redirect(self):
-        return self.form.get('redirect', self.form.get('redirect_to'))
-
     def derive_status_code(self, is_router_method: bool):
         """Create status code for web request based on a file's availability, status_code property"""
         self.status_code = 200 if self.file.file_exists or is_router_method else 404
-        # return file_code if self.file and self.file.file_exists or not is_system_control else 404
 
     def render_error(self):
         """Data output for an unknown file path for a web request"""
@@ -398,6 +407,41 @@ class PyonirRequest:
             "title": f"{self.path} was not found!",
             "content": f"Perhaps this page once lived but has now been archived or permanently removed."
         }
+
+    def resolve_request_to_file(self, path_str: str, app: PyonirApp, skip_vanity: bool = False) -> tuple[PyonirApp, Parsely]:
+        from pyonir import Site
+        from pyonir.parser import Parsely
+        path_result = ''
+        is_home = path_str == '/'
+        if not is_home and hasattr(app, 'available_plugins'):
+            for plg in app.available_plugins:
+                if not hasattr(plg, 'request_paths') or not plg.endpoint: continue
+                plg, path_result = self.resolve_request_to_file(path_str, plg)
+                if path_result: break
+            if path_result: return plg, path_result
+
+        ctx_route, ctx_paths = app.request_paths
+        check_wildcard = ctx_route!='/' and (path_str.startswith(ctx_route) or path_str.replace('/api','').startswith(ctx_route))
+        # ctx_route = ctx_route.replace('/*','')
+        ctx_slug = ctx_route[1:]
+        path_slug = path_str[1:]
+        reqst_path = [p for p in path_slug.split('/') if p not in ('api', ctx_slug)]
+        if path_str.startswith('/api'): path_str = path_str.replace('/api','')
+        if not is_home and not path_str.startswith(ctx_route): return app, ''
+
+        for rootp in ctx_paths:
+            is_cat = os.path.join(rootp, *reqst_path, 'index.md')
+            is_page = os.path.join(rootp, *reqst_path) + Site.EXTENSIONS['file']
+            for pp in (is_cat, is_page):
+                if not os.path.exists(pp): continue
+                path_result = pp
+                break
+            if path_result: break
+        # if path_result is None and check_wildcard:
+        if not path_result:
+            path_result = os.path.join(app.pages_dirpath, '.routes.md')
+
+        return app, Parsely(str(path_result), app.app_ctx)
 
     @staticmethod
     def process_header(headers):
@@ -468,6 +512,7 @@ class PyonirBase:
     CONFIGS_DIRNAME: str = 'configs'
     TEMPLATES_DIRNAME: str = 'templates'
     SSG_DIRNAME: str = 'static_site'
+    SSG_IN_PROGRESS: bool = False
 
     # Contents sub directory default names
     UPLOADS_THUMBNAIL_DIRNAME: str = "thumbnails" # resized image directory name
@@ -486,6 +531,7 @@ class PyonirBase:
     API_ROUTE = f"/{API_DIRNAME}"  # Api base path for accessing pages as JSON
     ASSETS_ROUTE = f"/{ASSETS_DIRNAME}"  # serves static assets from configured theme
     UPLOADS_ROUTE = f"/{UPLOADS_DIRNAME}"  # Upload base path to access resources within upload directory
+    TemplateEnvironment: TemplateEnvironment = None # Template environment configurations
 
     @property
     def module(self):
@@ -518,6 +564,57 @@ class PyonirBase:
             create_file(file_path, m_temp)
             print(f"\t{meth_name} at {file_path}")
 
+    def generate_static_website(self):
+        """Generates Static website into the specified static_site_dirpath"""
+        import time
+        from pyonir.server import generate_nginx_conf
+        from pyonir import utilities
+
+        self.SSG_IN_PROGRESS = True
+        count = 0
+        print(f"{utilities.pcolors.OKBLUE}1. Coping Assets")
+        try:
+            self.run([])
+            site_map_path = os.path.join(self.ssg_dirpath, 'sitemap.xml')
+            # generate_nginx_conf(self)
+            print(f"{utilities.pcolors.OKCYAN}3. Generating Static Pages")
+
+            self.TemplateEnvironment.globals['is_ssg'] = True
+            start_time = time.perf_counter()
+
+            all_pages = utilities.get_all_files_from_dir(self.pages_dirpath, app_ctx=self.app_ctx)
+            xmls = []
+            for page in all_pages:
+                self.TemplateEnvironment.globals['request'] = page  # pg_req
+                count += page.generate_static_file()
+                t = f"<url><loc>{self.protocol}://{self.domain}{page.url}</loc><priority>1.0</priority></url>\n"
+                xmls.append(t)
+                self.TemplateEnvironment.block_pull_cache.clear()
+
+            # Compile sitemap
+            smap = f'<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>{self.domain}</loc><priority>1.0</priority></url> {"".join(xmls)} </urlset>'
+            utilities.create_file(site_map_path, smap, 0)
+
+            # Copy pyonir static assets for js and css vendor libraries into ssg directory
+            # utilities.copy_assets(PYONIR_STATIC_DIRPATH, os.path.join(self.ssg_dirpath, PYONIR_STATIC_ROUTE.lstrip('/')))
+
+            # Copy theme static css, js files into ssg directory
+            utilities.copy_assets(self.TemplateEnvironment.themes.active_theme.static_dirpath, os.path.join(self.ssg_dirpath, self.ASSETS_DIRNAME))
+
+            end_time = time.perf_counter() - start_time
+            ms = end_time * 1000
+            count += 3
+            msg = f"SSG generated {count} html/json files in {round(end_time, 2)} secs :  {round(ms, 2)} ms"
+            print(f'\033[95m {msg}')
+        except Exception as e:
+            msg = f"SSG encountered an error: {str(e)}"
+            raise
+
+        self.SSG_IN_PROGRESS = False
+        response = {"status": "COMPLETE", "msg": msg, "files": count}
+        print(response)
+        print(utilities.pcolors.RESET)
+        return response
 
 class PyonirPlugin(PyonirBase):
 
@@ -735,6 +832,14 @@ class PyonirApp(PyonirBase):
     def setup_templates(self):
         self.TemplateEnvironment = TemplateEnvironment(self)
 
+    def install_sys_plugins(self):
+        """Install pyonir plugins"""
+        from pyonir.libs.plugins.ecommerce import Ecommerce
+        from pyonir.libs.plugins.forms import Forms
+        from pyonir.libs.plugins.navigation import Navigation
+        from pyonir.libs.plugins.fileuploader import FileUploader
+        return self.install_plugins([Ecommerce, Forms, Navigation, FileUploader])
+
     def install_plugins(self, plugins: list):
         is_configured = hasattr(self.configs, 'app') and hasattr(self.configs.app, 'enabled_plugins')
         for plugin in plugins:
@@ -760,30 +865,27 @@ class PyonirApp(PyonirBase):
             hook_method = getattr(plg, hook)
             await hook_method(data_value, self)
 
-    def run(self, endpoints: PyonirEndpoints, plugins=None):
-        """Runs the Uvicorn webserver"""
-        from pyonir.libs.plugins.ecommerce import Ecommerce
-        from pyonir.libs.plugins.forms import Forms
-        from pyonir.libs.plugins.navigation import Navigation
-        from pyonir.libs.plugins.fileuploader import FileUploader
+    def setup_configs(self):
+        """Setup site configurations and template environment"""
         from pyonir.utilities import process_contents, load_env
-        if plugins is None:
-            plugins = [Ecommerce, Forms, Navigation, FileUploader]
+        self.configs = process_contents(os.path.join(self.contents_dirpath, self.CONFIGS_DIRNAME), self.app_ctx)
+        envopts = load_env(os.path.join(self.app_dirpath, '.env'))
+        setattr(self.configs, 'env', envopts)
+        self.setup_templates()
+
+    def run(self, routes: PyonirRouters, plugins: list[PyonirPlugin] =None):
+        """Runs the Uvicorn webserver"""
         from .server import (setup_starlette_server, start_uvicorn_server,)
 
         # Initialize Server instance
         self.server = setup_starlette_server(self)
         # Initialize Application settings and templates
-        self.configs = process_contents(os.path.join(self.contents_dirpath, self.CONFIGS_DIRNAME), self.app_ctx)
-        envopts = load_env(os.path.join(self.app_dirpath, '.env'))
-        setattr(self.configs, 'env', envopts)
-        self.setup_templates()
-        self.install_plugins(plugins)
+        self.setup_configs()
+        self.install_sys_plugins()
 
         # Run uvicorn server
-        start_uvicorn_server(self, endpoints)
-
-    def generate_static_website(self): pass
+        if self.SSG_IN_PROGRESS: return
+        start_uvicorn_server(self, routes)
 
 
 class TemplateEnvironment(Environment):
@@ -823,10 +925,6 @@ class TemplateEnvironment(Environment):
         self.globals['request'] = None
         # self.globals.update(**app.jinja_template_globals)
 
-    # @property
-    # def app(self):
-    #     from pyonir import Site
-    #     return Site
 
     def add_jinja_path(self, path: str):
         pass
@@ -855,11 +953,12 @@ class Theme:
     def jinja_template_path(self):
         return os.path.join(self.theme_dirpath, self.templates_dirname)
 
-@dataclass
 class PyonirThemes:
     """Represents sites available and active theme(s) within the frontend directory."""
-    themes_dirpath: str # directory path to available site themes
-    _available_themes: PyonirCollection | None = None # collection of themes available in frontend/themes directory
+
+    def __init__(self, theme_dirpath: str):
+        self.themes_dirpath: str = theme_dirpath # directory path to available site themes
+        self._available_themes: PyonirCollection | None = None # collection of themes available in frontend/themes directory
 
     @property
     def active_theme(self) -> Theme | None:
@@ -873,7 +972,6 @@ class PyonirThemes:
 
     def get_available_themes(self) -> PyonirCollection | None:
         from pyonir import Site
-
         if not Site: return None
         fe_ctx = list(Site.app_ctx)
         fe_ctx[2] = Site.frontend_dirpath

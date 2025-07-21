@@ -1,7 +1,7 @@
 from __future__ import annotations
 import os
 import typing
-from typing import Union, Generator, Iterable, Mapping, get_origin, get_args, get_type_hints
+from typing import Union, Generator, Iterable,Callable, Mapping, get_origin, get_args, get_type_hints
 from collections.abc import Iterable as ABCIterable
 
 from pyonir.types import PyonirRequest, PyonirSchema
@@ -38,6 +38,9 @@ def is_optional_type(t):
     if get_origin(t) is not Union: return t
     return [arg for arg in get_args(t) if arg is not type(None)][0]
 
+def is_callable_type(pt) -> bool:
+    return get_origin(pt) is Callable or pt.__name__=='callable'
+
 def cls_mapper(file_obj: any, cls: typing.Callable, from_request: PyonirRequest = None):
     param_name, param_type, param_value = ['','','']
     try:
@@ -46,8 +49,8 @@ def cls_mapper(file_obj: any, cls: typing.Callable, from_request: PyonirRequest 
         is_generic = cls.__name__ == 'GenericQueryModel'
         if is_scalar_type(cls):
             return cls(file_obj)
-        if is_generic:
-            print('isgeneric', file_obj.file_name, file_obj.file_data_type)
+        # if is_generic:
+        #     print('isgeneric', file_obj.file_name, file_obj.file_data_type)
         mapper_keys = cls._mapper if hasattr(cls, '_mapper') else {}
         data = get_attr(file_obj, 'data') or {}
         _parsely_data_key = '.'.join(['data', get_attr(cls, '_mapper_key') or cls.__name__.lower()])
@@ -63,9 +66,11 @@ def cls_mapper(file_obj: any, cls: typing.Callable, from_request: PyonirRequest 
             param_value = get_attr(data, mapper_key) or get_attr(file_obj, mapper_key)
             if param_type == PyonirRequest and from_request:
                 param_value = from_request
-            if param_value is None or param_name[0]=='_' or param_name=='return':
+            if (param_value==param_type) or param_value is None or param_name[0]=='_' or param_name=='return':
                 continue
-            if is_iterable(param_type):
+            if is_callable_type(param_type):
+                cls_args[mapper_key] = param_value
+            elif is_iterable(param_type):
                 iter_ptype = get_args(param_type)
                 is_mapp = is_mappable_type(param_type)
                 if is_mapp:
@@ -80,7 +85,8 @@ def cls_mapper(file_obj: any, cls: typing.Callable, from_request: PyonirRequest 
                 is_typed = isinstance(param_value, param_type)
                 if is_instance and from_request:
                     param_value = cls_mapper(from_request.form, param_type)
-                cls_args[param_name] = param_value if is_typed or is_instance else param_type(param_value)
+                should_spread = isinstance(param_value, dict)
+                cls_args[param_name] = param_value if is_typed or is_instance else param_type(**param_value) if should_spread else param_type(param_value)
 
         if from_request: return cls_args
         if not from_request and param_type_map: res = cls(**cls_args)
@@ -289,18 +295,20 @@ def get_all_files_from_dir(abs_dirpath: str,
         return cls_mapper(pf, entry_type or Page ) if entry_type or pf.is_page else pf.map_to_model(None)
 
 
-    def is_public(parentdir, entry=None):
-        if force_all: return True
+    def should_skip(parentdir, filename):
         parentdir = parentdir.replace(pages_dirpath, "").lstrip(os.path.sep)
         is_hidden_dir = parentdir.startswith(IGNORE_FILES)
-        if entry in IGNORE_FILES:
-            return False
-        if not entry:
-            return False if is_hidden_dir else True
-        else:
-            is_hidden_file = entry.startswith(IGNORE_FILES)
-            is_filetype = entry.endswith(ALLOWED_CONTENT_EXTENSIONS)
-            return False if is_filetype and is_hidden_file or is_hidden_dir else True
+        is_invalid_file = not filename.endswith(ALLOWED_CONTENT_EXTENSIONS)
+        is_ignored_file = filename in (IGNORE_FILES + tuple(exclude_file))
+        is_private_file = filename.startswith(IGNORE_FILES)
+        if filename!='.routes.md' and force_all and not is_invalid_file: return False
+        if is_hidden_dir or is_invalid_file or is_ignored_file or is_private_file: return True
+        # if not filename:
+        #     return False if is_hidden_dir else True
+        # else:
+        #     is_hidden_file = filename.startswith(IGNORE_FILES)
+        #     is_filetype = filename.endswith(ALLOWED_CONTENT_EXTENSIONS)
+        #     return False if is_filetype and is_hidden_file or is_hidden_dir else True
 
     for parentdir, subs, files in os.walk(os.path.normpath(abs_dirpath)):
         folderRoot = parentdir.replace(pages_dirpath, "").lstrip(os.path.sep)
@@ -312,10 +320,11 @@ def get_all_files_from_dir(abs_dirpath: str,
         if skipRoot or skipSubs: continue
 
         for filename in files:
-            include_only_file = (include_only and filename != include_only)
-            if filename in exclude_file or include_only_file: continue
-            if not force_all and not filename.endswith(ALLOWED_CONTENT_EXTENSIONS): continue
-            if not is_public(parentdir, filename) or filename in IGNORE_FILES: continue
+            # include_only_file = (include_only and filename != include_only)
+            if should_skip(parentdir, filename): continue
+            # if filename in exclude_file or include_only_file: continue
+            # if not force_all and not filename.endswith(ALLOWED_CONTENT_EXTENSIONS): continue
+            # if not should_skip(parentdir, filename) or filename in IGNORE_FILES: continue
             yield get_datatype(parentdir, filename)
 
 

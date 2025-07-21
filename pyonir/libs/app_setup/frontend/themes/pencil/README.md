@@ -2,6 +2,6 @@ name: Pencil theme
 author: Pablo Pyonir
 static: public
 ===
-# Frontend
+# Pencil
 
-Installation directory for site themes
+a minimal site theme demo

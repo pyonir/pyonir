@@ -60,6 +60,7 @@ class Page:
     _mapper = {'created_on': 'file_created_on', 'modified_on': 'file_modified_on'}
     _mapper_merge = True # merges additional data properties to model
     url: str
+    is_router: bool = False
     created_on: datetime = None
     modified_on: datetime = None
     tags: list = None
@@ -76,6 +77,7 @@ class Page:
     file_path: str = ''
     file_created_on: datetime = None
     contents_relpath: str = ''
+    generate_static_file: callable = None
 
     def to_json(self) -> dict:
         """Json serializable repr"""
@@ -193,6 +195,7 @@ class ParselyMedia:
 class Parsely:
     """Parsely is a static file parser"""
     _Filters = {'md': parse_markdown}  # Global filters that modify scalar values
+    default_file_attributes = ['file_name','file_path','file_dirname','file_data_type','file_ctx','file_created_on']
 
     def __init__(self, abspth: str, app_ctx=None, generic_query_model = None):
         from pyonir import Site
@@ -202,7 +205,7 @@ class Parsely:
         self._cursor = None
         self._blob_keys = []
         self.resolver = None
-        self.route = None
+        self.is_router = abspth.endswith('.routes.md')
         self.app_ctx = app_ctx # application context for file
         self.file_path = abspth
         self.file_dirpath = os.path.dirname(abspth) # path to files contents directory
@@ -215,7 +218,7 @@ class Parsely:
         self.schema = None
         ctx_url, ctx_name, ctx_dirpath, ctx_staticpath, contents_relpath, file_name, file_ext = self.process_ctx(app_ctx)
         content_type, *content_subs = os.path.dirname(contents_relpath).split(os.path.sep) # directory at root of contents scope
-        is_page = content_type in (Site.PAGES_DIRNAME, Site.API_DIRNAME)
+        is_page = content_type in (Site.PAGES_DIRNAME, Site.API_DIRNAME) and not self.is_router
         self.file_contents_dirpath =  ctx_dirpath # contents directory path used when querying refs
         self.is_page = is_page
         self.is_home = ctx_url=='' and is_page and contents_relpath == f'{Site.PAGES_DIRNAME}/index'
@@ -277,8 +280,9 @@ class Parsely:
 
     def process_ctx(self, app_ctx):
         ctx_dir, ctx_url, ctx_dirpath, ctx_staticpath = app_ctx
+        if not os.path.exists(ctx_dirpath): ctx_dirpath = os.path.dirname(ctx_dirpath)
         _, _, content_dirpath = self.file_path.partition(ctx_dirpath)
-        file_name, file_ext = os.path.splitext(os.path.basename(content_dirpath))
+        file_name, file_ext = os.path.splitext(os.path.basename(self.file_path))
         content_dirpath = content_dirpath.lstrip(os.path.sep).replace(file_ext,'')
         return ctx_url, ctx_dir, ctx_dirpath, ctx_staticpath, content_dirpath, file_name, file_ext
 
@@ -323,7 +327,7 @@ class Parsely:
 
     def map_to_model(self, model):
         if not model:
-            file_props = {k: v for k,v in self.__dict__.items() if k in PyonirSchema.default_file_attributes}
+            file_props = {k: v for k,v in self.__dict__.items() if k in self.default_file_attributes}
             return dict_to_class({**self.data, **file_props, '@model': 'GenericQueryModel'}, self.file_data_type)
         return cls_mapper(self, model)
 
@@ -347,18 +351,22 @@ class Parsely:
     async def process_response(self, req: PyonirRequest) -> str:
         """process web request into response"""
         from pyonir.server import JSON_RES, TEXT_RES
-        if not self.file_exists:
-            self.data = req.render_error() if not req.form and not req.server_response else req.server_response
+        if not self.file_exists and not req.server_response and not req.form:
+            self.data = req.render_error()
+        elif req.server_response and not self.file_exists:
+            self.data = {
+                "url": req.url, "slug": req.slug, "template": "base.html"
+            }
+            if isinstance(req.server_response, str):
+                self.data['content'] = req.server_response
         else:
             if req.type == JSON_RES:
                 return self.output_json(req.server_response)
         return self.output_html(req) if req.type in (TEXT_RES, '*/*') else self.output_json() \
             if req.type == JSON_RES else req.server_response
 
-    # @staticmethod
     async def _access_module(self, resolver_path: str) -> tuple:
         from pyonir import Site
-        from pyonir.types import PyonirPlugin
         if resolver_path.startswith(LOOKUP_DIR_PREFIX):
             return None, self.process_value_type(resolver_path)
         pkg = resolver_path.split('.')
@@ -371,8 +379,9 @@ class Parsely:
             module, resolver = get_module(mod_path, meth_name)
             # resolver = get_attr(Site.server.resolvers, resolver_path)
         else:
-            isplugin: PyonirPlugin = list(filter(lambda p: p.module == pkg[0], Site.available_plugins))
-            if len(isplugin): isplugin = isplugin[0]
+            isplugin = list(filter(lambda p: p.module == pkg[0], Site.available_plugins))
+            if len(isplugin):
+                isplugin = isplugin[0]
             if isplugin:
                 pkg.pop(0)
                 resolver = get_attr(isplugin, resolver_path)
@@ -387,42 +396,44 @@ class Parsely:
 
     async def process_route(self, pyonir_request: PyonirRequest, app: 'PyonirApp'):
         """Processes dynamic routes from @routes property"""
-        routes_obj: dict | None = self.data.get('@routes')
-        _slug = self.data.get('slug')
-        if not routes_obj or _slug == pyonir_request.slug: return None
+        router_obj: dict | None = self.data.get('@routes') or self.data
+        is_not_router = pyonir_request.file.file_exists and not pyonir_request.file.is_router
+        if not router_obj or is_not_router or app.endpoint == pyonir_request.url: return None
         from starlette.routing import compile_path
-        base_url = "/".join(pyonir_request.parts[0:pyonir_request.parts.index(_slug)+1])
+        base_url = "/".join(pyonir_request.parts[0:pyonir_request.parts.index(app.endpoint.lstrip(os.path.sep))+1])
         path = pyonir_request.path
-        route_value = None
+        router_method = None
         match = None
-        for r in routes_obj.keys():
+        # v_page = Parsely('') # error page by default until route has match
+        for r in router_obj.keys():
             if match: break
             relpath = f"/{base_url}{r}"
             path_regex, path_format, *args = compile_path(relpath)
             match = path_regex.match(path)
             if match:
                 pyonir_request.path_params.update(match.groupdict())
-                value = routes_obj[r]
-                key = None
-                if isinstance(value, dict):
-                    key, value = tuple(value.items())[0]
-                if isinstance(value, str):
-                    _, route_value = await self._access_module(value)
-                if key: # only functions and files in pages can be returned. keyed values are added to requested page data
-                    self.data[key] = route_value or value
-                if not callable(route_value) and not key:
-                    print('@routes must return a callable or a file from the pages directory')
-        if match or route_value:
-            self.route = route_value
+                self.refresh_data()
+                value = self.data[r]
+                virtual_req = value.get(pyonir_request.method) or value.get('page')
+                method_mod_path = value.get('call')
+                is_page = value.get('page') is not None
+                if is_page:
+                    self.data = virtual_req
+                if method_mod_path:
+                    _, router_method = await self._access_module(method_mod_path)
+
+        if match or router_method:
             self.data.update({"url": pyonir_request.url, "slug": pyonir_request.slug})
+            self.resolver = router_method
         else:
             # When no matching route spec is found we return an error page
-            pyonir_request.file.file_path = ''
+            self.file_path = ''
+            pass
 
     async def process_resolver(self, request: PyonirRequest):
         """Resolves dynamic data from external methods"""
         resolver_obj = self.data.get(RESOLVER_KEY, {}).get(request.method)
-        if not resolver_obj: return
+        if not resolver_obj or self.resolver is not None: return
         resolver_path = resolver_obj.get('call')
         resolver_args = resolver_obj.get('args')
         resolver_redirect = resolver_obj.get('redirect')
@@ -527,8 +538,9 @@ class Parsely:
             in_limit = cur + 1 < self.file_line_count
             stop_comm_blok = self.file_lines[cur].strip().endswith(stop_str) if in_limit and stop_str else None
             nxt_curs_is_blok = in_limit and self.file_lines[cur + 1].startswith(BLOCK_PREFIX_STR)
+            nxt_curs_is_blokb = in_limit and self.file_lines[cur + 1].strip().endswith(":|")
             nxt_curs_tabs = count_tabs(self.file_lines[cur + 1]) if (in_limit and not is_blob) else -1
-            return '__STOPLOOKAHEAD__' if stop_comm_blok or nxt_curs_is_blok or (
+            return '__STOPLOOKAHEAD__' if stop_comm_blok or nxt_curs_is_blok or nxt_curs_is_blokb or (
                     nxt_curs_tabs < curtabs and not is_blob) else None
 
         stop = False
@@ -551,7 +563,7 @@ class Parsely:
                         output_data += ln_frag + "\n"
                     elif not comment and not stop_str:
                         inlimts = cursor + 1 < self.file_line_count
-                        is_block = ln_frag.startswith(BLOCK_PREFIX_STR)
+                        is_block = ln_frag.startswith(BLOCK_PREFIX_STR) or ln_frag.endswith("|")
                         is_parent = True if is_block else count_tabs(
                             self.file_lines[cursor + 1]) > tabs if inlimts else False
                         parsed_key, val_type, parsed_val, methArgs = process_iln_frag(ln_frag)
@@ -560,7 +572,7 @@ class Parsely:
                         if is_parent or is_block:
                             parsed_key = parsed_val if not parsed_key else parsed_key
                             parsed_key = "content" if parsed_key == BLOCK_PREFIX_STR else parsed_key.replace(
-                                BLOCK_PREFIX_STR, "").strip()
+                                BLOCK_PREFIX_STR, "").replace(":|",'').strip()
                             cursor, parsed_val = self.process_line(cursor + 1, output_data=val_type,
                                                                    is_blob=isinstance(val_type, str))
                             if isinstance(parsed_val, list) and '-' in parsed_val:  # consolidate list of maps
@@ -666,27 +678,6 @@ class Parsely:
 
         return valuestr.lstrip('$')
 
-    # def parse_reference(self, line_value: str):
-    #     query_params = line_value.split("?").pop() if "?" in line_value else False
-    #     has_attr_path = line_value.split("#")[-1] if "#" in line_value else ''
-    #     line_value = line_value.replace(f"{LOOKUP_DIR_PREFIX}/", "") \
-    #     .replace(f"?{query_params}", "") \
-    #     .replace(f'#{has_attr_path}', '')
-    #     query_params = dict(map(lambda x: x.split("="), query_params.split('&')) if query_params else '')
-    #     use_rel = line_value.startswith('./')
-    #     return_all_files = line_value.endswith('/*')
-    #     generic_model_properties = query_params.get('model')
-    #     line_value = line_value.replace('../', '').replace('/*', '')
-    #     dir_root = self.file_contents_dirpath if not use_rel else self.file_dirpath
-    #     lookup_fpath = os.path.join(dir_root, *line_value.split("/"))
-    #     if not os.path.exists(lookup_fpath):
-    #         print({
-    #         'ISSUE': f'FileNotFound while processing {line_value}',
-    #         'SOLUTION': f'Make sure the `{lookup_fpath}` file exists. Note that only valid md and json files can be processed.'
-    #         })
-    #         return line_value
-    #     return EmbeddedTypes.get(lookup_fpath, parse_ref_to_files(lookup_fpath, os.path.isdir(lookup_fpath)))
-    #
     @staticmethod
     def serializer(json_map: any, namespace: list = [], inline_mode: bool = False, filter_params=None) -> str:
         """Converts json string into parsely string"""
@@ -889,12 +880,19 @@ class Parsely:
             return None
         return PyonirCollection.prev_next(self)
 
-
     def output_json(self, data_value: any = None, as_str=True):
         """Outputs a json string"""
+        # TODO: structure proper REST response to adhere to public schema prior to serving
         from .utilities import json_serial
-        if not as_str: return {"data": data_value or self}
-        return json.dumps({"data": data_value or self}, default=json_serial)
+        data = data_value or self
+        rest_response = {
+            'message': '',
+            'status': 'success',
+            'data': data,
+            'meta': {},
+        }
+        if not as_str: return rest_response
+        return json.dumps(rest_response, default=json_serial)
 
     def output_html(self, req: PyonirRequest):
         """Renders and html output"""

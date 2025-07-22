@@ -1,5 +1,5 @@
 from pyonir.libs.app_setup.backend.models.EmailSubscriber import EmailSubscriber
-from pyonir.types import PyonirRequest, PyonirRoute, PyonirRouters
+from pyonir.core import PyonirRequest, PyonirRoute, PyonirRouters
 
 
 async def dynamic_lambda(request: PyonirRequest) -> str:

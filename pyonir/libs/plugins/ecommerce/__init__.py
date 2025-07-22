@@ -1,7 +1,8 @@
 import os
 
 from pyonir import process_contents
-from pyonir.types import PyonirApp, PyonirRequest, PyonirPlugin
+from pyonir.types import PyonirApp, PyonirRequest
+from pyonir.core import PyonirPlugin
 from .backend.filters import babelmoney
 
 

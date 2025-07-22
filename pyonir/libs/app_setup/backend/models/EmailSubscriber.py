@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from pyonir.types import PyonirSchema
+from pyonir.core import PyonirSchema
 
 
 @dataclass

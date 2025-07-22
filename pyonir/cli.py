@@ -31,6 +31,9 @@ class PyonirSetup:
         self.intro()
 
     def intro(self):
+        self.decide_project_name()
+
+    def long_intro(self):
         print("Welcome to the Pyonir Web framework!")
         # Step 1: Choose an action
         self.action = inquirer.prompt([

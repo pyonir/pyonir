@@ -4,7 +4,7 @@ import typing
 from typing import Union, Generator, Iterable,Callable, Mapping, get_origin, get_args, get_type_hints
 from collections.abc import Iterable as ABCIterable
 
-from pyonir.types import PyonirRequest, PyonirSchema
+from pyonir.core import PyonirRequest
 
 
 def is_iterable(tp):

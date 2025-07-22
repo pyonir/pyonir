@@ -2,7 +2,8 @@ import os, pytz, re, json
 from datetime import datetime
 from dataclasses import dataclass, field
 
-from .types import PyonirRequest, ParselyCollection, PyonirCollection, PyonirSchema
+from .core import PyonirRequest, PyonirCollection, PyonirSchema
+from .types import ParselyPagination
 from .utilities import dict_to_class, get_attr, get_all_files_from_dir, deserialize_datestr, create_file, get_module, \
     cls_mapper
 
@@ -71,7 +72,7 @@ class Page:
     content: str = ''
     slug: str = ''
     author: str = 'pyonir'
-    entries: ParselyCollection = None
+    entries: ParselyPagination = None
     gallery: dict = None
     file_name: str = ''
     file_path: str = ''

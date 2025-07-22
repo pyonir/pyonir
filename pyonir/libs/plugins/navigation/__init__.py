@@ -1,6 +1,6 @@
 import dataclasses
-from pyonir.types import PyonirRequest, PyonirApp, PyonirPlugin, PyonirCollection
-
+from pyonir.types import PyonirRequest, PyonirApp
+from pyonir.core import PyonirPlugin, PyonirCollection
 
 @dataclasses.dataclass
 class Menu:

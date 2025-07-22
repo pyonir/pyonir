@@ -2,7 +2,7 @@
 import os, sys
 from pyonir import utilities
 from pyonir.parser import Parsely
-from pyonir.types import PyonirHooks, PyonirOptions, TemplateEnvironment, PyonirRequest, PyonirApp
+from pyonir.core import PyonirHooks, TemplateEnvironment, PyonirRequest, PyonirApp
 from pyonir.utilities import dict_to_class, get_attr, process_contents, load_env
 
 # Pyonir settings
@@ -26,6 +26,6 @@ def init(entry_file_path: str, options: dict = None):
     """Initializes existing Pyonir application"""
     global Site
     # Set Global Site instance
-    if options: options = PyonirOptions(**(options or {}))
+    # if options: options = PyonirOptions(**(options or {}))
     Site = PyonirApp(entry_file_path)
     return Site

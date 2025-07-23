@@ -13,17 +13,13 @@ From pypi:
 
 Manually create a `main.py` file from an empty directory with the following values.
 
+**Example**
 ```markdown
 your_project/
-├─ backend/
-├─ contents/
-│  └─ pages/
-├─ frontend/
-│  └─ themes/
-├─ main.py
-└─ .env
+    └─ main.py
 ```
 
+**Example main.py file**
 ```python
 import pyonir
 app = pyonir.init(__file__)
@@ -34,7 +30,17 @@ app.run()
 or scaffold a demo web application from the cli:
 
 ```bash
-~ pyonir-create
+> pyonir-create
+```
+
+This will generate the following directory structure
+
+```md
+your_project/
+    ├─ backend/
+    ├─ contents/
+    ├─ frontend/
+    └─ main.py
 ```
 
 ### Configure Contents

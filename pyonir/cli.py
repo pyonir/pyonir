@@ -1,26 +1,13 @@
 import os, inquirer
-from . import PYONIR_SETUPS_DIRPATH, utilities
 
 
 class PyonirSetup:
     create_app_msg = "Create a new Pyonir app"
     exit_cli_msg = "Exiting Pyonir cli"
 
-    def create_new_app(self):
-        """Creates new pyonir application directories"""
-        self.decide_clear_dir()
-        backend_dirpath = os.path.join(PYONIR_SETUPS_DIRPATH, 'backend')
-        frontend_dirpath = os.path.join(PYONIR_SETUPS_DIRPATH, 'frontend')
-        entry_filepath = os.path.join(PYONIR_SETUPS_DIRPATH, 'main.py')
-        if not os.path.exists(self.app_path):
-            utilities.copy_assets(backend_dirpath, os.path.join(self.app_path, 'backend'), False)
-            utilities.copy_assets(entry_filepath, os.path.join(self.app_path, 'main.py'), False)
-        if self.app_use_frontend:
-            utilities.copy_assets(frontend_dirpath, os.path.join(self.app_path, 'frontend'), False)
-            pass
 
     def __init__(self):
-        self.app_path = None
+        self.app_path = os.getcwd()
         self.frontend_tool = None
         self.app_use_frontend = None
         self.app_name: str = ""
@@ -30,8 +17,36 @@ class PyonirSetup:
         self.summary: str = ""
         self.intro()
 
+    def create_new_app(self):
+        """Creates new pyonir application directories"""
+        from pyonir.utilities import copy_assets
+        from pyonir import PYONIR_SETUPS_DIRPATH
+
+        self.decide_clear_dir()
+        copy_assets(PYONIR_SETUPS_DIRPATH, self.app_path, False)
+        # backend_dirpath = os.path.join(PYONIR_SETUPS_DIRPATH, 'backend')
+        # frontend_dirpath = os.path.join(PYONIR_SETUPS_DIRPATH, 'frontend')
+        # entry_filepath = os.path.join(PYONIR_SETUPS_DIRPATH, 'main.py')
+        # if not os.path.exists(self.app_path):
+        #     copy_assets(backend_dirpath, os.path.join(self.app_path, 'backend'), False)
+        #     copy_assets(backend_dirpath, os.path.join(self.app_path, 'contents'), False)
+        #     copy_assets(entry_filepath, os.path.join(self.app_path, 'main.py'), False)
+        # if self.app_use_frontend:
+        #     copy_assets(frontend_dirpath, os.path.join(self.app_path, 'frontend'), False)
+        #     pass
+
     def intro(self):
+        print(self.app_path)
         self.decide_project_name()
+        self.decide_use_frontend()
+        self.create_new_app()
+        self.summary = f'''
+Project {self.app_name} created!
+- path: {self.app_path}
+- use frontend: {self.app_use_frontend}
+        '''
+        print(self.summary)
+        exit(0)
 
     def long_intro(self):
         print("Welcome to the Pyonir Web framework!")
@@ -81,11 +96,23 @@ Project {self.app_name} created!
                           message="What is your project named?"
                           ),
         ])['app_name']
+        self.app_path = os.path.join(self.app_path, self.app_name)
 
-        self.app_path = os.path.join(self.user_dir, self.app_name)
+    def decide_use_frontend(self):
+        # print("You chose Task 1!")
+        # Additional options or tasks for Task 1
+        # Choose an App Name
+        app_use_frontend = inquirer.prompt([
+            inquirer.List('app_use_frontend',
+                          message="Will the project need a frontend theme?",
+                          choices=['Yes', 'No']
+                          )
+        ])['app_use_frontend']
+
+        self.app_use_frontend = True if app_use_frontend == 'Yes' else False
 
     def decide_clear_dir(self):
-        if os.path.exists(self.app_path):
+        if self.app_path and os.path.exists(self.app_path):
             override = inquirer.prompt([
                         inquirer.Text('override',
                       message="Pyonir app already exists. Would you like to start with a clean directory?"
@@ -93,19 +120,6 @@ Project {self.app_name} created!
                     ])['override']
             if override:
                 print('delete this directory', self.app_path)
-
-    def decide_use_frontend(self):
-        # Choose optional Frontend
-        app_use_frontend = inquirer.prompt([
-            inquirer.Text('app_use_frontend',
-                          message="Would you like to use a frontend? (y=Yes or n=No)"
-                          ),
-        ])['app_use_frontend']
-        self.app_use_frontend = True if app_use_frontend.lower() == 'y' else False
-        if self.app_use_frontend:
-            self.decide_frontend_tool()
-
-        self.outro()
 
     def decide_frontend_tool(self):
         self.frontend_tool = inquirer.prompt([

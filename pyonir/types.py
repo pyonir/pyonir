@@ -208,6 +208,7 @@ class PyonirBase:
     CONFIG_FILENAME: str
 
 class PyonirApp(PyonirBase):
+    configs: object
     request_paths: str
     nginx_config_filepath: str
     unix_socket_filepath: str

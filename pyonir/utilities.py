@@ -437,7 +437,7 @@ def generate_base64_id(value):
 
 def load_env(path=".env") -> object:
     from collections import defaultdict
-
+    if not os.path.exists(path): return {}
     def set_nested(d, keys, value):
         """Helper to set value in nested dictionary using dot-separated keys."""
         for key in keys[:-1]:

@@ -1,5 +1,5 @@
 {% if page.entries %}
-<div iml-app id="listingComponent">
+<div id="listingComponent">
     {# <iml> tags written in this template are reactive text fragments used with the optimljs library #}
     {%- include 'components/pagination.html' -%}
     <div class="list-search">
@@ -23,8 +23,8 @@
         {%- for entry in page.entries.items %}
         <li class="list-item" each="entry in filteredItems" index="{{loop.index0}}">
             <div class="head">
-                <a class="title" href="{{entry.url}}" attrs="{href: entry.url}"><iml js="i+1">{{loop.index}}</iml>.
-                    <iml js="highlight(entry.title)" html>{{entry.title}}</iml>
+                <a class="title" href="{{entry.url}}" attrs="{href: entry.url}">{{loop.index}}.
+                    {{entry.title}}
                 </a>
                 <div class="date">{{entry.date.strftime('%a, %B %d')}}</div>
             </div>
@@ -33,7 +33,7 @@
                 <ul>
                     {%- for color in ['red','green','blue'] %}
                     <small class="color-chips" each="color in colors" index="{{loop.index0}}">
-                        <iml js="i+1">{{loop.index}}.</iml> <iml js="(color)">{{color}}</iml>
+                        {{loop.index}}.{{color}}
                         <button attrs onclick="{deleteColor}">X</button>
                     </small>
                     {% endfor %}
@@ -43,46 +43,7 @@
         {%- endfor %}
     </ul>
 </div>
-<script type="importmap">
-  {
-    "imports": { "optiml": "http://localhost:3000/index.js" }
-  }
-</script>
-<script type="module">
-// import {render} from "/public/js/optiml.min.js";
-import {render} from "optiml";
-function highlight(txt){
-    const char = listingComponent.state.filter;
-    if(!char) return txt;
-    const regex = new RegExp(String.raw`${char}`,'g');
-    return txt.replace(regex, `<span class="hlt">${char}</span>`);
-}
-function filterSearch(evt, state, app){
-    state.filter = evt.target.value;
-    app._update()
-}
-const state = {
-    colors: ['red','green','blue'],
-    filter: '',
-    highlight,
-    filterSearch,
-    get filteredItems(){
-        return this.filter ? this.entries.items.filter(x=> x.title.toLowerCase().indexOf(this.filter.toLowerCase()) > -1) : [...this.entries.items];
-    }
-};
-state.entries = {{page.entries | asjson }};
-const actions = {
-    deleteColor(evt, {color, i}, state){
-        state.colors.splice(i, 1)
-    },
-    addColor(evt, state){
-        state.colors.push('foo'+Math.random())
-    },
-    highlight,
-    filterSearch
-}
-render(listingComponent, {state, actions});
-</script>
+
 <style>
     .hlt {
     background: yellow;

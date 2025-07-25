@@ -7,4 +7,4 @@ class FileUploader(PyonirPlugin):
 
     def __init__(self, app: PyonirApp):
         super().__init__(app, __file__)
-        self.resolvers_dirpath = os.path.join(self.app_dirpath, 'resolvers')
+        # self.resolvers_dirpath = os.path.join(self.app_dirpath, 'resolvers')

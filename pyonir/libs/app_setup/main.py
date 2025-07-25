@@ -1,5 +1,5 @@
-import os, pyonir
-from backend.controllers import endpoints
+import pyonir
+from backend import router
 # application configuration options
 # options = {
 #     "contents_dirpath": os.path.dirname(__file__)
@@ -15,4 +15,4 @@ demo_app = pyonir.init(__file__)
 # demo_app.generate_static_website()
 
 # Run server
-demo_app.run(routes=endpoints)
+demo_app.run(routes=router)

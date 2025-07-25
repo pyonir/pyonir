@@ -4,7 +4,7 @@ import typing
 from typing import Union, Generator, Iterable,Callable, Mapping, get_origin, get_args, get_type_hints
 from collections.abc import Iterable as ABCIterable
 
-from pyonir.core import PyonirRequest
+from pyonir.types import PyonirRequest
 
 
 def is_iterable(tp):
@@ -86,7 +86,9 @@ def cls_mapper(file_obj: any, cls: typing.Callable, from_request: PyonirRequest 
                 if is_instance and from_request:
                     param_value = cls_mapper(from_request.form, param_type)
                 should_spread = isinstance(param_value, dict)
-                cls_args[param_name] = param_value if is_typed or is_instance else param_type(**param_value) if should_spread else param_type(param_value)
+                use_value = param_type == PyonirRequest and from_request or is_typed or is_instance
+                v = param_value if use_value else param_type(**param_value) if should_spread else param_type(param_value)
+                cls_args[param_name] = v
 
         if from_request: return cls_args
         if not from_request and param_type_map: res = cls(**cls_args)
@@ -279,6 +281,7 @@ def get_all_files_from_dir(abs_dirpath: str,
     """Returns a generator of files from a directory path"""
 
     from pyonir.parser import ALLOWED_CONTENT_EXTENSIONS, IGNORE_FILES,Page, Parsely, ParselyMedia
+    from pyonir.core import PyonirBase
     if abs_dirpath in (exclude_dirs or []): return []
     if exclude_file is None: exclude_file = []
     _, _, pages_dirpath, _ = app_ctx
@@ -298,17 +301,12 @@ def get_all_files_from_dir(abs_dirpath: str,
     def should_skip(parentdir, filename):
         parentdir = parentdir.replace(pages_dirpath, "").lstrip(os.path.sep)
         is_hidden_dir = parentdir.startswith(IGNORE_FILES)
-        is_invalid_file = not filename.endswith(ALLOWED_CONTENT_EXTENSIONS)
+        is_media_file = filename.endswith(PyonirBase.MEDIA_EXTENSIONS)
+        is_invalid_file = not is_media_file and not filename.endswith(ALLOWED_CONTENT_EXTENSIONS)
         is_ignored_file = filename in (IGNORE_FILES + tuple(exclude_file))
         is_private_file = filename.startswith(IGNORE_FILES)
         if filename!='.routes.md' and force_all and not is_invalid_file: return False
         if is_hidden_dir or is_invalid_file or is_ignored_file or is_private_file: return True
-        # if not filename:
-        #     return False if is_hidden_dir else True
-        # else:
-        #     is_hidden_file = filename.startswith(IGNORE_FILES)
-        #     is_filetype = filename.endswith(ALLOWED_CONTENT_EXTENSIONS)
-        #     return False if is_filetype and is_hidden_file or is_hidden_dir else True
 
     for parentdir, subs, files in os.walk(os.path.normpath(abs_dirpath)):
         folderRoot = parentdir.replace(pages_dirpath, "").lstrip(os.path.sep)
@@ -400,7 +398,7 @@ def json_serial(obj):
     elif hasattr(obj, 'to_json'):
         return obj.to_json()
     else:
-        return None if not hasattr(obj, '__dict__') else obj.__dict__
+        return obj if not hasattr(obj, '__dict__') else obj.__dict__
 
 
 def load_modules_from(pkg_dirpath, as_list: bool = False)-> tuple[dict[str, object], dict[str, typing.Callable]]:

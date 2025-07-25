@@ -1,1 +1,0 @@
-from .demo_controller import endpoints

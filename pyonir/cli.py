@@ -1,4 +1,5 @@
 import os, inquirer
+from pathlib import Path
 
 
 class PyonirSetup:
@@ -23,16 +24,17 @@ class PyonirSetup:
         from pyonir import PYONIR_SETUPS_DIRPATH
 
         self.decide_clear_dir()
-        copy_assets(PYONIR_SETUPS_DIRPATH, self.app_path, False)
-        # backend_dirpath = os.path.join(PYONIR_SETUPS_DIRPATH, 'backend')
-        # frontend_dirpath = os.path.join(PYONIR_SETUPS_DIRPATH, 'frontend')
-        # entry_filepath = os.path.join(PYONIR_SETUPS_DIRPATH, 'main.py')
+        # copy_assets(PYONIR_SETUPS_DIRPATH, self.app_path, False)
+        backend_dirpath = Path(os.path.join(PYONIR_SETUPS_DIRPATH, 'backend'))
+        frontend_dirpath = os.path.join(PYONIR_SETUPS_DIRPATH, 'frontend')
+        entry_filepath = os.path.join(PYONIR_SETUPS_DIRPATH, 'main.py')
+
+        copy_assets(entry_filepath, os.path.join(self.app_path, 'main.py'), False)
         # if not os.path.exists(self.app_path):
         #     copy_assets(backend_dirpath, os.path.join(self.app_path, 'backend'), False)
         #     copy_assets(backend_dirpath, os.path.join(self.app_path, 'contents'), False)
-        #     copy_assets(entry_filepath, os.path.join(self.app_path, 'main.py'), False)
-        # if self.app_use_frontend:
-        #     copy_assets(frontend_dirpath, os.path.join(self.app_path, 'frontend'), False)
+        if self.app_use_frontend:
+            copy_assets(frontend_dirpath, os.path.join(self.app_path, 'frontend'), False)
         #     pass
 
     def intro(self):
@@ -129,5 +131,5 @@ Project {self.app_name} created!
                           ),
         ])['use_frontend_tool']
 
-
-PyonirSetup()
+if __name__ == '__main__':
+    setup = PyonirSetup()

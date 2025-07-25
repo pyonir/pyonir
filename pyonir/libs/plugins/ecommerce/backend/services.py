@@ -259,7 +259,7 @@ class OrderService:
         self.gateway = 'paypal'
         self.shop_app = ecommerce_app
         self.orders_dirpath = os.path.join(ecommerce_app.contents_dirpath, 'orders')
-        paypal_configs = ecommerce_app.configs.env.get(self.gateway).get('sandbox' if ecommerce_app.app.is_dev else 'prod')
+        paypal_configs = ecommerce_app.configs.env.get(self.gateway,{}).get('sandbox' if ecommerce_app.app.is_dev else 'prod')
         square_configs = ecommerce_app.configs.env.get('square')
         self.paypalClient: PayPalClient = PayPalClient(client_secret=paypal_configs.get('secret'), client_id=paypal_configs.get('client_id'), sandbox=ecommerce_app.app.is_dev)
         self.squareClient: SquareClient = SquareClient(env_configs=square_configs, sandbox=ecommerce_app.app.is_dev)

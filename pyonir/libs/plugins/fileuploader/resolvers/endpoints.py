@@ -5,7 +5,6 @@ import os
 async def delete_file(request: PyonirRequest):
     """Deletes a document"""
     from pyonir import Site
-    import os
     docpath = os.path.join(Site.uploads_dirpath, getattr(request.query_params,'file_id'))
     doc: ParselyMedia = ParselyMedia.from_path(docpath, Site.app_ctx)
     if doc.file_exists:

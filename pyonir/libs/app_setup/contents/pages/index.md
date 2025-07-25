@@ -1,7 +1,7 @@
 @filter.jinja:- content
 title: Pyonir
 menu.group: primary
-entries: $dir/pages?limit=9
+entries: $dir/pages?limit=15
 ===
 <section class="toc">
 <header class="hanken-grotesk-regular">

@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from enum import StrEnum
 import os
-from typing import Optional, Union
+from typing import Optional, Union, Callable, List, Tuple
 
 from starlette.applications import Starlette
 
@@ -10,22 +10,53 @@ JSON_RES: str = 'application/json'
 EVENT_RES: str = 'text/event-stream'
 PAGINATE_LIMIT: int = 6
 
-RoutePath: str = str()
-RouteFunction: callable = callable
-RouteMethods: list[str] = []
-PyonirRoute: [RoutePath, RouteFunction, RouteMethods] = []
-PyonirRouters: [(RoutePath, [PyonirRoute])] = []
 
-AppName: str = str()
-ModuleName: str = str()
-AppEndpoint: str = str()
-AppPaths: list[str] = []
-AppContentsPath: str = str()
-AppSSGPath: str = str()
-AppContextPaths: list[AppName, RoutePath, AppPaths] = []
-AppCtx: list[ModuleName, RoutePath, AppContentsPath, AppSSGPath] = []
-AppRequestPaths: tuple[RoutePath, AppPaths] = '',''
+# === Route Definitions ===
 
+RoutePath = str
+"""Represents the URL path of a route (e.g., '/about', '/api/data')."""
+
+RouteFunction = Callable
+"""A callable that handles a specific route request (e.g., controller function)."""
+
+RouteMethods = List[str]
+"""HTTP methods supported by a route (e.g., ['GET', 'POST'])."""
+
+PyonirRoute = Tuple[RoutePath, RouteFunction, RouteMethods]
+"""A single route entry containing the path, its handler function, and allowed HTTP methods."""
+
+PyonirRouters = List[Tuple[RoutePath, List[PyonirRoute]]]
+"""A list of route groups, each keyed by a base path and containing multiple PyonirRoute entries."""
+
+
+# === Application Module Definitions ===
+
+AppName = str
+"""The name identifier for an app module."""
+
+ModuleName = str
+"""The Python module name used for import or registration."""
+
+AppEndpoint = str
+"""The base endpoint path where the app is mounted."""
+
+AppPaths = List[str]
+"""A list of file or URL paths associated with the app."""
+
+AppContentsPath = str
+"""The root path to the static or content files of the app."""
+
+AppSSGPath = str
+"""The path used for static site generation output."""
+
+AppContextPaths = Tuple[AppName, RoutePath, AppPaths]
+"""Context binding tuple that connects an app name to a route and its associated paths."""
+
+AppCtx = Tuple[ModuleName, RoutePath, AppContentsPath, AppSSGPath]
+"""Full application context including module reference and content/static paths."""
+
+AppRequestPaths = Tuple[RoutePath, AppPaths]
+"""Tuple representing an incoming request path and all known paths for resolution."""
 
 @dataclass
 class ParselyPagination:

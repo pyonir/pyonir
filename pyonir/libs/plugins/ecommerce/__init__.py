@@ -20,7 +20,7 @@ class Ecommerce(PyonirPlugin):
         super().__init__(app, __file__)
 
         self.configs = process_contents(os.path.join(self.contents_dirpath, 'configs'), app_ctx=self.app_ctx)
-        setattr(self.configs, 'env', getattr(app.configs.env, self.name))
+        setattr(self.configs, 'env', getattr(app.configs.env, self.name) if app.configs.env else {})
 
         # Setup services
         self.productService = ProductService(self, app)
@@ -72,7 +72,7 @@ class Ecommerce(PyonirPlugin):
         self.app.server.url_map[f"{self.module}.cart"] = {"path": f"{self.endpoint}/cart"}
 
     async def on_request(self, request: PyonirRequest, app: PyonirApp):
-        if request.method == 'POST': return
+        if request.method == 'POST' or not hasattr(self, 'cartService'): return
         cart_items = self.cartService.view_cart(request)
         app.TemplateEnvironment.globals['cart_items'] = cart_items
         pass

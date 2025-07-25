@@ -6,8 +6,19 @@ menu.group: primary
 This page demonstrates the functionality of websockets using pycasso library.
 Visit this page in another browser to test functionality.
 
-[Check out the Game demo](/ws-game)
-
+<style>
+#inbox article {
+    border-radius: 20px;
+    padding: 1rem 2rem;
+    background: greenyellow;
+    margin-bottom: 1rem;
+    &.client-msg {
+    
+        text-align: right;
+        background: aliceblue;
+    }
+}
+</style>
 <div style="display:block;">
 <dl>
     <dt>Your Chat ID:</dt>

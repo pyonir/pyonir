@@ -4,7 +4,7 @@ import os, typing, json, inspect
 from starlette.websockets import WebSocket, WebSocketState, WebSocketDisconnect
 
 # from pyonir import ASSETS_ROUTE, UPLOADS_ROUTE, PAGINATE_LIMIT, API_ROUTE, API_DIRNAME
-from pyonir.core import PyonirApp, PyonirRequest, PyonirServer, PyonirHooks
+from pyonir.types import PyonirApp, PyonirRequest, PyonirServer, PyonirHooks
 from pyonir.utilities import create_file, get_attr, cls_mapper
 
 TEXT_RES = 'text/html'
@@ -99,7 +99,6 @@ async def pyonir_sse_handler(request: PyonirRequest) -> typing.AsyncGenerator:
         await asyncio.sleep(interval)  # Wait for 5 seconds before sending the next message
         res = process_sse(last_client)
         yield res
-
 
 async def pyonir_docs_handler(request: PyonirRequest):
     """Documentation for every endpoint by pyonir"""
@@ -282,10 +281,10 @@ def _add_route(dec_func: typing.Callable | None,
         return Site.server.add_websocket_route(path, dec_func, dec_func.__name__)
 
     async def dec_wrapper(star_req):
-        from pyonir.parser import Parsely
+        from pyonir.core import PyonirRequest
         if star_req.url.path == '/favicon.ico': return serve_favicon(Site)
         # Resolve page file route
-        pyonir_request: PyonirRequest = PyonirRequest(star_req)
+        pyonir_request = PyonirRequest(star_req)
         await pyonir_request.process_request_data()
         # app_ctx, req_filepath = resolve_path_to_file(star_req.url.path, Site)
 
@@ -295,15 +294,14 @@ def _add_route(dec_func: typing.Callable | None,
 
         # Query File system for Page from request
         app_ctx, req_file = pyonir_request.resolve_request_to_file(star_req.url.path, Site)
-        # req_file = Parsely(req_filepath or '', app_ctx.app_ctx)
         pyonir_request.file = req_file
+        pyonir_request.app_ctx_name = app_ctx.name
 
         # Preprocess routes or resolver endpoint from file
         await req_file.process_route(pyonir_request, app_ctx)
         await req_file.process_resolver(pyonir_request)
         route_func = dec_func if not req_file.resolver else req_file.resolver
-        # if req_file.route and callable(req_file.route):
-        #     route_func = req_file.route
+
 
         # Get router endpoint from map
         if callable(route_func):

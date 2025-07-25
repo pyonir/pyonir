@@ -1,5 +1,5 @@
-from pyonir.libs.app_setup.backend.models.EmailSubscriber import EmailSubscriber
-from pyonir.core import PyonirRequest, PyonirRoute, PyonirRouters
+from pyonir.types import PyonirRequest
+from .models.EmailSubscriber import EmailSubscriber
 
 
 async def dynamic_lambda(request: PyonirRequest) -> str:
@@ -21,18 +21,3 @@ async def subscriber_values(email: str, subscriptions: list[str]):
 
 async def some_route(request: PyonirRequest):
     return "hello router annotation"
-
-
-# Define routes
-
-routes: list[PyonirRoute] = [
-    ['/items', demo_items, ["GET"]],
-    ['/items/{sample_id:int}', demo_items, ["GET"]],
-    ['/subscribe_values', subscriber_values, ["POST"]],
-    ['/subscribe_model', subscriber_model, ["POST"]],
-]
-
-# Define an endpoint
-endpoints: PyonirRouters = [
-    ('/api/demo', routes)
-]

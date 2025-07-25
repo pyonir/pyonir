@@ -3,7 +3,7 @@ from datetime import datetime
 from dataclasses import dataclass, field
 
 from .core import PyonirRequest, PyonirCollection, PyonirSchema
-from .types import ParselyPagination
+from .types import ParselyPagination, PyonirBase
 from .utilities import dict_to_class, get_attr, get_all_files_from_dir, deserialize_datestr, create_file, get_module, \
     cls_mapper
 
@@ -144,7 +144,7 @@ class ParselyMedia:
     @classmethod
     def from_path(cls, file_path, app_ctx):
         p = Parsely(file_path, app_ctx)
-        return p.map_to_model(cls)
+        return p.map_to_model(cls) if p.file_exists else None
 
     def resize(self, sizes=None):
         '''
@@ -298,16 +298,15 @@ class Parsely:
         if self.file_ext.endswith(ALLOWED_CONTENT_EXTENSIONS): return
         from PIL import Image
         from pyonir import Site
-        group = self.file_dirpath.split(f'{Site.UPLOADS_DIRNAME}{os.path.sep}', 1).pop()
-        group_name = group.split(os.path.sep)[0]
+        group = self.file_dirpath.lstrip('/').split(f'/{Site.UPLOADS_DIRNAME}', 1).pop()
+        group_name = group.lstrip('/').split(os.path.sep)[0]
         image_name, *image_captions = self.file_name.replace('.' + self.file_ext, '').split(IMG_FILENAME_DELIM)
         formatted_name = re.sub(r'[^a-zA-Z0-9]+', ' ', image_name).title()
         formated_caption = "".join(image_captions or formatted_name).title()
-        _slug = f"{Site.UPLOADS_ROUTE}/{group}/{image_name}.{self.file_ext}"
+        _slug = f"{Site.UPLOADS_ROUTE}/{group_name+'/' if group else ''}{image_name}.{self.file_ext}"
         _url = f"{_slug}"
         is_thumb = Site.UPLOADS_THUMBNAIL_DIRNAME in self.file_dirname
-        full_url = _slug.replace(Site.UPLOADS_THUMBNAIL_DIRNAME + '/', '').split('--')[0] + f".{self.file_ext}" \
-            if is_thumb else _url
+        full_url = _slug.replace(Site.UPLOADS_THUMBNAIL_DIRNAME + '/', '').split('--')[0] + f".{self.file_ext}" if is_thumb else _url
         raw_img = Image.open(self.file_path)
         width = get_attr(raw_img, "width", None)
         height = get_attr(raw_img, "height", None)
@@ -325,6 +324,7 @@ class Parsely:
             'width':width, 'height': height,
             # 'raw_img': raw_img,
         }
+        pass
 
     def map_to_model(self, model):
         if not model:
@@ -395,6 +395,26 @@ class Parsely:
                 module, resolver = get_module(pkg_path, meth_name)
         return module, resolver
 
+    async def _access_module_from_request(self, resolver_path: str) -> tuple:
+        from pyonir import Site
+        if resolver_path.startswith(LOOKUP_DIR_PREFIX):
+            return None, self.process_value_type(resolver_path)
+        pkg = resolver_path.split('.')
+        meth_name = pkg.pop()
+        module = None
+
+        app_plugin = list(filter(lambda p: p.module == pkg[0], Site.available_plugins))
+        app_plugin = app_plugin[0] if len(app_plugin) else Site
+        resolver = get_attr(app_plugin, resolver_path)
+        if not resolver:
+            namespace = pkg.pop(0)
+            base_pkg_path = app_plugin.app_dirpath if namespace != 'pyonir' else app_plugin.pyonir_path
+            pkg_path = os.path.join(base_pkg_path, *pkg)+'.py'
+            if not os.path.exists(pkg_path): pkg_path = os.path.join(base_pkg_path, *pkg, '__init__.py')
+            module, resolver = get_module(str(pkg_path), meth_name)
+
+        return module, resolver
+
     async def process_route(self, pyonir_request: PyonirRequest, app: 'PyonirApp'):
         """Processes dynamic routes from @routes property"""
         router_obj: dict | None = self.data.get('@routes') or self.data
@@ -421,7 +441,7 @@ class Parsely:
                 if is_page:
                     self.data = virtual_req
                 if method_mod_path:
-                    _, router_method = await self._access_module(method_mod_path)
+                    _, router_method = await self._access_module_from_request(method_mod_path)
 
         if match or router_method:
             self.data.update({"url": pyonir_request.url, "slug": pyonir_request.slug})
@@ -440,7 +460,7 @@ class Parsely:
         resolver_redirect = resolver_obj.get('redirect')
 
         if not resolver_path: return
-        module, resolver = await self._access_module(resolver_path)
+        module, resolver = await self._access_module_from_request(resolver_path)
 
         request.type = resolver_obj.get('headers', {}).get('accept', request.type)
         if resolver and resolver_args:

@@ -22,7 +22,7 @@ form.inputs:-
     type: submit
     class: btn
 ===form.message
-Thank you for subscribing to {subscriptions}!
+Thank you for subscribing your {email} to {subscriptions}!
 ===form.js
 <script defer>
 art_lovers_form.addEventListener('change', (e)=>{

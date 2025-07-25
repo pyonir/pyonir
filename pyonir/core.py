@@ -4,7 +4,8 @@ import typing, os
 from jinja2 import Environment
 from starlette.requests import Request as StarletteRequest
 
-from pyonir.types import PyonirServer, Theme, PyonirHooks, Parsely, ParselyPagination
+from pyonir.types import PyonirServer, Theme, PyonirHooks, Parsely, ParselyPagination, AppRequestPaths, AppCtx, \
+    PyonirRouters, RoutePath
 
 # Environments
 DEV_ENV:str = 'LOCAL'
@@ -16,21 +17,6 @@ JSON_RES: str = 'application/json'
 EVENT_RES: str = 'text/event-stream'
 PAGINATE_LIMIT: int = 6
 
-RoutePath: str = str()
-RouteFunction: callable = callable
-RouteMethods: list[str] = []
-PyonirRoute: [RoutePath, RouteFunction, RouteMethods] = []
-PyonirRouters: [(RoutePath, [PyonirRoute])] = []
-
-AppName: str = str()
-ModuleName: str = str()
-AppEndpoint: str = str()
-AppPaths: list[str] = []
-AppContentsPath: str = str()
-AppSSGPath: str = str()
-AppContextPaths: list[AppName, RoutePath, AppPaths] = []
-AppCtx: list[ModuleName, RoutePath, AppContentsPath, AppSSGPath] = []
-AppRequestPaths: tuple[RoutePath, AppPaths] = '',''
 
 class PyonirSchema:
     # default_file_attributes = ['file_name','file_path','file_dirname','file_data_type','file_ctx','file_created_on']
@@ -278,6 +264,7 @@ class PyonirRequest:
         if self.slug.startswith('api'): self.headers['accept'] = JSON_RES
         self.type: TEXT_RES | JSON_RES | EVENT_RES = self.headers.get('accept')
         self.status_code: int = 200
+        self.app_ctx_name: str = ''
 
     @property
     def redirect(self):
@@ -345,43 +332,100 @@ class PyonirRequest:
             "status": self.status_code,
             "res": self.server_response,
             "title": f"{self.path} was not found!",
-            "content": f"Perhaps this page once lived but has now been archived or permanently removed."
+            "content": f"Perhaps this page once lived but has now been archived or permanently removed from {self.app_ctx_name}."
         }
 
-    def resolve_request_to_file(self, path_str: str, app: PyonirApp, skip_vanity: bool = False) -> tuple[PyonirApp, Parsely]:
+    def resolve_request_to_file(
+        self,
+        path_str: str,
+        app: PyonirApp,
+        skip_vanity: bool = False
+    ) -> typing.Tuple[PyonirApp, typing.Optional[Parsely]]:
+        """Resolve a request URL to a file on disk, checking plugin paths first, then the main app."""
         from pyonir import Site
         from pyonir.parser import Parsely
-        path_result = ''
         is_home = path_str == '/'
-        if not is_home and hasattr(app, 'available_plugins'):
-            for plg in app.available_plugins:
-                if not hasattr(plg, 'request_paths') or not plg.endpoint: continue
-                plg, path_result = self.resolve_request_to_file(path_str, plg)
-                if path_result: break
-            if path_result: return plg, path_result
 
-        ctx_route, ctx_paths = app.request_paths
-        check_wildcard = ctx_route!='/' and (path_str.startswith(ctx_route) or path_str.replace('/api','').startswith(ctx_route))
-        # ctx_route = ctx_route.replace('/*','')
+        # First, check plugins if available and not home
+        if not is_home and hasattr(app, 'available_plugins'):
+            for plugin in app.available_plugins:
+                if not plugin.request_paths: continue
+                resolved_app, parsed = self.resolve_request_to_file(path_str, plugin)
+                if parsed and parsed.file_exists:
+                    return resolved_app, parsed
+
+        ctx_route, ctx_paths = app.request_paths or ('', [])
+        ctx_route = ctx_route or ''
         ctx_slug = ctx_route[1:]
         path_slug = path_str[1:]
-        reqst_path = [p for p in path_slug.split('/') if p not in ('api', ctx_slug)]
-        if path_str.startswith('/api'): path_str = path_str.replace('/api','')
-        if not is_home and not path_str.startswith(ctx_route): return app, ''
 
-        for rootp in ctx_paths:
-            is_cat = os.path.join(rootp, *reqst_path, 'index.md')
-            is_page = os.path.join(rootp, *reqst_path) + Site.EXTENSIONS['file']
-            for pp in (is_cat, is_page):
-                if not os.path.exists(pp): continue
-                path_result = pp
-                break
-            if path_result: break
-        # if path_result is None and check_wildcard:
-        if not path_result:
-            path_result = os.path.join(app.pages_dirpath, '.routes.md')
+        # Normalize API prefix and path segments
+        if path_str.startswith('/api'):
+            path_str = path_str.replace('/api', '')
 
-        return app, Parsely(str(path_result), app.app_ctx)
+        request_segments = [
+            segment for segment in path_slug.split('/')
+            if segment and segment not in ('api', ctx_slug)
+        ]
+
+        # Skip if no paths or route doesn't match
+        if not ctx_paths or (not is_home and not path_str.startswith(ctx_route)):
+            return app, None
+
+        # Try resolving to actual file paths
+        for root_path in ctx_paths:
+            category_index = os.path.join(root_path, *request_segments, 'index.md')
+            single_page = os.path.join(root_path, *request_segments) + Site.EXTENSIONS['file']
+
+            for candidate in (category_index, single_page):
+                if os.path.exists(candidate):
+                    return app, Parsely(candidate, app.app_ctx)
+
+        # Fallback: check for .routes.md inside pages_dirpath
+        if hasattr(app, 'pages_dirpath'):
+            fallback_route = os.path.join(app.pages_dirpath, '.routes.md')
+            if os.path.exists(fallback_route):
+                return app, Parsely(fallback_route, app.app_ctx)
+
+        return app, Parsely('404_ERROR', app.app_ctx)
+
+    # def xresolve_request_to_file(self, path_str: str, app: PyonirApp, skip_vanity: bool = False) -> tuple[PyonirApp, Parsely|None]:
+    #     from pyonir import Site
+    #     from pyonir.parser import Parsely
+    #     path_result = ''
+    #     is_home = path_str == '/'
+    #     if not is_home and hasattr(app, 'available_plugins'):
+    #         for plg in app.available_plugins:
+    #             if not plg.request_paths: continue
+    #             plg, path_result = self.resolve_request_to_file(path_str, plg)
+    #             if path_result and path_result.file_exists: break
+    #         if path_result and path_result.file_exists:
+    #             return plg, path_result
+    #         else:
+    #             path_result = ''
+    #
+    #     ctx_route, ctx_paths = app.request_paths
+    #     # check_wildcard = ctx_route!='/' and (path_str.startswith(ctx_route) or path_str.replace('/api','').startswith(ctx_route))
+    #     ctx_route = ctx_route or ''
+    #     ctx_slug = ctx_route[1:]
+    #     path_slug = path_str[1:]
+    #     reqst_path = [p for p in path_slug.split('/') if p not in ('api', ctx_slug)]
+    #     if path_str.startswith('/api'): path_str = path_str.replace('/api','')
+    #     if not len(ctx_paths) or (not is_home and not path_str.startswith(ctx_route)): return app, None
+    #
+    #     for rootp in ctx_paths:
+    #         is_cat = os.path.join(rootp, *reqst_path, 'index.md')
+    #         is_page = os.path.join(rootp, *reqst_path) + Site.EXTENSIONS['file']
+    #         for pp in (is_cat, is_page):
+    #             if not os.path.exists(pp): continue
+    #             path_result = pp
+    #             break
+    #         if path_result: break
+    #     # if path_result is None and check_wildcard:
+    #     if not path_result and hasattr(app, 'pages_dirpath'):
+    #         path_result = os.path.join(app.pages_dirpath, '.routes.md')
+    #
+    #     return app, Parsely(str(path_result), app.app_ctx)
 
     @staticmethod
     def process_header(headers):
@@ -414,8 +458,23 @@ class PyonirBase:
     PAGINATE_LIMIT: int = 6
     DATE_FORMAT: str = "%Y-%m-%d %I:%M:%S %p"
     TIMEZONE: str = "US/Eastern"
-    ALLOWED_UPLOAD_EXTENSIONS = {'jpg', 'JPG', 'PNG', 'png', 'txt', 'md', 'jpeg', 'pdf', 'svg', 'gif'}
+    # ALLOWED_UPLOAD_EXTENSIONS: set[str] = {'jpg', 'JPG', 'PNG', 'png', 'txt', 'md', 'jpeg', 'pdf', 'svg', 'gif'}
+    MEDIA_EXTENSIONS = (
+        # Audio
+        ".mp3", ".wav", ".aac", ".flac", ".ogg", ".m4a", ".wma", ".aiff", ".alac",
 
+        # Video
+        ".mp4", ".mov", ".avi", ".mkv", ".webm", ".flv", ".wmv", ".mpeg", ".mpg", ".3gp",
+
+        # Images
+        ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tiff", ".webp", ".svg", ".heic",
+
+        # Raw Image Formats
+        ".raw", ".cr2", ".nef", ".orf", ".arw", ".dng",
+
+        # Media Playlists / Containers
+        ".m3u", ".m3u8", ".pls", ".asx", ".m4v", ".ts"
+    )
     # Base application  default directories
     # Overriding these properties will dynamicall change path properties
     SOFTWARE_VERSION: str = '' # pyonir version number
@@ -447,6 +506,11 @@ class PyonirBase:
     ASSETS_ROUTE = f"/{ASSETS_DIRNAME}"  # serves static assets from configured theme
     UPLOADS_ROUTE = f"/{UPLOADS_DIRNAME}"  # Upload base path to access resources within upload directory
     TemplateEnvironment: TemplateEnvironment = None # Template environment configurations
+    routing_paths: list[RoutePath] | None = []
+
+    @property
+    def request_paths(self) -> AppRequestPaths:
+        return self.endpoint, self.routing_paths
 
     @property
     def module(self):
@@ -540,13 +604,14 @@ class PyonirPlugin(PyonirBase):
         self.app_entrypoint: str = app_entrypoint # plugin application initializing file
         self.app_dirpath: str = os.path.dirname(app_entrypoint) # plugin directory path
         self.name: str = os.path.basename(self.app_dirpath) # web url to serve application pages
-        self.routing_paths = list()
         self.CONFIG_FILENAME = self.module
         self.available_models = {}
+        self.routing_paths = []
 
     @property
-    def request_paths(self) -> AppRequestPaths:
+    def request_paths(self) -> AppRequestPaths | None:
         """Request context for route resolution"""
+        if not self.routing_paths and self.endpoint: return None
         return self.endpoint, self.routing_paths
 
     @property
@@ -628,12 +693,13 @@ class PyonirApp(PyonirBase):
         self.SECRET_SAUCE = generate_id()
         self.SESSION_KEY = f"pyonir_{self.app_name}"
         self.configs = None
+        self.routing_paths = [self.pages_dirpath, self.api_dirpath]
         Parsely._Filters['jinja'] = self.parse_jinja
         Parsely._Filters['pyformat'] = self.parse_pyformat
 
-    @property
-    def request_paths(self) -> AppRequestPaths:
-        return [self.endpoint, (self.pages_dirpath, self.api_dirpath)]
+    # @property
+    # def request_paths(self) -> AppRequestPaths:
+    #     return [self.endpoint, (self.pages_dirpath, self.api_dirpath)]
 
     @property
     def nginx_config_filepath(self):
@@ -689,10 +755,10 @@ class PyonirApp(PyonirBase):
         """Directory path to site's available plugins"""
         return os.path.join(self.contents_dirpath, self.UPLOADS_DIRNAME)
 
-    @property
-    def resolvers_dirpath(self) -> str:
-        """Directory path to site's available python server functions"""
-        return os.path.join(self.backend_dirpath, "resolvers")
+    # @property
+    # def resolvers_dirpath(self) -> str:
+    #     """Directory path to site's available python server functions"""
+    #     return os.path.join(self.backend_dirpath, "resolvers")
 
     @property
     def jinja_filters_dirpath(self) -> str:
@@ -701,7 +767,7 @@ class PyonirApp(PyonirBase):
 
     @property
     def app_ctx(self) -> AppCtx:
-        return [self.name, self.endpoint, self.contents_dirpath, self.ssg_dirpath]
+        return self.name, self.endpoint, self.contents_dirpath, self.ssg_dirpath
 
     @property
     def env(self): return os.getenv('APPENV')

@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from enum import StrEnum
 import os
-from typing import Optional, Union, Callable, List, Tuple
+from typing import Optional, Union, Callable, List, Tuple, Iterator
 
 from starlette.applications import Starlette
 
@@ -66,6 +66,9 @@ class ParselyPagination:
     page_nums: list[int, int] = field(default_factory=list)
     items: list['Parsely'] = field(default_factory=list)
 
+    def __iter__(self) -> Iterator['Parsely']:
+        return iter(self.items)
+
 
 @dataclass
 class Theme:
@@ -123,6 +126,7 @@ class Parsely:
     resolver: Optional[callable]
     route: Optional[callable]
     app_ctx: AppCtx # application context for file
+    file_status: str
     file_path: str
     file_dirpath: str # path to files contents directory
     file_contents: str # contents of a file

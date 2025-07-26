@@ -1,0 +1,17 @@
+{% if page.navigation %}
+<nav id="navigation" class="menu inline">
+    <ul class="menu center">
+        {% set active_page = request.path %}
+        {% for page in navigation.primary %}
+            <li class="{{'active' if active_page == page.url else ''}}">
+                <a href="{{page.url}}">{{page.title}}{{page.menu_icon}}</a>
+                <ul class="sub-menu">
+                {% for subpage in page.sub_menus %}
+                    <li><a href="{{subpage.url}}">{{subpage.name}}</a></li>
+                {% endfor %}
+                </ul>
+            </li>
+        {% endfor %}
+    </ul>
+</nav>
+{% endif %}

@@ -12,7 +12,7 @@ TABLE OF CONTENT
   <li class="chapter">
     <span class="title"><a href="/my-shop">Ecommerce Shop</a></span>
   </li>
-{% for p in page.entries %}
+{% for p in page.entries.items %}
   <li class="chapter">
     <span class="title"><a href="{{p.url}}">{{loop.index}}. {{p.title}}</a></span>
     <span class="pgnum">{{p.date.strftime("%b. %d %Y")}}</span>

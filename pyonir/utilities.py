@@ -418,7 +418,20 @@ def load_modules_from(pkg_dirpath, as_list: bool = False)-> tuple[dict[str, obje
 
     return loaded_funcs
 
-def get_module(pkg_path: str, callable_name: str) -> tuple[any, typing.Callable]:
+def get_module(pkg_path: str, callable_name: str) -> tuple[typing.Any, typing.Callable]:
+    import sys, importlib
+    spec = importlib.util.spec_from_file_location(callable_name, pkg_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Could not load spec for {callable_name} from {pkg_path}")
+
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[callable_name] = module  # Optional: allows intra-module imports to resolve
+    spec.loader.exec_module(module)
+
+    func = getattr(module, callable_name)
+    return module, func
+
+def _get_module(pkg_path: str, callable_name: str) -> tuple[any, typing.Callable]:
     from importlib import util
     mod = util.spec_from_file_location(callable_name, pkg_path).loader.load_module(callable_name)
     func = getattr(mod, callable_name)

@@ -1,9 +1,9 @@
 from pyonir.types import PyonirRequest
-from .models.EmailSubscriber import EmailSubscriber
+from backend.models.EmailSubscriber import EmailSubscriber
 
 
 async def dynamic_lambda(request: PyonirRequest) -> str:
-    return "hello battle rap forever yay"
+    return "hello battle rap forever!"
 
 async def demo_items(request: PyonirRequest, sample_id: int=99, version_id: str='0.1'):
     """Home route handler"""

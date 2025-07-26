@@ -58,9 +58,8 @@ class {name}Tests(unittest.TestCase):
 if __name__=='__main__':
     # generate_pyonir_types()
     App = init(__file__)
-    # file = Parsely(os.path.join(os.path.dirname(__file__),'test.md'), App.app_ctx)
-    file_thumb = Parsely("/Users/hypermac/dev/pyonir/pyonir/libs/app_setup/contents/uploads/thumbnails/img_0249--230x350.png", App.app_ctx)
-    file_img = Parsely("/Users/hypermac/dev/pyonir/pyonir/libs/app_setup/contents/uploads/img_0249.png", App.app_ctx)
+    App.contents_dirpath = os.path.join(os.path.dirname(__file__), 'contents')
+    # file = App.parsely_file('test.md')
     # generate_tests(file)
     # print(file.data)
     pass

@@ -322,7 +322,15 @@ class PyonirRequest:
 
     def derive_status_code(self, is_router_method: bool):
         """Create status code for web request based on a file's availability, status_code property"""
-        self.status_code = 200 if self.file.file_exists or is_router_method else 404
+        from pyonir.parser import ParselyFileStatus
+
+        code = 404
+        if self.file.file_status == ParselyFileStatus.PROTECTED:
+            self.file.data = {'template': '40x.html', 'content': f'Unauthorized access to this resource.', 'url': self.url, 'slug': self.slug}
+            code = 401
+        elif self.file.file_status == ParselyFileStatus.PUBLIC or is_router_method:
+            code = 200
+        self.status_code = code #200 if self.file.file_exists or is_router_method else 404
 
     def render_error(self):
         """Data output for an unknown file path for a web request"""
@@ -373,11 +381,13 @@ class PyonirRequest:
             return app, None
 
         # Try resolving to actual file paths
+        protected_segment = [s if i > len(request_segments)-1 else f'_{s}' for i,s in enumerate(request_segments)]
         for root_path in ctx_paths:
             category_index = os.path.join(root_path, *request_segments, 'index.md')
             single_page = os.path.join(root_path, *request_segments) + Site.EXTENSIONS['file']
+            single_protected_page = os.path.join(root_path, *protected_segment) + Site.EXTENSIONS['file']
 
-            for candidate in (category_index, single_page):
+            for candidate in (category_index, single_page, single_protected_page):
                 if os.path.exists(candidate):
                     return app, Parsely(candidate, app.app_ctx)
 

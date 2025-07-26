@@ -1,4 +1,6 @@
 import dataclasses
+import os
+
 from pyonir.types import PyonirRequest, PyonirApp
 from pyonir.core import PyonirPlugin, PyonirCollection
 
@@ -29,6 +31,9 @@ class Navigation(PyonirPlugin):
         self.menus = {}
         self.active_page = None
         self.build_navigation(app=app)
+        # include navigation template example
+        self.app = app
+        self.register_templates([os.path.join(os.path.dirname(__file__), 'templates')])
         pass
 
     def after_init(self, data: any, app: PyonirApp):

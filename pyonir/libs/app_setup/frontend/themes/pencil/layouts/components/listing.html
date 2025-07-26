@@ -1,25 +1,8 @@
 {% if page.entries %}
 <div id="listingComponent">
-    {# <iml> tags written in this template are reactive text fragments used with the optimljs library #}
     {%- include 'components/pagination.html' -%}
-    <div class="list-search">
-        <div class="form-row" tabindex="0">
-            <label for="filter-list" class="form-label">Search list (
-                {{page.entries.max_count }}
-                {{'' | iml('colors.length')}}
-                )</label>
-            <input name="search"
-                   attrs
-                   oninput="{filterSearch}"
-                   id="filter-list"
-                   class="form-input"
-                   type="text"
-                   placeholder="Search"
-                   tabindex="0">
-        </div>
-    </div>
+
     <ul class="scrollable-list">
-        <button attrs onclick="{addColor}" data-foo="{colors.length}">Add Item</button>
         {%- for entry in page.entries.items %}
         <li class="list-item" each="entry in filteredItems" index="{{loop.index0}}">
             <div class="head">
@@ -30,14 +13,6 @@
             </div>
             <div class="tags">
                 from: {{entry.author}}
-                <ul>
-                    {%- for color in ['red','green','blue'] %}
-                    <small class="color-chips" each="color in colors" index="{{loop.index0}}">
-                        {{loop.index}}.{{color}}
-                        <button attrs onclick="{deleteColor}">X</button>
-                    </small>
-                    {% endfor %}
-                </ul>
             </div>
         </li>
         {%- endfor %}
@@ -45,10 +20,7 @@
 </div>
 
 <style>
-    .hlt {
-    background: yellow;
-    color: black;
-}
+
     .color-chips {
         background-color: #1b8ef4;
         padding: .564rem;
@@ -57,15 +29,11 @@
         display: inline-block;
     }
     #listingComponent {
-        background: #212121;
-        color: white;
-        padding: 2rem;
         border-radius: 12px;
         font-size: 1.2rem;
 
         & input#filter-list {
             width: 100%;
-            background: black;
             border-radius: .345rem;
             color: white;
         }
@@ -80,10 +48,6 @@
             display: flex;
             flex-direction: column;
             gap: .25em;
-        }
-
-        .list-item:hover {
-            background-color: #ffffff12;
         }
 
         & .excerpt {
@@ -106,16 +70,13 @@
 
         & ul li {
             list-style: none;
-            padding: .756rem;
-            background: #0000007a;
+            /* padding: .756rem; */
+            /* background: #0000007a; */
             border-radius: .345rem;
             margin-bottom: calc(.5rem * calc(1 - 0));
             margin-top: 0;
         }
 
-        > ul {
-            margin: 0;
-        }
     }
 </style>
 {% endif %}

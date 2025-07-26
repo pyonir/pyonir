@@ -1,5 +1,6 @@
 import asyncio
 import os, typing, json, inspect
+from typing import get_type_hints
 
 from starlette.websockets import WebSocket, WebSocketState, WebSocketDisconnect
 
@@ -257,7 +258,7 @@ def _add_route(dec_func: typing.Callable | None,
     new_route = {
         "doc": docs,
         "endpoint": endpoint_route,
-        "params": dec_func.__annotations__,
+        "params": {k: v.__name__ for k, v in dec_func.__annotations__.items()},
         "route": path,  # has regex pattern
         "path": route_path,
         "methods": methods,

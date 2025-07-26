@@ -1,6 +1,7 @@
 import os, pytz, re, json
 from datetime import datetime
 from dataclasses import dataclass, field
+from enum import StrEnum
 
 from .core import PyonirRequest, PyonirCollection, PyonirSchema
 from .types import ParselyPagination, PyonirBase
@@ -46,6 +47,19 @@ IMAGE_FORMATS = (
     'XBM',  # .xbm
     'PCX'  # .pcx
 )
+
+class ParselyFileStatus(StrEnum):
+    HIDDEN = 'hidden'
+    """Read only by the system often used for temporary files"""
+
+    PROTECTED = 'protected'
+    """Requires authentication and authorization. can be READ and WRITE."""
+
+    FORBIDDEN = 'forbidden'
+    """System only access. READ ONLY"""
+
+    PUBLIC = 'public'
+    """Access external and internal with READ and WRITE."""
 
 
 def parse_markdown(content, kwargs):
@@ -245,9 +259,9 @@ class Parsely:
 
 
     @property
-    def file_status(self):  # String
-        if not self.file_exists: return None
-        return 'hidden' if self.file_name.startswith('_') else 'public'
+    def file_status(self) -> ParselyFileStatus:  # String
+        if not self.file_exists: return ParselyFileStatus.FORBIDDEN
+        return ParselyFileStatus.PROTECTED if self.file_name.startswith('_') else ParselyFileStatus.PUBLIC
 
     @property
     def file_created_on(self):  # Datetime
@@ -366,34 +380,34 @@ class Parsely:
         return self.output_html(req) if req.type in (TEXT_RES, '*/*') else self.output_json() \
             if req.type == JSON_RES else req.server_response
 
-    async def _access_module(self, resolver_path: str) -> tuple:
-        from pyonir import Site
-        if resolver_path.startswith(LOOKUP_DIR_PREFIX):
-            return None, self.process_value_type(resolver_path)
-        pkg = resolver_path.split('.')
-        meth_name = pkg.pop()
-        is_system = pkg[0] == 'pyonir'
-        module, resolver = None, None
-
-        if is_system:
-            mod_path = os.path.join(Site.pyonir_path,'server.py')
-            module, resolver = get_module(mod_path, meth_name)
-            # resolver = get_attr(Site.server.resolvers, resolver_path)
-        else:
-            isplugin = list(filter(lambda p: p.module == pkg[0], Site.available_plugins))
-            if len(isplugin):
-                isplugin = isplugin[0]
-            if isplugin:
-                pkg.pop(0)
-                resolver = get_attr(isplugin, resolver_path)
-                if not resolver and hasattr(isplugin, 'resolvers_dirpath'):
-                    mod_path = os.path.join(isplugin.resolvers_dirpath, *pkg)+'.py'
-                    module, resolver = get_module(mod_path, meth_name)
-            else:
-                pkg_path = os.path.join(Site.backend_dirpath, *pkg) + '.py'
-                if not os.path.exists(pkg_path): pkg_path = os.path.join(Site.backend_dirpath, *pkg, '__init__.py')
-                module, resolver = get_module(pkg_path, meth_name)
-        return module, resolver
+    # async def _access_module(self, resolver_path: str) -> tuple:
+    #     from pyonir import Site
+    #     if resolver_path.startswith(LOOKUP_DIR_PREFIX):
+    #         return None, self.process_value_type(resolver_path)
+    #     pkg = resolver_path.split('.')
+    #     meth_name = pkg.pop()
+    #     is_system = pkg[0] == 'pyonir'
+    #     module, resolver = None, None
+    #
+    #     if is_system:
+    #         mod_path = os.path.join(Site.pyonir_path,'server.py')
+    #         module, resolver = get_module(mod_path, meth_name)
+    #         # resolver = get_attr(Site.server.resolvers, resolver_path)
+    #     else:
+    #         isplugin = list(filter(lambda p: p.module == pkg[0], Site.available_plugins))
+    #         if len(isplugin):
+    #             isplugin = isplugin[0]
+    #         if isplugin:
+    #             pkg.pop(0)
+    #             resolver = get_attr(isplugin, resolver_path)
+    #             if not resolver and hasattr(isplugin, 'resolvers_dirpath'):
+    #                 mod_path = os.path.join(isplugin.resolvers_dirpath, *pkg)+'.py'
+    #                 module, resolver = get_module(mod_path, meth_name)
+    #         else:
+    #             pkg_path = os.path.join(Site.backend_dirpath, *pkg) + '.py'
+    #             if not os.path.exists(pkg_path): pkg_path = os.path.join(Site.backend_dirpath, *pkg, '__init__.py')
+    #             module, resolver = get_module(pkg_path, meth_name)
+    #     return module, resolver
 
     async def _access_module_from_request(self, resolver_path: str) -> tuple:
         from pyonir import Site

@@ -9,9 +9,6 @@ TABLE OF CONTENT
 </header>
 <p>"Learn the rules like a pro, so you can break them like an artist." - Pablo Picasso </p>
 <ul class="chapters">
-  <li class="chapter">
-    <span class="title"><a href="/my-shop">Ecommerce Shop</a></span>
-  </li>
 {% for p in page.entries %}
   <li class="chapter">
     <span class="title"><a href="{{p.url}}">{{loop.index}}. {{p.title}}</a></span>

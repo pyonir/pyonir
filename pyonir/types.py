@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from enum import StrEnum
+# from enum import StrEnum
 import os
 from typing import Optional, Union, Callable, List, Tuple, Iterator
 
@@ -99,7 +99,7 @@ class Pagination:
     page_num: int = 1
     limit: int = 0
 
-class PyonirHooks(StrEnum):
+class PyonirHooks:
     AFTER_INIT = 'AFTER_INIT'
     ON_REQUEST = 'ON_REQUEST'
     ON_PARSELY_COMPLETE = 'ON_PARSELY_COMPLETE'

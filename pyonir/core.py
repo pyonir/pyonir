@@ -561,12 +561,12 @@ class PyonirBase:
 
         self.SSG_IN_PROGRESS = True
         count = 0
-        print(f"{utilities.pcolors.OKBLUE}1. Coping Assets")
+        print(f"{utilities.PrntColrs.OKBLUE}1. Coping Assets")
         try:
             self.run([])
             site_map_path = os.path.join(self.ssg_dirpath, 'sitemap.xml')
             # generate_nginx_conf(self)
-            print(f"{utilities.pcolors.OKCYAN}3. Generating Static Pages")
+            print(f"{utilities.PrntColrs.OKCYAN}3. Generating Static Pages")
 
             self.TemplateEnvironment.globals['is_ssg'] = True
             start_time = time.perf_counter()
@@ -602,7 +602,7 @@ class PyonirBase:
         self.SSG_IN_PROGRESS = False
         response = {"status": "COMPLETE", "msg": msg, "files": count}
         print(response)
-        print(utilities.pcolors.RESET)
+        print(utilities.PrntColrs.RESET)
         return response
 
 
@@ -874,7 +874,7 @@ class PyonirApp(PyonirBase):
         self.server = setup_starlette_server(self)
         # Initialize Application settings and templates
         self.setup_configs()
-        self.install_sys_plugins()
+        # self.install_sys_plugins()
 
         # Run uvicorn server
         if self.SSG_IN_PROGRESS: return

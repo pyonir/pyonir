@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pyonir"
-version = "0.0.19"
+version = "0.0.20"
 description = "a python library for building web applications"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -28,7 +28,7 @@ dependencies = [
 Homepage = "https://pyonir.dev"
 
 [project.scripts]
-pyonir-create = "pyonir:cli.PyonirSetup"
+pyonir-create = "pyonir:cli.pyonir_setup"
 
 [tool.setuptools]
 include-package-data = true

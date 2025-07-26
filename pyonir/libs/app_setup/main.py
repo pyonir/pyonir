@@ -1,9 +1,5 @@
 import pyonir
 from backend import router
-# application configuration options
-# options = {
-#     "contents_dirpath": os.path.dirname(__file__)
-# }
 
 # Instantiate pyonir application
 demo_app = pyonir.init(__file__)

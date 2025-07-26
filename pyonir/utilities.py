@@ -373,13 +373,14 @@ def copy_assets(src: str, dst: str, purge: bool = True):
     """Copies files from a source directory into a destination directory with option to purge destination"""
     import shutil
     from shutil import ignore_patterns
-    print(f"\033[92mCoping `{src}` theme assets into {dst}")
+    print(f"{PrntColrs.OKBLUE}Coping `{src}` theme assets into {dst}{PrntColrs.RESET}")
     try:
         if os.path.exists(dst) and purge:
             shutil.rmtree(dst)
-        shutil.copytree(src, dst, ignore=ignore_patterns('*.pyc', 'tmp*', 'node_modules', '.*'))
-    except NotADirectoryError as e:
-        shutil.copyfile(src, dst)
+        if os.path.isfile(src):
+            shutil.copyfile(src, dst)
+        if os.path.isdir(src):
+            shutil.copytree(src, dst, ignore=ignore_patterns('__pycache__', '*.pyc', 'tmp*', 'node_modules', '.*'))
     except Exception as e:
         raise
 
@@ -479,12 +480,12 @@ def load_env(path=".env") -> object:
     return dict_to_class(env_data, 'env')
 
 
-class pcolors:
+class PrntColrs:
     RESET = '\033[0m'
     HEADER = '\033[95m'
     OKBLUE = '\033[94m'
     OKCYAN = '\033[96m'
-    OKGREEN = '\033[92m'
+    OKGREEN = '\x1b[0;92;49m'
     WARNING = '\033[93m'
     FAIL = '\033[91m'
     ENDC = '\033[0m'

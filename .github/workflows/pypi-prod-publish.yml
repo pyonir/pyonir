@@ -2,8 +2,11 @@ name: Publish Python 🐍 distribution 📦 to PyPI
 
 on:
   push:
-    tags:
-      - "v*"  # Only run on version tags like v1.0.0
+    branches:
+      - main
+    paths:
+      - '**.py'
+      - 'pyproject.toml'
 
 jobs:
   build-and-publish:

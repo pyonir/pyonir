@@ -827,11 +827,8 @@ class PyonirApp(PyonirBase):
 
     def install_sys_plugins(self):
         """Install pyonir plugins"""
-        from pyonir.libs.plugins.ecommerce import Ecommerce
-        from pyonir.libs.plugins.forms import Forms
         from pyonir.libs.plugins.navigation import Navigation
-        from pyonir.libs.plugins.fileuploader import FileUploader
-        return self.install_plugins([Ecommerce, Forms, Navigation, FileUploader])
+        return self.install_plugins([Navigation])
 
     def install_plugins(self, plugins: list):
         is_configured = hasattr(self.configs, 'app') and hasattr(self.configs.app, 'enabled_plugins')

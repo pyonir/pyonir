@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 # from enum import StrEnum
 import os
+from enum import Enum
 from typing import Optional, Union, Callable, List, Tuple, Iterator
 
 from starlette.applications import Starlette
@@ -99,7 +100,7 @@ class Pagination:
     page_num: int = 1
     limit: int = 0
 
-class PyonirHooks:
+class PyonirHooks(str, Enum):
     AFTER_INIT = 'AFTER_INIT'
     ON_REQUEST = 'ON_REQUEST'
     ON_PARSELY_COMPLETE = 'ON_PARSELY_COMPLETE'

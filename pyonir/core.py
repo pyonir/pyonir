@@ -355,8 +355,8 @@ class PyonirRequest:
         is_home = path_str == '/'
 
         # First, check plugins if available and not home
-        if not is_home and hasattr(app, 'available_plugins'):
-            for plugin in app.available_plugins:
+        if not is_home and hasattr(app, 'plugins_activated'):
+            for plugin in app.plugins_activated:
                 if not plugin.request_paths: continue
                 resolved_app, parsed = self.resolve_request_to_file(path_str, plugin)
                 if parsed and parsed.file_exists:
@@ -398,44 +398,6 @@ class PyonirRequest:
                 return app, Parsely(fallback_route, app.app_ctx)
 
         return app, Parsely('404_ERROR', app.app_ctx)
-
-    # def xresolve_request_to_file(self, path_str: str, app: PyonirApp, skip_vanity: bool = False) -> tuple[PyonirApp, Parsely|None]:
-    #     from pyonir import Site
-    #     from pyonir.parser import Parsely
-    #     path_result = ''
-    #     is_home = path_str == '/'
-    #     if not is_home and hasattr(app, 'available_plugins'):
-    #         for plg in app.available_plugins:
-    #             if not plg.request_paths: continue
-    #             plg, path_result = self.resolve_request_to_file(path_str, plg)
-    #             if path_result and path_result.file_exists: break
-    #         if path_result and path_result.file_exists:
-    #             return plg, path_result
-    #         else:
-    #             path_result = ''
-    #
-    #     ctx_route, ctx_paths = app.request_paths
-    #     # check_wildcard = ctx_route!='/' and (path_str.startswith(ctx_route) or path_str.replace('/api','').startswith(ctx_route))
-    #     ctx_route = ctx_route or ''
-    #     ctx_slug = ctx_route[1:]
-    #     path_slug = path_str[1:]
-    #     reqst_path = [p for p in path_slug.split('/') if p not in ('api', ctx_slug)]
-    #     if path_str.startswith('/api'): path_str = path_str.replace('/api','')
-    #     if not len(ctx_paths) or (not is_home and not path_str.startswith(ctx_route)): return app, None
-    #
-    #     for rootp in ctx_paths:
-    #         is_cat = os.path.join(rootp, *reqst_path, 'index.md')
-    #         is_page = os.path.join(rootp, *reqst_path) + Site.EXTENSIONS['file']
-    #         for pp in (is_cat, is_page):
-    #             if not os.path.exists(pp): continue
-    #             path_result = pp
-    #             break
-    #         if path_result: break
-    #     # if path_result is None and check_wildcard:
-    #     if not path_result and hasattr(app, 'pages_dirpath'):
-    #         path_result = os.path.join(app.pages_dirpath, '.routes.md')
-    #
-    #     return app, Parsely(str(path_result), app.app_ctx)
 
     @staticmethod
     def process_header(headers):
@@ -687,9 +649,19 @@ class PyonirApp(PyonirBase):
 
     # Application data structures
     endpoint = '/'
+    """Web url to access application resources."""
+
     server: PyonirServer = None
+    """Starlette server instance"""
+
     TemplateEnvironment: TemplateEnvironment = None
-    available_plugins: set = set()
+    """Template environment for jinja templates"""
+
+    plugins_installed: dict = dict()
+    """Represents plugins installed within the site plugins directory"""
+
+    plugins_activated: set = set()
+    """All enabled plugins instances"""
 
     def __init__(self, app_entrypoint: str):
         from pyonir.utilities import generate_id, get_attr, process_contents
@@ -706,10 +678,6 @@ class PyonirApp(PyonirBase):
         self.routing_paths = [self.pages_dirpath, self.api_dirpath]
         Parsely._Filters['jinja'] = self.parse_jinja
         Parsely._Filters['pyformat'] = self.parse_pyformat
-
-    # @property
-    # def request_paths(self) -> AppRequestPaths:
-    #     return [self.endpoint, (self.pages_dirpath, self.api_dirpath)]
 
     @property
     def nginx_config_filepath(self):
@@ -765,11 +733,6 @@ class PyonirApp(PyonirBase):
         """Directory path to site's available plugins"""
         return os.path.join(self.contents_dirpath, self.UPLOADS_DIRNAME)
 
-    # @property
-    # def resolvers_dirpath(self) -> str:
-    #     """Directory path to site's available python server functions"""
-    #     return os.path.join(self.backend_dirpath, "resolvers")
-
     @property
     def jinja_filters_dirpath(self) -> str:
         """Directory path to site's available Jinja filters"""
@@ -801,6 +764,48 @@ class PyonirApp(PyonirBase):
     @property
     def domain(self): return self.get_attr(self.configs, 'app.domain', self.host) # if self.configs else self.host
 
+    def load_plugin(self, plugin: callable | list[callable]):
+        """Make the plugin known to the pyonir application"""
+        if isinstance(plugin, list):
+            for plugin in plugin:
+                self.load_plugin(plugin)
+        else:
+            plg_pkg_name = plugin.__module__.split('.').pop()
+            self.plugins_installed[plg_pkg_name] = plugin
+
+    # def _load_plugins(self):
+    #     """Loads the plugin initializing object into runtime"""
+    #     self.plugins_installed = load_modules_from(self.plugins_dirpath, only_packages=True)
+    #     pass
+
+    def _activate_plugins(self):
+        """Active plugins enabled based on configurations"""
+        is_configured = hasattr(self.configs, 'app') and hasattr(self.configs.app, 'enabled_plugins')
+        for plg_id, plugin in self.plugins_installed.items():
+            if is_configured and plg_id not in self.configs.app.enabled_plugins: continue
+            self.plugins_activated.add(plugin(self))
+
+    def install_sys_plugins(self):
+        """Install pyonir plugins"""
+        from pyonir.libs.plugins.navigation import Navigation
+        self.plugins_installed['pyonir_navigation'] = Navigation
+
+    def run_plugins(self, hook: PyonirHooks, data_value=None):
+        if not hook or not self.plugins_activated: return
+        hook = hook.name.lower()
+        for plg in self.plugins_activated:
+            if not hasattr(plg, hook): continue
+            hook_method = getattr(plg, hook)
+            hook_method(data_value, self)
+
+    async def run_async_plugins(self, hook: PyonirHooks, data_value=None):
+        if not hook or not self.plugins_activated: return
+        hook_method_name = hook.lower()
+        for plg in self.plugins_activated:
+            if not hasattr(plg, hook_method_name): continue
+            hook_method = getattr(plg, hook_method_name)
+            await hook_method(data_value, self)
+
     def parse_jinja(self, string, context=None) -> str:
         """Render jinja template fragments"""
         if not context: context = {}
@@ -825,35 +830,6 @@ class PyonirApp(PyonirBase):
     def setup_templates(self):
         self.TemplateEnvironment = TemplateEnvironment(self)
 
-    def install_sys_plugins(self):
-        """Install pyonir plugins"""
-        from pyonir.libs.plugins.navigation import Navigation
-        return self.install_plugins([Navigation])
-
-    def install_plugins(self, plugins: list):
-        is_configured = hasattr(self.configs, 'app') and hasattr(self.configs.app, 'enabled_plugins')
-        for plugin in plugins:
-            plg_id = plugin.__name__
-            # if is_configured and plg_id not in self.configs.app.enabled_plugins: continue
-            print(f'Installing {plg_id} plugin')
-            self.available_plugins.add(plugin(self))
-        pass
-
-    def run_plugins(self, hook: PyonirHooks, data_value=None):
-        if not hook or not self.available_plugins: return
-        hook = hook.name.lower()
-        for plg in self.available_plugins:
-            if not hasattr(plg, hook): continue
-            hook_method = getattr(plg, hook)
-            hook_method(data_value, self)
-
-    async def run_async_plugins(self, hook: PyonirHooks, data_value=None):
-        if not hook or not self.available_plugins: return
-        hook = hook.name.lower()
-        for plg in self.available_plugins:
-            if not hasattr(plg, hook): continue
-            hook_method = getattr(plg, hook)
-            await hook_method(data_value, self)
 
     def setup_configs(self):
         """Setup site configurations and template environment"""
@@ -871,7 +847,8 @@ class PyonirApp(PyonirBase):
         self.server = setup_starlette_server(self)
         # Initialize Application settings and templates
         self.setup_configs()
-        # self.install_sys_plugins()
+        self.install_sys_plugins()
+        self._activate_plugins()
 
         # Run uvicorn server
         if self.SSG_IN_PROGRESS: return

@@ -1,7 +1,7 @@
 from __future__ import annotations
 import os
 import typing
-from typing import Union, Generator, Iterable,Callable, Mapping, get_origin, get_args, get_type_hints
+from typing import Union, Generator, Iterable, Callable, Mapping, get_origin, get_args, get_type_hints, Any
 from collections.abc import Iterable as ABCIterable
 
 from pyonir.types import PyonirRequest
@@ -402,15 +402,19 @@ def json_serial(obj):
         return obj if not hasattr(obj, '__dict__') else obj.__dict__
 
 
-def load_modules_from(pkg_dirpath, as_list: bool = False)-> tuple[dict[str, object], dict[str, typing.Callable]]:
+def load_modules_from(pkg_dirpath, as_list: bool = False, only_packages:bool = False)-> dict[Any, Any] | list[Any]:
     loaded_mods = {} if not as_list else []
     loaded_funcs = {} if not as_list else []
     if not os.path.exists(pkg_dirpath): return loaded_funcs
     for mod_file in os.listdir(pkg_dirpath):
         name,_, ext = mod_file.partition('.')
-        if ext!='py': continue
-        mod_abspath = os.path.join(pkg_dirpath, name.strip())+'.py'
-        mod, func = get_module(mod_abspath, name)
+        if only_packages:
+            pkg_abspath = os.path.join(pkg_dirpath, mod_file, '__init__.py')
+            mod, func = get_module(pkg_abspath, name)
+        else:
+            if ext!='py': continue
+            mod_abspath = os.path.join(pkg_dirpath, name.strip())+'.py'
+            mod, func = get_module(mod_abspath, name)
         if as_list:
             loaded_funcs.append(func)
         else:
@@ -426,18 +430,18 @@ def get_module(pkg_path: str, callable_name: str) -> tuple[typing.Any, typing.Ca
         raise ImportError(f"Could not load spec for {callable_name} from {pkg_path}")
 
     module = importlib.util.module_from_spec(spec)
-    sys.modules[callable_name] = module  # Optional: allows intra-module imports to resolve
+    # sys.modules[callable_name] = module  # Optional: allows intra-module imports to resolve
     spec.loader.exec_module(module)
 
-    func = getattr(module, callable_name)
+    func = get_attr(module, callable_name) or get_attr(module, module.__name__)
     return module, func
 
-def _get_module(pkg_path: str, callable_name: str) -> tuple[any, typing.Callable]:
-    from importlib import util
-    mod = util.spec_from_file_location(callable_name, pkg_path).loader.load_module(callable_name)
-    func = getattr(mod, callable_name)
-
-    return (mod, func)
+# def _get_module(pkg_path: str, callable_name: str) -> tuple[any, typing.Callable]:
+#     from importlib import util
+#     mod = util.spec_from_file_location(callable_name, pkg_path).loader.load_module(callable_name)
+#     func = getattr(mod, callable_name)
+#
+#     return (mod, func)
 
 def generate_id():
     import uuid

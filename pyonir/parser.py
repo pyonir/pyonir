@@ -417,7 +417,7 @@ class Parsely:
         meth_name = pkg.pop()
         module = None
 
-        app_plugin = list(filter(lambda p: p.module == pkg[0], Site.available_plugins))
+        app_plugin = list(filter(lambda p: p.module == pkg[0], Site.plugins_activated))
         app_plugin = app_plugin[0] if len(app_plugin) else Site
         resolver = get_attr(app_plugin, resolver_path)
         if not resolver:

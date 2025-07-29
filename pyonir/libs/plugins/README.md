@@ -25,5 +25,13 @@ from plugins.some_plugin_package import SomePluginClass
 demo_app = pyonir.init(__file__)
 
 # Install plugins
-demo_app.install_plugins([SomePluginClass])
+demo_app.load_plugin(SomePluginClass)
+```
+
+## Configurations
+Add `enabled_plugins` property to your `/contents/configs/app.md` file
+
+```yml
+# app.md
+enabled_plugins:- <YOUR_PLUGIN_DIRECTORY_NAME>
 ```

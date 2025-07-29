@@ -2,6 +2,7 @@
 title: Pyonir
 menu.group: primary
 entries: $dir/pages?limit=15
+form: subscribe-demo
 ===
 <section class="toc">
 <header class="hanken-grotesk-regular">

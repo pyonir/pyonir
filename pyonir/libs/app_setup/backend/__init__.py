@@ -1,4 +1,4 @@
-from pyonir.types import PyonirRoute, PyonirRouters
+from pyonir.pyonir_types import PyonirRoute, PyonirRouters
 from .demo_controller import demo_items, subscriber_model, subscriber_values
 
 # Define routes

@@ -1,10 +1,6 @@
-import os, unittest, json, textwrap
+import os, json, textwrap
 from pyonir.parser import Parsely
 from pyonir import init
-import os
-import inspect
-from pathlib import Path
-from textwrap import indent
 
 def generate_pyonir_types():
     from pyonir.core import PyonirApp, PyonirRequest, PyonirPlugin
@@ -58,7 +54,6 @@ class {name}Tests(unittest.TestCase):
 if __name__=='__main__':
     # generate_pyonir_types()
     App = init(__file__)
-    App.contents_dirpath = os.path.join(os.path.dirname(__file__), 'contents')
     # file = App.parsely_file('test.md')
     # generate_tests(file)
     # print(file.data)

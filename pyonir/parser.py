@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 
 from .core import PyonirRequest, PyonirCollection, PyonirSchema
-from .types import ParselyPagination, PyonirBase
+from .pyonir_types import ParselyPagination, PyonirBase
 from .utilities import dict_to_class, get_attr, get_all_files_from_dir, deserialize_datestr, create_file, get_module, \
     cls_mapper
 

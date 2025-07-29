@@ -4,7 +4,7 @@ import typing, os
 from jinja2 import Environment
 from starlette.requests import Request as StarletteRequest
 
-from pyonir.types import PyonirServer, Theme, PyonirHooks, Parsely, ParselyPagination, AppRequestPaths, AppCtx, \
+from pyonir.pyonir_types import PyonirServer, Theme, PyonirHooks, Parsely, ParselyPagination, AppRequestPaths, AppCtx, \
     PyonirRouters, RoutePath
 
 # Environments

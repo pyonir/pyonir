@@ -100,7 +100,7 @@ class Pagination:
     page_num: int = 1
     limit: int = 0
 
-class PyonirHooks(str, Enum):
+class PyonirHooks(str):
     AFTER_INIT = 'AFTER_INIT'
     ON_REQUEST = 'ON_REQUEST'
     ON_PARSELY_COMPLETE = 'ON_PARSELY_COMPLETE'

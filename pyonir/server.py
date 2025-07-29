@@ -5,7 +5,7 @@ from typing import get_type_hints
 from starlette.websockets import WebSocket, WebSocketState, WebSocketDisconnect
 
 # from pyonir import ASSETS_ROUTE, UPLOADS_ROUTE, PAGINATE_LIMIT, API_ROUTE, API_DIRNAME
-from pyonir.types import PyonirApp, PyonirRequest, PyonirServer, PyonirHooks
+from pyonir.pyonir_types import PyonirApp, PyonirRequest, PyonirServer, PyonirHooks
 from pyonir.utilities import create_file, get_attr, cls_mapper
 
 TEXT_RES = 'text/html'

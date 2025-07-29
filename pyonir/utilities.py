@@ -4,7 +4,7 @@ import typing
 from typing import Union, Generator, Iterable, Callable, Mapping, get_origin, get_args, get_type_hints, Any
 from collections.abc import Iterable as ABCIterable
 
-from pyonir.types import PyonirRequest
+from pyonir.pyonir_types import PyonirRequest
 
 
 def is_iterable(tp):
@@ -373,7 +373,7 @@ def copy_assets(src: str, dst: str, purge: bool = True):
     """Copies files from a source directory into a destination directory with option to purge destination"""
     import shutil
     from shutil import ignore_patterns
-    print(f"{PrntColrs.OKBLUE}Coping `{src}` theme assets into {dst}{PrntColrs.RESET}")
+    print(f"{PrntColrs.OKBLUE}Coping `{src}` resource into {dst}{PrntColrs.RESET}")
     try:
         if os.path.exists(dst) and purge:
             shutil.rmtree(dst)

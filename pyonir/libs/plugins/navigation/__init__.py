@@ -1,7 +1,7 @@
 import dataclasses
 import os
 
-from pyonir.types import PyonirRequest, PyonirApp
+from pyonir.pyonir_types import PyonirRequest, PyonirApp
 from pyonir.core import PyonirPlugin, PyonirCollection
 
 @dataclasses.dataclass

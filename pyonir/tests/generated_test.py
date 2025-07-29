@@ -6,8 +6,8 @@ class ParselyTests(unittest.TestCase):
     def setUpClass(cls):
         from pyonir.parser import Parsely
         from pyonir import init
-        App = init(__file__)
-        cls.parselyFile = Parsely(os.path.join(os.path.dirname(__file__),'test.md'), App.app_ctx)
+        app = init(__file__)
+        cls.parselyFile = Parsely(os.path.join(os.path.dirname(__file__),'contents','test.md'), app.app_ctx)
 
     def test_basic(self):
         self.assertEqual("scalar value", self.parselyFile.data.get('basic'))

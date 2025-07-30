@@ -198,7 +198,7 @@ def process_sse(data: dict) -> str:
     return sse_payload + "\n"
 
 
-def serve_favicon(app: PyonirApp):
+def serve_static(app: PyonirApp, request: PyonirRequest):
     from starlette.responses import FileResponse
     return FileResponse(os.path.join(app.TemplateEnvironment.themes.active_theme.static_dirpath,'favicon.ico'), 200)
 
@@ -283,9 +283,10 @@ def _add_route(dec_func: typing.Callable | None,
 
     async def dec_wrapper(star_req):
         from pyonir.core import PyonirRequest
-        if star_req.url.path == '/favicon.ico': return serve_favicon(Site)
+        # if star_req.url.path == '/favicon.ico': return serve_favicon(Site)
         # Resolve page file route
         pyonir_request = PyonirRequest(star_req)
+        if pyonir_request.is_static: return serve_static(Site, pyonir_request)
         await pyonir_request.process_request_data()
         # app_ctx, req_filepath = resolve_path_to_file(star_req.url.path, Site)
 

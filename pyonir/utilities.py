@@ -118,16 +118,16 @@ def process_contents(path, app_ctx=None, file_model: any = None):
     """Deserializes all files within the contents directory"""
     from pyonir.parser import Parsely
 
-    def update(self):
-        for key in self.__dict__.keys():
-            val = get_attr(self, key)
-            if not hasattr(val, '_path'): continue
-            pval = Parsely(val._path, app_ctx)
-            setattr(self, key, dict_to_class({**pval.data, '_path': pval.file_path}, key))
-        pass
+    # def update(self):
+    #     for key in self.__dict__.keys():
+    #         val = get_attr(self, key)
+    #         if not hasattr(val, '_path'): continue
+    #         pval = Parsely(val._path, app_ctx)
+    #         setattr(self, key, dict_to_class({**pval.data, '_path': pval.file_path}, key))
+    #     pass
 
     key = os.path.basename(path)
-    res = type(key, (object,), {})() # generic map
+    res = type(key, (object,), {"__name__": key})() # generic map
     pgs = get_all_files_from_dir(path, app_ctx=app_ctx, entry_type=file_model)
     for pg in pgs:
         name = getattr(pg, 'file_name')
@@ -270,6 +270,17 @@ def sortBykey(listobj, sort_by_key="", limit="", reverse=True):
     except Exception as e:
         return listobj
 
+def parse_query_model_to_object(model_fields: str) -> object:
+    if not model_fields: return None
+    from pyonir.parser import Parsely
+    mapper = {}
+    params = {"_mapper": mapper}
+    for k in Parsely.default_file_attributes+model_fields.split(','):
+        if ':' in k:
+            k,_, src = k.partition(':')
+            mapper[k] = src
+        params[k] = None
+    return type('GenericQueryModel', (object,), params)
 
 def get_all_files_from_dir(abs_dirpath: str,
                            app_ctx: list = None,
@@ -293,13 +304,17 @@ def get_all_files_from_dir(abs_dirpath: str,
         ismedia = not filepath.endswith(ALLOWED_CONTENT_EXTENSIONS)
         generic_model = entry_type if entry_type and entry_type.__name__=='GenericQueryModel' else None
         pf = Parsely(filepath, app_ctx, generic_model)
-        if ismedia:
-            return cls_mapper(pf, ParselyMedia)
-        return cls_mapper(pf, entry_type or Page ) if entry_type or pf.is_page else pf.map_to_model(None)
+        pf.schema = ParselyMedia if ismedia else Page if pf.is_page else generic_model or entry_type
+        return pf.map_to_model(pf.schema)
+        # if ismedia:
+        #     return cls_mapper(pf, ParselyMedia)
+        # return cls_mapper(pf, entry_type or Page ) if entry_type or pf.is_page else pf.map_to_model(None)
 
 
     def should_skip(parentdir, filename):
         parentdir = parentdir.replace(pages_dirpath, "").lstrip(os.path.sep)
+        is_include_only_file = (include_only and filename == include_only)
+        if is_include_only_file: return False
         is_hidden_dir = parentdir.startswith(IGNORE_FILES)
         is_media_file = filename.endswith(PyonirBase.MEDIA_EXTENSIONS)
         is_invalid_file = not is_media_file and not filename.endswith(ALLOWED_CONTENT_EXTENSIONS)

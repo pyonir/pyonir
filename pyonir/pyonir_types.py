@@ -1,7 +1,5 @@
 from dataclasses import dataclass, field
-# from enum import StrEnum
 import os
-from enum import Enum
 from typing import Optional, Union, Callable, List, Tuple, Iterator
 
 from starlette.applications import Starlette
@@ -127,6 +125,11 @@ class Parsely:
     resolver: Optional[callable]
     route: Optional[callable]
     app_ctx: AppCtx # application context for file
+    status: str
+    """Status based on access rights"""
+
+    schema: callable
+    """Model object associated with file."""
     file_status: str
     file_path: str
     file_dirpath: str # path to files contents directory

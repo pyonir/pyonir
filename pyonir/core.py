@@ -17,8 +17,106 @@ JSON_RES: str = 'application/json'
 EVENT_RES: str = 'text/event-stream'
 PAGINATE_LIMIT: int = 6
 
+from dataclasses import dataclass, field, replace, asdict
+from typing import Optional, Type, TypeVar
+
+T = TypeVar("T", bound="PyonirSchema")
+
 
 class PyonirSchema:
+    """Interface for immutable dataclass models with CRUD and session support."""
+    _validation_errors: list[str] = []
+    _deleted = False
+
+    def validate(self):
+        """validates a given property with accessible validation method"""
+        for name, value in self.__dict__.items():
+            if name.startswith('_'): continue
+            validator_fn = getattr(self, f'validate_{name}', None)
+            if validator_fn: validator_fn()
+        pass
+
+    def __post_init__(self):
+        # self._validation_errors = []
+        self.validate()
+
+    # --- Database helpers ---
+    @classmethod
+    def create(cls: Type[T], **data) -> T:
+        """Create and persist a new record in DB."""
+        instance = cls(**data)  # Validate via __post_init__ in dataclass
+        # orm_model = instance._to_orm()
+        # session.add(orm_model)
+        # session.commit()
+        # session.refresh(orm_model)
+        return instance
+
+    # @classmethod
+    # def get_from_db(cls: Type[T], session: Session, obj_id: int) -> Optional[T]:
+    #     """Fetch a record from DB by ID."""
+    #     orm_model = session.query(cls._orm_model()).get(obj_id)
+    #     if not orm_model:
+    #         return None
+    #     return cls._from_orm(orm_model)
+
+    @classmethod
+    def from_session(cls: Type[T], session_data: dict) -> T:
+        return cls(**session_data)
+
+    # --- ORM binding ---
+    @classmethod
+    def _orm_model(cls):
+        """Should be overridden to return the ORM model class."""
+        raise NotImplementedError
+
+    @classmethod
+    def _from_orm(cls: Type[T], orm_obj) -> T:
+        """Should be overridden to map ORM object to dataclass."""
+        raise NotImplementedError
+
+    def patch(self: T, **changes) -> T:
+        """Return a new instance with updated fields (no DB)."""
+        return replace(self, **changes)
+
+    def update(self: T, session: Session, **changes) -> T:
+        """Update a record in DB and return a new immutable instance."""
+        if not getattr(self, "id", None):
+            raise ValueError("Cannot update without ID")
+
+        orm_model = session.query(self._orm_model()).get(self.id)
+        if not orm_model:
+            raise ValueError(f"{self.__class__.__name__} not found")
+
+        for field_name, value in changes.items():
+            setattr(orm_model, field_name, value)
+
+        session.commit()
+        session.refresh(orm_model)
+        return self.__class__._from_orm(orm_model)
+
+    def delete(self: T) -> T:
+        """Delete record from DB (soft-delete can be overridden)."""
+        # if not getattr(self, "id", None):
+        #     raise ValueError("Cannot delete without ID")
+        #
+        # orm_model = session.query(self._orm_model()).get(self.id)
+        # if not orm_model:
+        #     raise ValueError(f"{self.__class__.__name__} not found")
+        #
+        # session.delete(orm_model)
+        # session.commit()
+
+        return replace(self, _deleted=True)
+
+    # --- Session helpers ---
+    def to_session(self) -> dict:
+        return asdict(self)
+
+    def _to_orm(self):
+        """Should be overridden to map dataclass to ORM object."""
+        raise NotImplementedError
+
+# class xPyonirSchema:
     # default_file_attributes = ['file_name','file_path','file_dirname','file_data_type','file_ctx','file_created_on']
 
     """Schema class enables validation when model class initializes"""
@@ -31,30 +129,30 @@ class PyonirSchema:
     #                        'created_on', 'modified_on', 'modified_by', 'last_modified_by',
     #                        'date_created', 'date_modified', 'raw', 'provider_model') + PRIVATE_FIELDS
 
-    def validate(self):
-        """validates a given property with accessible validation method"""
-        for name, value in self.__dict__.items():
-            if name.startswith('_'): continue
-            validator_fn = getattr(self, f'validate_{name}', None)
-            if validator_fn: validator_fn()
-        pass
+    # def validate(self):
+    #     """validates a given property with accessible validation method"""
+    #     for name, value in self.__dict__.items():
+    #         if name.startswith('_'): continue
+    #         validator_fn = getattr(self, f'validate_{name}', None)
+    #         if validator_fn: validator_fn()
+    #     pass
+    #
+    # def __post_init__(self):
+    #     self._validation_errors = []
+    #     self.validate()
 
-    def __post_init__(self):
-        self._validation_errors = []
-        self.validate()
-
-    @staticmethod
-    def generic_query_model(model_fields: str):
-        if not model_fields: return None
-        from pyonir.parser import Parsely
-        mapper = {}
-        params = {"_mapper": mapper}
-        for k in Parsely.default_file_attributes+model_fields.split(','):
-            if ':' in k:
-                k,_, src = k.partition(':')
-                mapper[k] = src
-            params[k] = None
-        return type('GenericQueryModel', (object,), params)
+    # @staticmethod
+    # def generic_query_model(model_fields: str) -> object:
+    #     if not model_fields: return None
+    #     from pyonir.parser import Parsely
+    #     mapper = {}
+    #     params = {"_mapper": mapper}
+    #     for k in Parsely.default_file_attributes+model_fields.split(','):
+    #         if ':' in k:
+    #             k,_, src = k.partition(':')
+    #             mapper[k] = src
+    #         params[k] = None
+    #     return type('GenericQueryModel', (object,), params)
 
 class PyonirCollection:
     SortedList = None
@@ -254,6 +352,7 @@ class PyonirRequest:
         self.model = get_attr(self.query_params, 'model')
         self.is_home = (self.path == '')
         self.is_api = False
+        self.is_static = bool(list(os.path.splitext(self.path)).pop())
         self.form = {}
         self.files = []
         self.ip = self.server_request.client.host
@@ -325,7 +424,7 @@ class PyonirRequest:
         from pyonir.parser import ParselyFileStatus
 
         code = 404
-        if self.file.file_status == ParselyFileStatus.PROTECTED:
+        if self.file.status in (ParselyFileStatus.PROTECTED, ParselyFileStatus.FORBIDDEN):
             self.file.data = {'template': '40x.html', 'content': f'Unauthorized access to this resource.', 'url': self.url, 'slug': self.slug}
             code = 401
         elif self.file.file_status == ParselyFileStatus.PUBLIC or is_router_method:
@@ -353,22 +452,29 @@ class PyonirRequest:
         from pyonir import Site
         from pyonir.parser import Parsely
         is_home = path_str == '/'
-
-        # First, check plugins if available and not home
-        if not is_home and hasattr(app, 'plugins_activated'):
-            for plugin in app.plugins_activated:
-                if not plugin.request_paths: continue
-                resolved_app, parsed = self.resolve_request_to_file(path_str, plugin)
-                if parsed and parsed.file_exists:
-                    return resolved_app, parsed
-
+        app_has_plugins = hasattr(app, 'plugins_activated')
         ctx_route, ctx_paths = app.request_paths or ('', [])
         ctx_route = ctx_route or ''
         ctx_slug = ctx_route[1:]
         path_slug = path_str[1:]
+        app_scope, *path_segments = path_slug.split('/')
+        is_api_request = (len(path_segments) and path_segments[0] == app.API_DIRNAME) or path_str.startswith(app.API_ROUTE)
+        # if is_api_request and app_has_plugins and any(plg.module == app_scope for plg in app.plugins_activated):
+        #     pass
+
+        # First, check plugins if available and not home
+        if not is_home and app_has_plugins:
+            for plugin in app.plugins_activated:
+                if not plugin.request_paths or (is_api_request and plugin.module != app_scope): continue
+                if plugin.module == app_scope and is_api_request:
+                    path_str = path_str.replace('/'+app_scope, '')
+                resolved_app, parsed = self.resolve_request_to_file(path_str, plugin)
+                if parsed and parsed.file_exists:
+                    return resolved_app, parsed
+
 
         # Normalize API prefix and path segments
-        if path_str.startswith('/api'):
+        if is_api_request:
             path_str = path_str.replace('/api', '')
 
         request_segments = [
@@ -383,6 +489,7 @@ class PyonirRequest:
         # Try resolving to actual file paths
         protected_segment = [s if i > len(request_segments)-1 else f'_{s}' for i,s in enumerate(request_segments)]
         for root_path in ctx_paths:
+            if not is_api_request and root_path.endswith(app.API_DIRNAME): continue
             category_index = os.path.join(root_path, *request_segments, 'index.md')
             single_page = os.path.join(root_path, *request_segments) + Site.EXTENSIONS['file']
             single_protected_page = os.path.join(root_path, *protected_segment) + Site.EXTENSIONS['file']
@@ -666,7 +773,7 @@ class PyonirApp(PyonirBase):
     def __init__(self, app_entrypoint: str):
         from pyonir.utilities import generate_id, get_attr, process_contents
         from pyonir import __version__
-        from pyonir.parser import Parsely
+        # from pyonir.parser import Parsely
         self.SOFTWARE_VERSION = __version__
         self.get_attr = get_attr
         self.app_entrypoint: str = app_entrypoint # application main.py file or the initializing file
@@ -676,8 +783,7 @@ class PyonirApp(PyonirBase):
         self.SESSION_KEY = f"pyonir_{self.app_name}"
         self.configs = None
         self.routing_paths = [self.pages_dirpath, self.api_dirpath]
-        Parsely._Filters['jinja'] = self.parse_jinja
-        Parsely._Filters['pyformat'] = self.parse_pyformat
+        self.Parsely_Filters = {'jinja': self.parse_jinja, 'pyformat': self.parse_pyformat}
 
     @property
     def nginx_config_filepath(self):
@@ -792,7 +898,7 @@ class PyonirApp(PyonirBase):
 
     def run_plugins(self, hook: PyonirHooks, data_value=None):
         if not hook or not self.plugins_activated: return
-        hook = hook.name.lower()
+        hook = hook.lower()
         for plg in self.plugins_activated:
             if not hasattr(plg, hook): continue
             hook_method = getattr(plg, hook)

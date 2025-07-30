@@ -1,8 +1,7 @@
 from dataclasses import dataclass
 from pyonir.core import PyonirSchema
 
-
-@dataclass
+@dataclass(frozen=True)
 class EmailSubscriber(PyonirSchema):
     """
     Represents an email subscriber
@@ -18,3 +17,7 @@ class EmailSubscriber(PyonirSchema):
         import re
         if not re.match(r"[^@]+@[^@]+\.[^@]+", self.email):
             self._validation_errors.append(f"Invalid email address: {self.email}")
+
+if __name__ == "__main__":
+    email = EmailSubscriber.create(email="foo@bar.com", subscriptions=["python","optimljs","starlette"])
+    pass

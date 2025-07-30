@@ -4,9 +4,9 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 
 from .core import PyonirRequest, PyonirCollection, PyonirSchema
-from .pyonir_types import ParselyPagination, PyonirBase
+from .pyonir_types import ParselyPagination, JSON_RES
 from .utilities import dict_to_class, get_attr, get_all_files_from_dir, deserialize_datestr, create_file, get_module, \
-    cls_mapper
+    cls_mapper, parse_query_model_to_object
 
 ALLOWED_CONTENT_EXTENSIONS = ('prs', 'md', 'json', 'yaml')
 IGNORE_FILES = ('.vscode', '.vs', '.DS_Store', '__pycache__', '.git', '.', '_', '<', '>', '(', ')', '$', '!', '._')
@@ -48,7 +48,7 @@ IMAGE_FORMATS = (
     'PCX'  # .pcx
 )
 
-class ParselyFileStatus(StrEnum):
+class ParselyFileStatus(str):
     HIDDEN = 'hidden'
     """Read only by the system often used for temporary files"""
 
@@ -93,6 +93,7 @@ class Page:
     file_created_on: datetime = None
     contents_relpath: str = ''
     generate_static_file: callable = None
+    status: str = ParselyFileStatus.PUBLIC
 
     def to_json(self) -> dict:
         """Json serializable repr"""
@@ -231,6 +232,8 @@ class Parsely:
         self.data = {}
 
         self.schema = None
+        """Model object associated with file."""
+
         ctx_url, ctx_name, ctx_dirpath, ctx_staticpath, contents_relpath, file_name, file_ext = self.process_ctx(app_ctx)
         content_type, *content_subs = os.path.dirname(contents_relpath).split(os.path.sep) # directory at root of contents scope
         is_page = content_type in (Site.PAGES_DIRNAME, Site.API_DIRNAME) and not self.is_router
@@ -242,6 +245,7 @@ class Parsely:
         self.file_data_type = content_type
         self.file_name = file_name
         self.file_ext = file_ext.lstrip('.')
+        self.status = self.file_status
 
         surl = re.sub(fr'\b{Site.PAGES_DIRNAME}/\b|\bindex\b', '', contents_relpath)
         slug = f'{ctx_url}/{surl}'.lstrip('/').rstrip('/').lower()
@@ -259,7 +263,7 @@ class Parsely:
 
 
     @property
-    def file_status(self) -> ParselyFileStatus:  # String
+    def file_status(self) -> str:  # String
         if not self.file_exists: return ParselyFileStatus.FORBIDDEN
         return ParselyFileStatus.PROTECTED if self.file_name.startswith('_') else ParselyFileStatus.PUBLIC
 
@@ -299,7 +303,7 @@ class Parsely:
         _, _, content_dirpath = self.file_path.partition(ctx_dirpath)
         file_name, file_ext = os.path.splitext(os.path.basename(self.file_path))
         content_dirpath = content_dirpath.lstrip(os.path.sep).replace(file_ext,'')
-        return ctx_url, ctx_dir, ctx_dirpath, ctx_staticpath, content_dirpath, file_name, file_ext
+        return ctx_url or '', ctx_dir, ctx_dirpath, ctx_staticpath, content_dirpath, file_name, file_ext
 
     def set_taxonomy(self) -> list[str] | None:
         if not self.file_exists: return None
@@ -340,7 +344,18 @@ class Parsely:
         }
         pass
 
-    def map_to_model(self, model):
+    def map_to_model(self, model, refresh = False):
+        if model and refresh:
+            import sys, importlib
+            model_name = model.__name__ if hasattr(model, '__name__') else type(model).__name__
+            module_path = model.__module__ if hasattr(model, '__module__') else None
+            module = sys.modules.get(module_path) if module_path else None
+            if module:
+                print(f'pyonir is reloading the model:{module_path}.{model_name}')
+                sys.modules[module_path] = importlib.reload(module)
+                new_model = getattr(sys.modules[module_path], model_name)
+                model = new_model
+
         if not model:
             file_props = {k: v for k,v in self.__dict__.items() if k in self.default_file_attributes}
             return dict_to_class({**self.data, **file_props, '@model': 'GenericQueryModel'}, self.file_data_type)
@@ -355,8 +370,9 @@ class Parsely:
         if not bool(self.data): return
         filters = self.data.get(FILTER_KEY)
         if not filters: return
+        from pyonir import Site
         for filtr, datakeys in filters.items():
-            ifiltr = Parsely._Filters.get(filtr)
+            ifiltr = Site.Parsely_Filters.get(filtr)
             if not ifiltr: continue
             for key in datakeys:
                 mod_val = ifiltr(get_attr(self.data, key), {"page": self.data})
@@ -380,34 +396,6 @@ class Parsely:
         return self.output_html(req) if req.type in (TEXT_RES, '*/*') else self.output_json() \
             if req.type == JSON_RES else req.server_response
 
-    # async def _access_module(self, resolver_path: str) -> tuple:
-    #     from pyonir import Site
-    #     if resolver_path.startswith(LOOKUP_DIR_PREFIX):
-    #         return None, self.process_value_type(resolver_path)
-    #     pkg = resolver_path.split('.')
-    #     meth_name = pkg.pop()
-    #     is_system = pkg[0] == 'pyonir'
-    #     module, resolver = None, None
-    #
-    #     if is_system:
-    #         mod_path = os.path.join(Site.pyonir_path,'server.py')
-    #         module, resolver = get_module(mod_path, meth_name)
-    #         # resolver = get_attr(Site.server.resolvers, resolver_path)
-    #     else:
-    #         isplugin = list(filter(lambda p: p.module == pkg[0], Site.available_plugins))
-    #         if len(isplugin):
-    #             isplugin = isplugin[0]
-    #         if isplugin:
-    #             pkg.pop(0)
-    #             resolver = get_attr(isplugin, resolver_path)
-    #             if not resolver and hasattr(isplugin, 'resolvers_dirpath'):
-    #                 mod_path = os.path.join(isplugin.resolvers_dirpath, *pkg)+'.py'
-    #                 module, resolver = get_module(mod_path, meth_name)
-    #         else:
-    #             pkg_path = os.path.join(Site.backend_dirpath, *pkg) + '.py'
-    #             if not os.path.exists(pkg_path): pkg_path = os.path.join(Site.backend_dirpath, *pkg, '__init__.py')
-    #             module, resolver = get_module(pkg_path, meth_name)
-    #     return module, resolver
 
     async def _access_module_from_request(self, resolver_path: str) -> tuple:
         from pyonir import Site
@@ -467,16 +455,20 @@ class Parsely:
 
     async def process_resolver(self, request: PyonirRequest):
         """Resolves dynamic data from external methods"""
-        resolver_obj = self.data.get(RESOLVER_KEY, {}).get(request.method)
-        if not resolver_obj or self.resolver is not None: return
-        resolver_path = resolver_obj.get('call')
-        resolver_args = resolver_obj.get('args')
-        resolver_redirect = resolver_obj.get('redirect')
+        resolver_obj = self.data.get(RESOLVER_KEY, {})
+        resolver_action = resolver_obj.get(request.method)
+        if resolver_obj and not resolver_action:
+            self.status = ParselyFileStatus.FORBIDDEN
+            request.type = JSON_RES
+        if not resolver_action or self.resolver is not None: return
+        resolver_path = resolver_action.get('call')
+        resolver_args = resolver_action.get('args')
+        resolver_redirect = resolver_action.get('redirect')
 
         if not resolver_path: return
         module, resolver = await self._access_module_from_request(resolver_path)
 
-        request.type = resolver_obj.get('headers', {}).get('accept', request.type)
+        request.type = resolver_action.get('headers', {}).get('accept', request.type)
         if resolver and resolver_args:
             request.form.update(resolver_args)
         if resolver and resolver_redirect:
@@ -665,7 +657,7 @@ class Parsely:
             def parse_ref_to_files(filepath, as_dir=0):
                 # use proper app context for path reference outside of scope is always the root level
                 # Ref parameters with model will return a generic model to represent the data value
-                generic_query_model = PyonirSchema.generic_query_model(generic_model_properties)
+                generic_query_model = parse_query_model_to_object(generic_model_properties)
 
                 if as_dir:
                     file_gen = PyonirCollection.query(filepath,
@@ -932,7 +924,7 @@ class Parsely:
     def output_html(self, req: PyonirRequest):
         """Renders and html output"""
         from pyonir import Site
-        page = self.map_to_model(Page)
+        page = self.map_to_model(Page, get_attr(req, 'query_params.rmodel'))
         Site.TemplateEnvironment.globals['prevNext'] = self.prev_next
         Site.TemplateEnvironment.globals['page'] = page
         html = Site.TemplateEnvironment.get_template(page.template).render()

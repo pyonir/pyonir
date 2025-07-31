@@ -199,8 +199,11 @@ def process_sse(data: dict) -> str:
 
 
 def serve_static(app: PyonirApp, request: PyonirRequest):
-    from starlette.responses import FileResponse
-    return FileResponse(os.path.join(app.TemplateEnvironment.themes.active_theme.static_dirpath,'favicon.ico'), 200)
+    from starlette.responses import FileResponse, PlainTextResponse
+    base_path = app.public_assets_dirpath if request.path.startswith('/static') else app.TemplateEnvironment.themes.active_theme.static_dirpath
+    req_path = request.parts[1:] if len(request.parts) > 1 else request.parts
+    path = os.path.join(base_path, *req_path)
+    return FileResponse(path, 200) if os.path.exists(path) else PlainTextResponse(f"{request.path} not found", status_code=404)
 
 def route(dec_func: typing.Callable | None,
                path: str = '',
@@ -346,20 +349,14 @@ def _add_route(dec_func: typing.Callable | None,
 
 def build_response(request: PyonirRequest):
     """Create web response for web server"""
-    from datetime import datetime, timedelta
     from pyonir import Site
     force_fresh = "no-store, no-cache, must-revalidate, max-age=0"
-    force_cache = "public"
+    # force_cache = "public"
 
-    # ishtml = request.type == TEXT_RES
-    # expires = datetime.utcnow() + timedelta(days=7)
-    # expires = expires.strftime("%a, %d %b %Y %H:%M:%S GMT")
     response = Site.server.response_renderer(request.server_response, media_type=request.type)
-    # if ishtml: response.headers['Expires'] = expires
     response.headers['Cache-Control'] = force_fresh
     response.headers['Pragma'] = "no-cache"
     response.headers['Expires'] = "0"
-    # response.headers['Vary'] = "Cookie"
     response.headers['Server'] = "Pyonir Web Framework"
     response.status_code = request.status_code
     return response

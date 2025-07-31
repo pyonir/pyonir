@@ -752,6 +752,7 @@ class PyonirApp(PyonirBase):
         self.SESSION_KEY = f"pyonir_{self.app_name}"
         self.configs = None
         self.routing_paths = [self.pages_dirpath, self.api_dirpath]
+        self.public_assets_dirpath = os.path.join(self.frontend_dirpath, 'static')
         self.Parsely_Filters = {'jinja': self.parse_jinja, 'pyformat': self.parse_pyformat,
                                  'md': parse_markdown}
 

@@ -49,8 +49,8 @@ IMAGE_FORMATS = (
 )
 
 class ParselyFileStatus(str):
-    HIDDEN = 'hidden'
-    """Read only by the system often used for temporary files"""
+    UNKNOWN = 'unknown'
+    """Read only by the system often used for temporary and unknown files"""
 
     PROTECTED = 'protected'
     """Requires authentication and authorization. can be READ and WRITE."""
@@ -210,7 +210,7 @@ class ParselyMedia:
 
 class Parsely:
     """Parsely is a static file parser"""
-    _Filters = {'md': parse_markdown}  # Global filters that modify scalar values
+    # _Filters = {'md': parse_markdown}  # Global filters that modify scalar values
     default_file_attributes = ['file_name','file_path','file_dirname','file_data_type','file_ctx','file_created_on']
 
     def __init__(self, abspth: str, app_ctx=None, generic_query_model = None):
@@ -264,8 +264,9 @@ class Parsely:
 
     @property
     def file_status(self) -> str:  # String
-        if not self.file_exists: return ParselyFileStatus.FORBIDDEN
-        return ParselyFileStatus.PROTECTED if self.file_name.startswith('_') else ParselyFileStatus.PUBLIC
+        if not self.file_exists: return ParselyFileStatus.UNKNOWN
+        return ParselyFileStatus.PROTECTED if self.file_name.startswith('_') else \
+            ParselyFileStatus.FORBIDDEN if self.file_name.startswith('.') else ParselyFileStatus.PUBLIC
 
     @property
     def file_created_on(self):  # Datetime

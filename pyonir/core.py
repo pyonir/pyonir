@@ -773,7 +773,7 @@ class PyonirApp(PyonirBase):
     def __init__(self, app_entrypoint: str):
         from pyonir.utilities import generate_id, get_attr, process_contents
         from pyonir import __version__
-        # from pyonir.parser import Parsely
+        from pyonir.parser import parse_markdown
         self.SOFTWARE_VERSION = __version__
         self.get_attr = get_attr
         self.app_entrypoint: str = app_entrypoint # application main.py file or the initializing file
@@ -783,7 +783,8 @@ class PyonirApp(PyonirBase):
         self.SESSION_KEY = f"pyonir_{self.app_name}"
         self.configs = None
         self.routing_paths = [self.pages_dirpath, self.api_dirpath]
-        self.Parsely_Filters = {'jinja': self.parse_jinja, 'pyformat': self.parse_pyformat}
+        self.Parsely_Filters = {'jinja': self.parse_jinja, 'pyformat': self.parse_pyformat,
+                                 'md': parse_markdown}
 
     @property
     def nginx_config_filepath(self):

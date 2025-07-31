@@ -1,9 +1,8 @@
 import os, pytz, re, json
 from datetime import datetime
 from dataclasses import dataclass, field
-from enum import StrEnum
 
-from .core import PyonirRequest, PyonirCollection, PyonirSchema
+from .core import PyonirRequest, PyonirCollection
 from .pyonir_types import ParselyPagination, JSON_RES
 from .utilities import dict_to_class, get_attr, get_all_files_from_dir, deserialize_datestr, create_file, get_module, \
     cls_mapper, parse_query_model_to_object
@@ -18,7 +17,9 @@ DICT_DELIM = ": "
 LST_DLM = ":-"
 STR_DLM = ":` "
 ILN_DCT_DLM = ":: "
+BLOCK_DELIM = ":|"
 BLOCK_PREFIX_STR = "==="
+BLOCK_CODE_FENCE = "```"
 LOOKUP_EMBED_PREFIX = '$'
 LOOKUP_FILE_PREFIX = '$file'
 # LOOKUP_CONTENT_PREFIX = '$content'
@@ -566,9 +567,10 @@ class Parsely:
             in_limit = cur + 1 < self.file_line_count
             stop_comm_blok = self.file_lines[cur].strip().endswith(stop_str) if in_limit and stop_str else None
             nxt_curs_is_blok = in_limit and self.file_lines[cur + 1].startswith(BLOCK_PREFIX_STR)
-            nxt_curs_is_blokb = in_limit and self.file_lines[cur + 1].strip().endswith(":|")
+            nxt_curs_is_blokfence = in_limit and self.file_lines[cur + 1].strip().startswith(BLOCK_CODE_FENCE)
+            nxt_curs_is_blokdelim = in_limit and self.file_lines[cur + 1].strip().endswith(BLOCK_DELIM)
             nxt_curs_tabs = count_tabs(self.file_lines[cur + 1]) if (in_limit and not is_blob) else -1
-            return '__STOPLOOKAHEAD__' if stop_comm_blok or nxt_curs_is_blok or nxt_curs_is_blokb or (
+            return '__STOPLOOKAHEAD__' if stop_comm_blok or nxt_curs_is_blok or nxt_curs_is_blokdelim or nxt_curs_is_blokfence or (
                     nxt_curs_tabs < curtabs and not is_blob) else None
 
         stop = False
@@ -578,14 +580,16 @@ class Parsely:
             if stop: break
             ln_frag = self.file_lines[cursor]
             is_multi_ln_comment = ln_frag.strip().startswith('{#')
+            is_block_code = ln_frag.strip().startswith(BLOCK_CODE_FENCE)
             is_ln_comment = not is_blob and ln_frag.strip().startswith('#') or not is_blob and ln_frag.strip() == ''
             comment = is_multi_ln_comment or is_ln_comment
+
             if comment:
                 if is_multi_ln_comment or stop_str:
                     cursor, ln_val = self.process_line(cursor + 1, '', stop_str='#}')
             else:
                 tabs = count_tabs(ln_frag)
-                stop_iter = tabs > 0 and not is_ln_comment or is_blob or stop_str
+                stop_iter = tabs > 0 and not is_ln_comment or is_blob or is_block_code or stop_str
                 try:
                     if is_blob:
                         output_data += ln_frag + "\n"
@@ -597,10 +601,16 @@ class Parsely:
                         parsed_key, val_type, parsed_val, methArgs = process_iln_frag(ln_frag)
                         if methArgs:
                             output_data['@args'] = [arg.replace(' ', '').split(':') for arg in methArgs.split(',')]
-                        if is_parent or is_block:
+                        if is_parent or is_block or is_block_code:
                             parsed_key = parsed_val if not parsed_key else parsed_key
-                            parsed_key = "content" if parsed_key == BLOCK_PREFIX_STR else parsed_key.replace(
-                                BLOCK_PREFIX_STR, "").replace(":|",'').strip()
+                            parsed_key = "content" if parsed_key == BLOCK_PREFIX_STR else \
+                                (parsed_key.replace(BLOCK_PREFIX_STR, "")
+                                 .replace(BLOCK_DELIM,'')
+                                 .replace(BLOCK_CODE_FENCE,'').strip())
+                            if is_block_code:
+                                fence_key, *overide_keyname = parsed_key.split(' ', 1)
+                                parsed_key = overide_keyname[0] if overide_keyname else fence_key
+                                pass
                             cursor, parsed_val = self.process_line(cursor + 1, output_data=val_type,
                                                                    is_blob=isinstance(val_type, str))
                             if isinstance(parsed_val, list) and '-' in parsed_val:  # consolidate list of maps

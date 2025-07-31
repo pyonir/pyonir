@@ -558,6 +558,9 @@ class PyonirBase:
         """The application module directory name"""
         return self.__module__.split('.').pop()
 
+    @property
+    def app_ctx(self) -> AppCtx: pass
+
     @staticmethod
     def generate_resolvers(cls: callable, output_dirpath: str, namespace: str):
         """Automatically generate api endpoints from service class."""
@@ -583,6 +586,10 @@ class PyonirBase:
             m_temp = resolver_template.format(call_path=namespace_instance_path, docs=docs)
             create_file(file_path, m_temp)
             print(f"\t{meth_name} at {file_path}")
+
+    def parse_file(self, file_path: str) -> Parsely:
+        from pyonir.parser import Parsely
+        return Parsely(file_path, app_ctx=self.app_ctx)
 
     def generate_static_website(self):
         """Generates Static website into the specified static_site_dirpath"""

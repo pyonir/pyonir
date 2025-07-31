@@ -116,44 +116,6 @@ class PyonirSchema:
         """Should be overridden to map dataclass to ORM object."""
         raise NotImplementedError
 
-# class xPyonirSchema:
-    # default_file_attributes = ['file_name','file_path','file_dirname','file_data_type','file_ctx','file_created_on']
-
-    """Schema class enables validation when model class initializes"""
-    # Schemas configs
-    # PROTECTED_FIELD_PREFIX = '@'
-    # # Private fields should can be read and written but should not be exposed
-    # PRIVATE_FIELDS = ('password', 'ssn', 'auth_token', 'id', 'uid', 'privateKey')
-    # # Protected fields are allowed to be read but are not allowed to be changed directly
-    # PROTECTED_FIELDS = (
-    #                        'created_on', 'modified_on', 'modified_by', 'last_modified_by',
-    #                        'date_created', 'date_modified', 'raw', 'provider_model') + PRIVATE_FIELDS
-
-    # def validate(self):
-    #     """validates a given property with accessible validation method"""
-    #     for name, value in self.__dict__.items():
-    #         if name.startswith('_'): continue
-    #         validator_fn = getattr(self, f'validate_{name}', None)
-    #         if validator_fn: validator_fn()
-    #     pass
-    #
-    # def __post_init__(self):
-    #     self._validation_errors = []
-    #     self.validate()
-
-    # @staticmethod
-    # def generic_query_model(model_fields: str) -> object:
-    #     if not model_fields: return None
-    #     from pyonir.parser import Parsely
-    #     mapper = {}
-    #     params = {"_mapper": mapper}
-    #     for k in Parsely.default_file_attributes+model_fields.split(','):
-    #         if ':' in k:
-    #             k,_, src = k.partition(':')
-    #             mapper[k] = src
-    #         params[k] = None
-    #     return type('GenericQueryModel', (object,), params)
-
 class PyonirCollection:
     SortedList = None
     get_attr =  None

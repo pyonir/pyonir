@@ -337,8 +337,8 @@ def _add_route(dec_func: typing.Callable | None,
         except Exception as e:
             raise
             # pyonir_request.server_response = json.dumps({"error": f"{e}"})
-        if pyonir_request.redirect:
-            return Site.server.serve_redirect(pyonir_request.redirect)
+        if pyonir_request.redirect_to:
+            return Site.server.serve_redirect(pyonir_request.redirect_to)
 
         return build_response(pyonir_request)
 

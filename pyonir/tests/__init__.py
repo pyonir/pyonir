@@ -52,8 +52,8 @@ def generate_tests(parsely: Parsely):
 
 if __name__=='__main__':
     # generate_pyonir_types()
-    # App = init(__file__)
-    # file = App.parse_file(os.path.join(os.path.dirname(__file__),'contents','test.md'))
-    # generate_tests(file)
+    App = init(__file__)
+    file = App.parse_file(os.path.join(os.path.dirname(__file__),'contents','test.md'))
+    generate_tests(file)
     # print(file.data)
     pass

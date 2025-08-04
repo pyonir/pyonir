@@ -174,6 +174,26 @@ class PyonirThemes:
 class TemplateEnvironment:
     themes: PyonirThemes
 
+@dataclass
+class PyonirRestResponse:
+    """Represents a REST response from the server."""
+    status_code: int = 000
+    """HTTP status code of the response, e.g., 200 for success, 404 for not found."""
+
+    message: str = ''
+    """Response message, typically a string describing the result of the request."""
+
+    data: dict = field(default_factory=dict)
+    """Response data, typically a dictionary containing the response payload."""
+
+    def to_json(self) -> dict:
+        """Converts the response to a JSON serializable dictionary."""
+        return self.__dict__ if isinstance(self, PyonirRestResponse) else {
+            'status_code': self.status_code,
+            'message': self.message,
+            'data': self.data
+        }
+
 class PyonirRequest:
 
     server_response: any
@@ -200,6 +220,8 @@ class PyonirRequest:
     browser :str
     type: Union[TEXT_RES, JSON_RES, EVENT_RES]
     status_code: int
+    redirect_to: Optional[str]
+    """URL to redirect to after processing the request."""
 
     @property
     def redirect(self): pass
@@ -246,7 +268,13 @@ class PyonirBase:
     PAGES_DIRNAME: str
     CONFIG_FILENAME: str
 
+    def parse_file(self) -> Parsely:
+        """Parses a file and returns a Parsely instance for the file."""
+        pass
+
+
 class PyonirApp(PyonirBase):
+    SECRET_SAUCE: str
     configs: object
     request_paths: str
     nginx_config_filepath: str

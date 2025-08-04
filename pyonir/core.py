@@ -5,7 +5,8 @@ from jinja2 import Environment
 from starlette.requests import Request as StarletteRequest
 
 from pyonir.pyonir_types import PyonirServer, Theme, PyonirHooks, Parsely, ParselyPagination, AppRequestPaths, AppCtx, \
-    PyonirRouters, RoutePath
+    PyonirRouters, RoutePath, PyonirRestResponse
+from pyonir.utilities import json_serial
 
 # Environments
 DEV_ENV:str = 'LOCAL'
@@ -22,99 +23,94 @@ from typing import Optional, Type, TypeVar
 
 T = TypeVar("T", bound="PyonirSchema")
 
-
 class PyonirSchema:
-    """Interface for immutable dataclass models with CRUD and session support."""
-    _validation_errors: list[str] = []
-    _deleted = False
+    """
+    Interface for immutable dataclass models with CRUD and session support.
+    Provides per-instance validation and session helpers.
+    """
+
+    def __init__(self):
+        # Each instance gets its own validation error list
+        self.errors: list[str] = []
+        self._deleted: bool = False
+        self._private_keys: list[str] = []
+
+    def is_valid(self) -> bool:
+        """Returns True if there are no validation errors."""
+        return not self.errors
 
     def validate(self):
-        """validates a given property with accessible validation method"""
-        for name, value in self.__dict__.items():
-            if name.startswith('_'): continue
-            validator_fn = getattr(self, f'validate_{name}', None)
-            if validator_fn: validator_fn()
-        pass
+        """
+        Validates fields by calling `validate_<fieldname>()` if defined.
+        Clears previous errors on every call.
+        """
+        for name in self.__dict__.keys():
+            if name.startswith("_"):
+                continue
+            validator_fn = getattr(self, f"validate_{name}", None)
+            if callable(validator_fn):
+                validator_fn()
 
     def __post_init__(self):
-        # self._validation_errors = []
+        """
+        Called automatically in dataclasses after initialization.
+        Ensures validation runs for each instance.
+        """
+        # Reset errors for new instance
+        self.errors = []
         self.validate()
 
     # --- Database helpers ---
+    def save_to_file(self, file_path: str) -> bool:
+        """Saves the user data to a file in JSON format"""
+        from pyonir.utilities import create_file
+        return create_file(file_path, self.to_json(obfuscate=False))
+
+    def save_to_session(self: T, request: PyonirRequest, value: any) -> None:
+        """Convert instance to a serializable dict."""
+        request.server_request.session[self.__class__.__name__.lower()] = value
+
     @classmethod
     def create(cls: Type[T], **data) -> T:
-        """Create and persist a new record in DB."""
-        instance = cls(**data)  # Validate via __post_init__ in dataclass
-        # orm_model = instance._to_orm()
-        # session.add(orm_model)
-        # session.commit()
-        # session.refresh(orm_model)
+        """Create and return a new instance (validation runs in __post_init__)."""
+        instance = cls(**data)
         return instance
 
-    # @classmethod
-    # def get_from_db(cls: Type[T], session: Session, obj_id: int) -> Optional[T]:
-    #     """Fetch a record from DB by ID."""
-    #     orm_model = session.query(cls._orm_model()).get(obj_id)
-    #     if not orm_model:
-    #         return None
-    #     return cls._from_orm(orm_model)
+    @classmethod
+    def from_file(cls: Type[T], file_path: str, app_ctx) -> T:
+        """Create an instance from a file path."""
+        from pyonir.parser import Parsely
+        parsely = Parsely(file_path, app_ctx=app_ctx)
+        return parsely.map_to_model(cls)
 
     @classmethod
     def from_session(cls: Type[T], session_data: dict) -> T:
+        """Create an instance from session data."""
         return cls(**session_data)
 
     # --- ORM binding ---
     @classmethod
     def _orm_model(cls):
-        """Should be overridden to return the ORM model class."""
         raise NotImplementedError
 
     @classmethod
     def _from_orm(cls: Type[T], orm_obj) -> T:
-        """Should be overridden to map ORM object to dataclass."""
         raise NotImplementedError
 
     def patch(self: T, **changes) -> T:
         """Return a new instance with updated fields (no DB)."""
         return replace(self, **changes)
 
-    def update(self: T, session: Session, **changes) -> T:
-        """Update a record in DB and return a new immutable instance."""
-        if not getattr(self, "id", None):
-            raise ValueError("Cannot update without ID")
-
-        orm_model = session.query(self._orm_model()).get(self.id)
-        if not orm_model:
-            raise ValueError(f"{self.__class__.__name__} not found")
-
-        for field_name, value in changes.items():
-            setattr(orm_model, field_name, value)
-
-        session.commit()
-        session.refresh(orm_model)
-        return self.__class__._from_orm(orm_model)
-
     def delete(self: T) -> T:
-        """Delete record from DB (soft-delete can be overridden)."""
-        # if not getattr(self, "id", None):
-        #     raise ValueError("Cannot delete without ID")
-        #
-        # orm_model = session.query(self._orm_model()).get(self.id)
-        # if not orm_model:
-        #     raise ValueError(f"{self.__class__.__name__} not found")
-        #
-        # session.delete(orm_model)
-        # session.commit()
-
+        """Mark the model as deleted (soft-delete)."""
         return replace(self, _deleted=True)
 
-    # --- Session helpers ---
-    def to_session(self) -> dict:
-        return asdict(self)
-
     def _to_orm(self):
-        """Should be overridden to map dataclass to ORM object."""
         raise NotImplementedError
+
+    def to_json(self, obfuscate):
+        pass
+
 
 class PyonirCollection:
     SortedList = None
@@ -131,7 +127,7 @@ class PyonirCollection:
         self._query_path = ''
         key = lambda x: self.get_attr(x, sort_key or 'file_created_on')
         try:
-            items = list(items)
+            # items = list(items)
             self.collection = SortedList(items, key=key)
         except Exception as e:
             raise
@@ -328,8 +324,21 @@ class PyonirRequest:
         self.app_ctx_name: str = ''
 
     @property
-    def redirect(self):
-        return self.form.get('redirect', self.form.get('redirect_to'))
+    def previous_url(self):
+        return self.headers.get('referer', '')
+
+    @property
+    def redirect_to(self):
+        """Returns the redirect URL from the request form data"""
+        return self.form.get('redirect_to', self.form.get('redirect'))
+
+    def redirect(self, url: str):
+        """Sets the redirect URL in the request form data"""
+        self.form['redirect_to'] = url
+
+    def messages(self, session_key: str):
+        """Returns messages from the session"""
+        return self.server_request.session.pop(session_key, '')
 
     async def process_request_data(self):
         """Get form data and file upload contents from request"""
@@ -392,6 +401,12 @@ class PyonirRequest:
         elif self.file.file_status == ParselyFileStatus.PUBLIC or is_router_method:
             code = 200
         self.status_code = code #200 if self.file.file_exists or is_router_method else 404
+
+    def api_response(self) -> PyonirRestResponse:
+        """Format the response data for REST API requests"""
+        if isinstance(self.server_response, PyonirRestResponse): return self.server_response
+        res = self.server_response or self.file
+        return PyonirRestResponse(message='', data=res, status_code=self.status_code)
 
     def render_error(self):
         """Data output for an unknown file path for a web request"""
@@ -588,6 +603,7 @@ class PyonirBase:
             print(f"\t{meth_name} at {file_path}")
 
     def parse_file(self, file_path: str) -> Parsely:
+        """Parses a file and returns a Parsely instance for the file."""
         from pyonir.parser import Parsely
         return Parsely(file_path, app_ctx=self.app_ctx)
 
@@ -749,7 +765,7 @@ class PyonirApp(PyonirBase):
         self.app_dirpath: str = os.path.dirname(app_entrypoint) # application main.py file or the initializing file
         self.name: str = os.path.basename(self.app_dirpath) # web url to serve application pages
         self.SECRET_SAUCE = generate_id()
-        self.SESSION_KEY = f"pyonir_{self.app_name}"
+        self.SESSION_KEY = f"pyonir_{self.name}"
         self.configs = None
         self.routing_paths = [self.pages_dirpath, self.api_dirpath]
         self.public_assets_dirpath = os.path.join(self.frontend_dirpath, 'static')
@@ -839,7 +855,10 @@ class PyonirApp(PyonirBase):
     def is_secure(self):return self.get_attr(self.configs, 'app.use_ssl', False) #if self.configs else None
 
     @property
-    def domain(self): return self.get_attr(self.configs, 'app.domain', self.host) # if self.configs else self.host
+    def domain_name(self): return self.get_attr(self.configs, 'app.domain', self.host) # if self.configs else self.host
+
+    @property
+    def domain(self): return f"{self.protocol}://{self.domain_name}{':'+str(self.port) if self.is_dev else ''}".replace('0.0.0.0','localhost') # if self.configs else self.host
 
     def load_plugin(self, plugin: callable | list[callable]):
         """Make the plugin known to the pyonir application"""

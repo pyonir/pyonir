@@ -4,7 +4,7 @@ import typing
 from typing import Union, Generator, Iterable, Callable, Mapping, get_origin, get_args, get_type_hints, Any
 from collections.abc import Iterable as ABCIterable
 
-from pyonir.pyonir_types import PyonirRequest
+from pyonir.pyonir_types import PyonirRequest, PyonirApp
 
 
 def is_iterable(tp):
@@ -64,8 +64,13 @@ def cls_mapper(file_obj: any, cls: typing.Callable, from_request: PyonirRequest 
             param_type = is_optional_type(param_type)
             mapper_key = get_attr(mapper_keys, param_name) or param_name
             param_value = get_attr(data, mapper_key) or get_attr(file_obj, mapper_key)
-            if param_type == PyonirRequest and from_request:
-                param_value = from_request
+            use_value = False
+            if from_request and param_type == PyonirApp or param_type == PyonirRequest:
+                from pyonir import Site
+                use_value = True
+                param_value = Site if param_type == PyonirApp else from_request
+            # if param_type == PyonirRequest and from_request:
+            #     param_value = from_request
             if (param_value==param_type) or param_value is None or param_name[0]=='_' or param_name=='return':
                 continue
             if is_callable_type(param_type):
@@ -86,7 +91,7 @@ def cls_mapper(file_obj: any, cls: typing.Callable, from_request: PyonirRequest 
                 if is_instance and from_request:
                     param_value = cls_mapper(from_request.form, param_type)
                 should_spread = isinstance(param_value, dict)
-                use_value = param_type == PyonirRequest and from_request or is_typed or is_instance
+                use_value = use_value or is_typed or is_instance
                 v = param_value if use_value else param_type(**param_value) if should_spread else param_type(param_value)
                 cls_args[param_name] = v
 
@@ -135,14 +140,14 @@ def process_contents(path, app_ctx=None, file_model: any = None):
     return res
 
 
-def dict_to_class(data: dict, name: str = 'T'):
+def dict_to_class(data: dict, name: str = 'T', deep: bool = True) -> object:
     """
     Converts a dictionary into a class object with the given name.
 
     Args:
         data (dict): The dictionary to convert.
         name (str): The name of the class.
-
+        deep (bool): If True, convert all dictionaries recursively.
     Returns:
         object: An instance of the dynamically created class with attributes from the dictionary.
     """
@@ -155,8 +160,8 @@ def dict_to_class(data: dict, name: str = 'T'):
     # Assign dictionary keys as attributes of the instance
     for key, value in data.items():
         if isinstance(getattr(cls, key, None), property): continue
-        # if isinstance(value, dict):
-        #     value = dict_to_class(value, key)
+        if deep and isinstance(value, dict):
+            value = dict_to_class(value, key)
         setattr(instance, key, value)
 
     return instance
@@ -353,14 +358,6 @@ def delete_file(full_filepath):
 
 
 def create_file(file_abspath: str, data: any = None, is_json: bool = False, mode='w') -> bool:
-    def write_file(file_abspath, data, is_json=False, mode='w'):
-        import json
-        with open(file_abspath, mode, encoding="utf-8") as f:
-            if is_json:
-                json.dump(data, f, indent=2, sort_keys=True, default=json_serial)
-            else:
-                f.write(data)
-
     """Creates a new file based on provided data
     Args:
         file_abspath: str = path to proposed file
@@ -370,14 +367,19 @@ def create_file(file_abspath: str, data: any = None, is_json: bool = False, mode
     Returns:
         bool: The return value if file was created successfully
     """
+    def write_file(file_abspath, data, is_json=False, mode='w'):
+        import json
+        with open(file_abspath, mode, encoding="utf-8") as f:
+            if is_json:
+                json.dump(data, f, indent=2, sort_keys=True, default=json_serial)
+            else:
+                f.write(data)
+
     if not os.path.exists(os.path.dirname(file_abspath)):
         os.makedirs(os.path.dirname(file_abspath))
     try:
-
-        if is_json:
-            file_abspath = file_abspath.replace(".md", ".json")
+        is_json = is_json or file_abspath.endswith('.json')
         write_file(file_abspath, data, is_json=is_json, mode=mode)
-
         return True
     except Exception as e:
         print(f"Error create_file method: {str(e)}")
@@ -437,6 +439,13 @@ def load_modules_from(pkg_dirpath, as_list: bool = False, only_packages:bool = F
             loaded_funcs[name] = func
 
     return loaded_funcs
+
+def import_module(pkg_path: str, callable_name: str) -> typing.Callable:
+    """Imports a module and returns the callable by name"""
+    import importlib
+    mod_pkg = importlib.import_module(pkg_path)
+    mod = getattr(mod_pkg, callable_name, None)
+    return mod
 
 def get_module(pkg_path: str, callable_name: str) -> tuple[typing.Any, typing.Callable]:
     import sys, importlib

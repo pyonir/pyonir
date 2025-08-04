@@ -3,9 +3,9 @@ from datetime import datetime
 from dataclasses import dataclass, field
 
 from .core import PyonirRequest, PyonirCollection
-from .pyonir_types import ParselyPagination, JSON_RES
+from .pyonir_types import ParselyPagination, JSON_RES, PyonirRestResponse
 from .utilities import dict_to_class, get_attr, get_all_files_from_dir, deserialize_datestr, create_file, get_module, \
-    cls_mapper, parse_query_model_to_object
+    cls_mapper, parse_query_model_to_object, import_module
 
 ALLOWED_CONTENT_EXTENSIONS = ('prs', 'md', 'json', 'yaml')
 IGNORE_FILES = ('.vscode', '.vs', '.DS_Store', '__pycache__', '.git', '.', '_', '<', '>', '(', ')', '$', '!', '._')
@@ -19,7 +19,7 @@ STR_DLM = ":` "
 ILN_DCT_DLM = ":: "
 BLOCK_DELIM = ":|"
 BLOCK_PREFIX_STR = "==="
-BLOCK_CODE_FENCE = "```"
+BLOCK_CODE_FENCE = "````"
 LOOKUP_EMBED_PREFIX = '$'
 LOOKUP_FILE_PREFIX = '$file'
 # LOOKUP_CONTENT_PREFIX = '$content'
@@ -361,7 +361,10 @@ class Parsely:
         if not model:
             file_props = {k: v for k,v in self.__dict__.items() if k in self.default_file_attributes}
             return dict_to_class({**self.data, **file_props, '@model': 'GenericQueryModel'}, self.file_data_type)
-        return cls_mapper(self, model)
+        res = cls_mapper(self, model)
+        for key in self.default_file_attributes:
+            setattr(res, key, getattr(self, key))
+        return res
 
     def to_json(self) -> dict:
         """Json serializable repr"""
@@ -394,13 +397,15 @@ class Parsely:
                 self.data['content'] = req.server_response
         else:
             if req.type == JSON_RES:
-                return self.output_json(req.server_response)
+                api_res = req.api_response()
+                return self.output_json(api_res)
         return self.output_html(req) if req.type in (TEXT_RES, '*/*') else self.output_json() \
             if req.type == JSON_RES else req.server_response
 
 
     async def _access_module_from_request(self, resolver_path: str) -> tuple:
         from pyonir import Site
+        from pyonir.utilities import import_module
         if resolver_path.startswith(LOOKUP_DIR_PREFIX):
             return None, self.process_value_type(resolver_path)
         pkg = resolver_path.split('.')
@@ -411,10 +416,15 @@ class Parsely:
         app_plugin = app_plugin[0] if len(app_plugin) else Site
         resolver = get_attr(app_plugin, resolver_path)
         if not resolver:
+            resolver = import_module(".".join(pkg), callable_name=meth_name)
+        if not resolver:
             namespace = pkg.pop(0)
             base_pkg_path = app_plugin.app_dirpath if namespace != 'pyonir' else app_plugin.pyonir_path
             pkg_path = os.path.join(base_pkg_path, *pkg)+'.py'
             if not os.path.exists(pkg_path): pkg_path = os.path.join(base_pkg_path, *pkg, '__init__.py')
+            if not os.path.exists(pkg_path):
+                meth_name =f'{pkg.pop()}.'+meth_name
+                pkg_path = os.path.join(base_pkg_path,*pkg)+'.py'
             module, resolver = get_module(str(pkg_path), meth_name)
 
         return module, resolver
@@ -468,6 +478,7 @@ class Parsely:
         resolver_redirect = resolver_action.get('redirect')
 
         if not resolver_path: return
+        self.data = resolver_action
         module, resolver = await self._access_module_from_request(resolver_path)
 
         request.type = resolver_action.get('headers', {}).get('accept', request.type)
@@ -562,17 +573,30 @@ class Parsely:
             else:
                 return str()
 
-        def get_stop(cur, curtabs, is_blob=None, stop_str=None):
-            if cur == self.file_line_count: return '__STOPLOOKAHEAD__'
+        # def get_stop(cur, curtabs, is_blob=None, stop_str=None):
+        #     if cur == self.file_line_count: return '__STOPLOOKAHEAD__'
+        #     in_limit = cur + 1 < self.file_line_count
+        #     stop_comm_blok = self.file_lines[cur].strip().endswith(stop_str) if in_limit and stop_str else None
+        #     nxt_curs_is_blok = in_limit and self.file_lines[cur + 1].startswith(BLOCK_PREFIX_STR)
+        #     nxt_curs_is_blokfence = in_limit and self.file_lines[cur + 1].strip().startswith(BLOCK_CODE_FENCE)
+        #     nxt_curs_is_blokdelim = in_limit and self.file_lines[cur + 1].strip().endswith(BLOCK_DELIM)
+        #     nxt_curs_tabs = count_tabs(self.file_lines[cur + 1]) if (in_limit and not is_blob) else -1
+        #     return '__STOPLOOKAHEAD__' if stop_comm_blok or nxt_curs_is_blok or nxt_curs_is_blokdelim or (
+        #             nxt_curs_tabs < curtabs and not is_blob) else None
+
+        def stop_loop_block(cur, curtabs, is_blob=None, stop_str=None):
+            if cur == self.file_line_count: return True
             in_limit = cur + 1 < self.file_line_count
             stop_comm_blok = self.file_lines[cur].strip().endswith(stop_str) if in_limit and stop_str else None
             nxt_curs_is_blok = in_limit and self.file_lines[cur + 1].startswith(BLOCK_PREFIX_STR)
             nxt_curs_is_blokfence = in_limit and self.file_lines[cur + 1].strip().startswith(BLOCK_CODE_FENCE)
             nxt_curs_is_blokdelim = in_limit and self.file_lines[cur + 1].strip().endswith(BLOCK_DELIM)
             nxt_curs_tabs = count_tabs(self.file_lines[cur + 1]) if (in_limit and not is_blob) else -1
-            return '__STOPLOOKAHEAD__' if stop_comm_blok or nxt_curs_is_blok or nxt_curs_is_blokdelim or nxt_curs_is_blokfence or (
-                    nxt_curs_tabs < curtabs and not is_blob) else None
-
+            res = True if stop_comm_blok or nxt_curs_is_blokfence or nxt_curs_is_blok or nxt_curs_is_blokdelim or\
+                (nxt_curs_tabs < curtabs and not is_blob) else False
+            return res
+            # return '__STOPLOOKAHEAD__' if stop_comm_blok or nxt_curs_is_blok or nxt_curs_is_blokdelim or (
+            #         nxt_curs_tabs < curtabs and not is_blob) else None
         stop = False
         stop_iter = False
         while cursor < self.file_line_count:
@@ -581,27 +605,28 @@ class Parsely:
             ln_frag = self.file_lines[cursor]
             is_multi_ln_comment = ln_frag.strip().startswith('{#')
             is_block_code = ln_frag.strip().startswith(BLOCK_CODE_FENCE)
+            is_end_block_code = ln_frag.strip() == BLOCK_CODE_FENCE
             is_ln_comment = not is_blob and ln_frag.strip().startswith('#') or not is_blob and ln_frag.strip() == ''
             comment = is_multi_ln_comment or is_ln_comment
 
-            if comment:
+            if comment or is_end_block_code:
                 if is_multi_ln_comment or stop_str:
                     cursor, ln_val = self.process_line(cursor + 1, '', stop_str='#}')
             else:
                 tabs = count_tabs(ln_frag)
-                stop_iter = tabs > 0 and not is_ln_comment or is_blob or is_block_code or stop_str
+                stop_iter = tabs > 0 and not is_ln_comment or is_blob or stop_str
                 try:
                     if is_blob:
                         output_data += ln_frag + "\n"
                     elif not comment and not stop_str:
                         inlimts = cursor + 1 < self.file_line_count
-                        is_block = ln_frag.startswith(BLOCK_PREFIX_STR) or ln_frag.endswith("|")
+                        is_block = ln_frag.startswith(BLOCK_PREFIX_STR) or ln_frag.endswith("|") or is_block_code
                         is_parent = True if is_block else count_tabs(
                             self.file_lines[cursor + 1]) > tabs if inlimts else False
                         parsed_key, val_type, parsed_val, methArgs = process_iln_frag(ln_frag)
                         if methArgs:
                             output_data['@args'] = [arg.replace(' ', '').split(':') for arg in methArgs.split(',')]
-                        if is_parent or is_block or is_block_code:
+                        if is_parent or is_block:
                             parsed_key = parsed_val if not parsed_key else parsed_key
                             parsed_key = "content" if parsed_key == BLOCK_PREFIX_STR else \
                                 (parsed_key.replace(BLOCK_PREFIX_STR, "")
@@ -611,12 +636,9 @@ class Parsely:
                                 fence_key, *overide_keyname = parsed_key.split(' ', 1)
                                 parsed_key = overide_keyname[0] if overide_keyname else fence_key
                                 pass
-                            cursor, parsed_val = self.process_line(cursor + 1, output_data=val_type,
-                                                                   is_blob=isinstance(val_type, str))
+                            cursor, parsed_val = self.process_line(cursor + 1, output_data=val_type, is_blob=isinstance(val_type, str))
                             if isinstance(parsed_val, list) and '-' in parsed_val:  # consolidate list of maps
                                 parsed_val = self.post_process_blocklist(parsed_val)
-                            # if "|" in parsed_key:
-                            #     print('Pipe filters are deprecated', self.abspath)
 
                         # Store objects with $ prefix
                         if parsed_key and parsed_key.startswith('$'):
@@ -634,7 +656,7 @@ class Parsely:
                     # raise Exception(f"{self.file_name}: {str(e)}")
                     raise
 
-            stop = get_stop(cursor, tabs, is_blob, stop_str=stop_str) if stop_iter else None
+            stop = stop_loop_block(cursor, tabs, is_blob, stop_str=stop_str) if stop_iter else None
             if not stop: cursor += 1
 
         return cursor, output_data
@@ -918,19 +940,12 @@ class Parsely:
             return None
         return PyonirCollection.prev_next(self)
 
-    def output_json(self, data_value: any = None, as_str=True):
+    def output_json(self, data_value: any = None, as_str=True) -> dict | str:
         """Outputs a json string"""
-        # TODO: structure proper REST response to adhere to public schema prior to serving
         from .utilities import json_serial
         data = data_value or self
-        rest_response = {
-            'message': '',
-            'status': 'success',
-            'data': data,
-            'meta': {},
-        }
-        if not as_str: return rest_response
-        return json.dumps(rest_response, default=json_serial)
+        if not as_str: return data
+        return json.dumps(data, default=json_serial)
 
     def output_html(self, req: PyonirRequest):
         """Renders and html output"""

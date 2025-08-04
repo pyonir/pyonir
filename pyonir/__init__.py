@@ -27,6 +27,6 @@ def init(entry_file_path: str, options: dict = None):
     global Site
     # Set Global Site instance
     # if options: options = PyonirOptions(**(options or {}))
-    sys.path.insert(0, entry_file_path)
+    sys.path.insert(0, os.path.dirname(os.path.dirname(entry_file_path)))
     Site = PyonirApp(entry_file_path)
     return Site

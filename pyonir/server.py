@@ -198,9 +198,12 @@ def process_sse(data: dict) -> str:
     return sse_payload + "\n"
 
 
-def serve_favicon(app: PyonirApp):
-    from starlette.responses import FileResponse
-    return FileResponse(os.path.join(app.TemplateEnvironment.themes.active_theme.static_dirpath,'favicon.ico'), 200)
+def serve_static(app: PyonirApp, request: PyonirRequest):
+    from starlette.responses import FileResponse, PlainTextResponse
+    base_path = app.public_assets_dirpath if request.path.startswith('/static') else app.TemplateEnvironment.themes.active_theme.static_dirpath
+    req_path = request.parts[1:] if len(request.parts) > 1 else request.parts
+    path = os.path.join(base_path, *req_path)
+    return FileResponse(path, 200) if os.path.exists(path) else PlainTextResponse(f"{request.path} not found", status_code=404)
 
 def route(dec_func: typing.Callable | None,
                path: str = '',
@@ -283,9 +286,10 @@ def _add_route(dec_func: typing.Callable | None,
 
     async def dec_wrapper(star_req):
         from pyonir.core import PyonirRequest
-        if star_req.url.path == '/favicon.ico': return serve_favicon(Site)
+        # if star_req.url.path == '/favicon.ico': return serve_favicon(Site)
         # Resolve page file route
         pyonir_request = PyonirRequest(star_req)
+        if pyonir_request.is_static: return serve_static(Site, pyonir_request)
         await pyonir_request.process_request_data()
         # app_ctx, req_filepath = resolve_path_to_file(star_req.url.path, Site)
 
@@ -333,8 +337,8 @@ def _add_route(dec_func: typing.Callable | None,
         except Exception as e:
             raise
             # pyonir_request.server_response = json.dumps({"error": f"{e}"})
-        if pyonir_request.redirect:
-            return Site.server.serve_redirect(pyonir_request.redirect)
+        if pyonir_request.redirect_to:
+            return Site.server.serve_redirect(pyonir_request.redirect_to)
 
         return build_response(pyonir_request)
 
@@ -345,20 +349,14 @@ def _add_route(dec_func: typing.Callable | None,
 
 def build_response(request: PyonirRequest):
     """Create web response for web server"""
-    from datetime import datetime, timedelta
     from pyonir import Site
     force_fresh = "no-store, no-cache, must-revalidate, max-age=0"
-    force_cache = "public"
+    # force_cache = "public"
 
-    # ishtml = request.type == TEXT_RES
-    # expires = datetime.utcnow() + timedelta(days=7)
-    # expires = expires.strftime("%a, %d %b %Y %H:%M:%S GMT")
     response = Site.server.response_renderer(request.server_response, media_type=request.type)
-    # if ishtml: response.headers['Expires'] = expires
     response.headers['Cache-Control'] = force_fresh
     response.headers['Pragma'] = "no-cache"
     response.headers['Expires'] = "0"
-    # response.headers['Vary'] = "Cookie"
     response.headers['Server'] = "Pyonir Web Framework"
     response.status_code = request.status_code
     return response

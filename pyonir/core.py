@@ -5,7 +5,8 @@ from jinja2 import Environment
 from starlette.requests import Request as StarletteRequest
 
 from pyonir.pyonir_types import PyonirServer, Theme, PyonirHooks, Parsely, ParselyPagination, AppRequestPaths, AppCtx, \
-    PyonirRouters, RoutePath
+    PyonirRouters, RoutePath, PyonirRestResponse
+from pyonir.utilities import json_serial
 
 # Environments
 DEV_ENV:str = 'LOCAL'
@@ -17,44 +18,99 @@ JSON_RES: str = 'application/json'
 EVENT_RES: str = 'text/event-stream'
 PAGINATE_LIMIT: int = 6
 
+from dataclasses import dataclass, field, replace, asdict
+from typing import Optional, Type, TypeVar
+
+T = TypeVar("T", bound="PyonirSchema")
 
 class PyonirSchema:
-    # default_file_attributes = ['file_name','file_path','file_dirname','file_data_type','file_ctx','file_created_on']
+    """
+    Interface for immutable dataclass models with CRUD and session support.
+    Provides per-instance validation and session helpers.
+    """
 
-    """Schema class enables validation when model class initializes"""
-    # Schemas configs
-    # PROTECTED_FIELD_PREFIX = '@'
-    # # Private fields should can be read and written but should not be exposed
-    # PRIVATE_FIELDS = ('password', 'ssn', 'auth_token', 'id', 'uid', 'privateKey')
-    # # Protected fields are allowed to be read but are not allowed to be changed directly
-    # PROTECTED_FIELDS = (
-    #                        'created_on', 'modified_on', 'modified_by', 'last_modified_by',
-    #                        'date_created', 'date_modified', 'raw', 'provider_model') + PRIVATE_FIELDS
+    def __init__(self):
+        # Each instance gets its own validation error list
+        self.errors: list[str] = []
+        self._deleted: bool = False
+        self._private_keys: list[str] = []
+
+    def is_valid(self) -> bool:
+        """Returns True if there are no validation errors."""
+        return not self.errors
 
     def validate(self):
-        """validates a given property with accessible validation method"""
-        for name, value in self.__dict__.items():
-            if name.startswith('_'): continue
-            validator_fn = getattr(self, f'validate_{name}', None)
-            if validator_fn: validator_fn()
-        pass
+        """
+        Validates fields by calling `validate_<fieldname>()` if defined.
+        Clears previous errors on every call.
+        """
+        for name in self.__dict__.keys():
+            if name.startswith("_"):
+                continue
+            validator_fn = getattr(self, f"validate_{name}", None)
+            if callable(validator_fn):
+                validator_fn()
 
     def __post_init__(self):
-        self._validation_errors = []
+        """
+        Called automatically in dataclasses after initialization.
+        Ensures validation runs for each instance.
+        """
+        # Reset errors for new instance
+        self.errors = []
         self.validate()
 
-    @staticmethod
-    def generic_query_model(model_fields: str):
-        if not model_fields: return None
+    # --- Database helpers ---
+    def save_to_file(self, file_path: str) -> bool:
+        """Saves the user data to a file in JSON format"""
+        from pyonir.utilities import create_file
+        return create_file(file_path, self.to_json(obfuscate=False))
+
+    def save_to_session(self: T, request: PyonirRequest, value: any) -> None:
+        """Convert instance to a serializable dict."""
+        request.server_request.session[self.__class__.__name__.lower()] = value
+
+    @classmethod
+    def create(cls: Type[T], **data) -> T:
+        """Create and return a new instance (validation runs in __post_init__)."""
+        instance = cls(**data)
+        return instance
+
+    @classmethod
+    def from_file(cls: Type[T], file_path: str, app_ctx) -> T:
+        """Create an instance from a file path."""
         from pyonir.parser import Parsely
-        mapper = {}
-        params = {"_mapper": mapper}
-        for k in Parsely.default_file_attributes+model_fields.split(','):
-            if ':' in k:
-                k,_, src = k.partition(':')
-                mapper[k] = src
-            params[k] = None
-        return type('GenericQueryModel', (object,), params)
+        parsely = Parsely(file_path, app_ctx=app_ctx)
+        return parsely.map_to_model(cls)
+
+    @classmethod
+    def from_session(cls: Type[T], session_data: dict) -> T:
+        """Create an instance from session data."""
+        return cls(**session_data)
+
+    # --- ORM binding ---
+    @classmethod
+    def _orm_model(cls):
+        raise NotImplementedError
+
+    @classmethod
+    def _from_orm(cls: Type[T], orm_obj) -> T:
+        raise NotImplementedError
+
+    def patch(self: T, **changes) -> T:
+        """Return a new instance with updated fields (no DB)."""
+        return replace(self, **changes)
+
+    def delete(self: T) -> T:
+        """Mark the model as deleted (soft-delete)."""
+        return replace(self, _deleted=True)
+
+    def _to_orm(self):
+        raise NotImplementedError
+
+    def to_json(self, obfuscate):
+        pass
+
 
 class PyonirCollection:
     SortedList = None
@@ -71,7 +127,7 @@ class PyonirCollection:
         self._query_path = ''
         key = lambda x: self.get_attr(x, sort_key or 'file_created_on')
         try:
-            items = list(items)
+            # items = list(items)
             self.collection = SortedList(items, key=key)
         except Exception as e:
             raise
@@ -254,6 +310,7 @@ class PyonirRequest:
         self.model = get_attr(self.query_params, 'model')
         self.is_home = (self.path == '')
         self.is_api = False
+        self.is_static = bool(list(os.path.splitext(self.path)).pop())
         self.form = {}
         self.files = []
         self.ip = self.server_request.client.host
@@ -267,8 +324,21 @@ class PyonirRequest:
         self.app_ctx_name: str = ''
 
     @property
-    def redirect(self):
-        return self.form.get('redirect', self.form.get('redirect_to'))
+    def previous_url(self):
+        return self.headers.get('referer', '')
+
+    @property
+    def redirect_to(self):
+        """Returns the redirect URL from the request form data"""
+        return self.form.get('redirect_to', self.form.get('redirect'))
+
+    def redirect(self, url: str):
+        """Sets the redirect URL in the request form data"""
+        self.form['redirect_to'] = url
+
+    def messages(self, session_key: str):
+        """Returns messages from the session"""
+        return self.server_request.session.pop(session_key, '')
 
     async def process_request_data(self):
         """Get form data and file upload contents from request"""
@@ -325,12 +395,18 @@ class PyonirRequest:
         from pyonir.parser import ParselyFileStatus
 
         code = 404
-        if self.file.file_status == ParselyFileStatus.PROTECTED:
+        if self.file.status in (ParselyFileStatus.PROTECTED, ParselyFileStatus.FORBIDDEN):
             self.file.data = {'template': '40x.html', 'content': f'Unauthorized access to this resource.', 'url': self.url, 'slug': self.slug}
             code = 401
         elif self.file.file_status == ParselyFileStatus.PUBLIC or is_router_method:
             code = 200
         self.status_code = code #200 if self.file.file_exists or is_router_method else 404
+
+    def api_response(self) -> PyonirRestResponse:
+        """Format the response data for REST API requests"""
+        if isinstance(self.server_response, PyonirRestResponse): return self.server_response
+        res = self.server_response or self.file
+        return PyonirRestResponse(message='', data=res, status_code=self.status_code)
 
     def render_error(self):
         """Data output for an unknown file path for a web request"""
@@ -353,22 +429,29 @@ class PyonirRequest:
         from pyonir import Site
         from pyonir.parser import Parsely
         is_home = path_str == '/'
-
-        # First, check plugins if available and not home
-        if not is_home and hasattr(app, 'plugins_activated'):
-            for plugin in app.plugins_activated:
-                if not plugin.request_paths: continue
-                resolved_app, parsed = self.resolve_request_to_file(path_str, plugin)
-                if parsed and parsed.file_exists:
-                    return resolved_app, parsed
-
+        app_has_plugins = hasattr(app, 'plugins_activated')
         ctx_route, ctx_paths = app.request_paths or ('', [])
         ctx_route = ctx_route or ''
         ctx_slug = ctx_route[1:]
         path_slug = path_str[1:]
+        app_scope, *path_segments = path_slug.split('/')
+        is_api_request = (len(path_segments) and path_segments[0] == app.API_DIRNAME) or path_str.startswith(app.API_ROUTE)
+        # if is_api_request and app_has_plugins and any(plg.module == app_scope for plg in app.plugins_activated):
+        #     pass
+
+        # First, check plugins if available and not home
+        if not is_home and app_has_plugins:
+            for plugin in app.plugins_activated:
+                if not plugin.request_paths or (is_api_request and plugin.module != app_scope): continue
+                if plugin.module == app_scope and is_api_request:
+                    path_str = path_str.replace('/'+app_scope, '')
+                resolved_app, parsed = self.resolve_request_to_file(path_str, plugin)
+                if parsed and parsed.file_exists:
+                    return resolved_app, parsed
+
 
         # Normalize API prefix and path segments
-        if path_str.startswith('/api'):
+        if is_api_request:
             path_str = path_str.replace('/api', '')
 
         request_segments = [
@@ -383,6 +466,7 @@ class PyonirRequest:
         # Try resolving to actual file paths
         protected_segment = [s if i > len(request_segments)-1 else f'_{s}' for i,s in enumerate(request_segments)]
         for root_path in ctx_paths:
+            if not is_api_request and root_path.endswith(app.API_DIRNAME): continue
             category_index = os.path.join(root_path, *request_segments, 'index.md')
             single_page = os.path.join(root_path, *request_segments) + Site.EXTENSIONS['file']
             single_protected_page = os.path.join(root_path, *protected_segment) + Site.EXTENSIONS['file']
@@ -489,6 +573,9 @@ class PyonirBase:
         """The application module directory name"""
         return self.__module__.split('.').pop()
 
+    @property
+    def app_ctx(self) -> AppCtx: pass
+
     @staticmethod
     def generate_resolvers(cls: callable, output_dirpath: str, namespace: str):
         """Automatically generate api endpoints from service class."""
@@ -514,6 +601,11 @@ class PyonirBase:
             m_temp = resolver_template.format(call_path=namespace_instance_path, docs=docs)
             create_file(file_path, m_temp)
             print(f"\t{meth_name} at {file_path}")
+
+    def parse_file(self, file_path: str) -> Parsely:
+        """Parses a file and returns a Parsely instance for the file."""
+        from pyonir.parser import Parsely
+        return Parsely(file_path, app_ctx=self.app_ctx)
 
     def generate_static_website(self):
         """Generates Static website into the specified static_site_dirpath"""
@@ -666,18 +758,19 @@ class PyonirApp(PyonirBase):
     def __init__(self, app_entrypoint: str):
         from pyonir.utilities import generate_id, get_attr, process_contents
         from pyonir import __version__
-        from pyonir.parser import Parsely
+        from pyonir.parser import parse_markdown
         self.SOFTWARE_VERSION = __version__
         self.get_attr = get_attr
         self.app_entrypoint: str = app_entrypoint # application main.py file or the initializing file
         self.app_dirpath: str = os.path.dirname(app_entrypoint) # application main.py file or the initializing file
         self.name: str = os.path.basename(self.app_dirpath) # web url to serve application pages
         self.SECRET_SAUCE = generate_id()
-        self.SESSION_KEY = f"pyonir_{self.app_name}"
+        self.SESSION_KEY = f"pyonir_{self.name}"
         self.configs = None
         self.routing_paths = [self.pages_dirpath, self.api_dirpath]
-        Parsely._Filters['jinja'] = self.parse_jinja
-        Parsely._Filters['pyformat'] = self.parse_pyformat
+        self.public_assets_dirpath = os.path.join(self.frontend_dirpath, 'static')
+        self.Parsely_Filters = {'jinja': self.parse_jinja, 'pyformat': self.parse_pyformat,
+                                 'md': parse_markdown}
 
     @property
     def nginx_config_filepath(self):
@@ -762,7 +855,10 @@ class PyonirApp(PyonirBase):
     def is_secure(self):return self.get_attr(self.configs, 'app.use_ssl', False) #if self.configs else None
 
     @property
-    def domain(self): return self.get_attr(self.configs, 'app.domain', self.host) # if self.configs else self.host
+    def domain_name(self): return self.get_attr(self.configs, 'app.domain', self.host) # if self.configs else self.host
+
+    @property
+    def domain(self): return f"{self.protocol}://{self.domain_name}{':'+str(self.port) if self.is_dev else ''}".replace('0.0.0.0','localhost') # if self.configs else self.host
 
     def load_plugin(self, plugin: callable | list[callable]):
         """Make the plugin known to the pyonir application"""
@@ -792,7 +888,7 @@ class PyonirApp(PyonirBase):
 
     def run_plugins(self, hook: PyonirHooks, data_value=None):
         if not hook or not self.plugins_activated: return
-        hook = hook.name.lower()
+        hook = hook.lower()
         for plg in self.plugins_activated:
             if not hasattr(plg, hook): continue
             hook_method = getattr(plg, hook)

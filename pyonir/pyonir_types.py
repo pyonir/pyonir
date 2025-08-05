@@ -263,6 +263,9 @@ class PyonirBase:
 
 
 class PyonirApp(PyonirBase):
+    ssl_key_file: str | None
+    ssl_cert_file: str | None
+
     SECRET_SAUCE: str
     configs: object
     request_paths: str
@@ -281,11 +284,11 @@ class PyonirApp(PyonirBase):
     jinja_filters_dirpath: str
     app_ctx: str
     env: str
-    is_dev: str
+    is_dev: bool
     host: str
     port: str
     protocol: str
-    is_secure: str
+    is_secure: bool
     domain: str
     parse_jinja: callable
     parse_pyformat: callable

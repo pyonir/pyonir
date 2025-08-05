@@ -95,7 +95,7 @@ def auth_decode(authorization_header: str) -> UserCredentials | None:
 def sign_up(request: PyonirRequest, app: PyonirApp) -> 'AuthResponse':
     """Registers a new user with the provided credentials."""
     authorizer = Auth(request, app)
-    authorizer.create_account()
+    authorizer.create_email_account()
     if request.redirect_to:
         authorizer.session['sign_up'] = authorizer.response.to_json()
     return authorizer.response

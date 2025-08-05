@@ -342,6 +342,10 @@ class PyonirRequest:
         """Returns messages from the session"""
         return self.server_request.session.pop(session_key, '')
 
+    def from_session(self, session_key: str) -> any:
+        """Returns data from the session"""
+        return self.server_request.session.get(session_key, None)
+
     async def process_request_data(self):
         """Get form data and file upload contents from request"""
 
@@ -762,7 +766,7 @@ class PyonirApp(PyonirBase):
     """All enabled plugins instances"""
 
     def __init__(self, app_entrypoint: str):
-        from pyonir.utilities import generate_id, get_attr, process_contents
+        from pyonir.utilities import generate_id, get_attr
         from pyonir import __version__
         from pyonir.parser import parse_markdown
         self.SOFTWARE_VERSION = __version__
@@ -840,33 +844,46 @@ class PyonirApp(PyonirBase):
         return os.path.join(self.backend_dirpath, "filters")
 
     @property
+    def app_ssl_cert_file(self):
+        """Path to the SSL certificate file for the application"""
+        return os.path.join(self.app_dirpath, "server.crt")
+
+    @property
+    def app_ssl_key_file(self):
+        """Path to the SSL key file for the application"""
+        return os.path.join(self.app_dirpath, "server.key")
+
+    @property
     def app_ctx(self) -> AppCtx:
         return self.name, self.endpoint, self.contents_dirpath, self.ssg_dirpath
 
     @property
-    def env(self): return os.getenv('APPENV')
+    def env(self) -> str: return os.getenv('APPENV')
 
     @property
-    def is_dev(self): return self.env == DEV_ENV
+    def is_dev(self) -> bool: return self.env == DEV_ENV
 
     @property
-    def host(self): return self.get_attr(self.configs, 'app.host', '0.0.0.0') #if self.configs else '0.0.0.0'
+    def host(self) -> str: return self.get_attr(self.configs, 'app.host', '0.0.0.0') #if self.configs else '0.0.0.0'
 
     @property
-    def port(self):
+    def port(self) -> int:
         return self.get_attr(self.configs, 'app.port', 5000) #if self.configs else 5000
 
     @property
-    def protocol(self):return 'https' if self.is_secure else 'http'
+    def protocol(self) -> str: return 'https' if self.is_secure else 'http'
 
     @property
-    def is_secure(self):return self.get_attr(self.configs, 'app.use_ssl', False) #if self.configs else None
+    def is_secure(self) -> bool:
+        """Check if the application is configured to use SSL"""
+        has_ssl_files = os.path.exists(self.app_ssl_cert_file) and os.path.exists(self.app_ssl_key_file)
+        return has_ssl_files and self.get_attr(self.configs, 'app.use_ssl', False)
 
     @property
-    def domain_name(self): return self.get_attr(self.configs, 'app.domain', self.host) # if self.configs else self.host
+    def domain_name(self) -> str: return self.get_attr(self.configs, 'app.domain', self.host) # if self.configs else self.host
 
     @property
-    def domain(self): return f"{self.protocol}://{self.domain_name}{':'+str(self.port) if self.is_dev else ''}".replace('0.0.0.0','localhost') # if self.configs else self.host
+    def domain(self) -> str: return f"{self.protocol}://{self.domain_name}{':'+str(self.port) if self.is_dev else ''}".replace('0.0.0.0','localhost') # if self.configs else self.host
 
     def load_plugin(self, plugin: callable | list[callable]):
         """Make the plugin known to the pyonir application"""
@@ -916,9 +933,11 @@ class PyonirApp(PyonirBase):
         if not context: context = {}
         if not self.TemplateEnvironment: return string
         try:
-            return self.TemplateEnvironment.from_string(string).render(configs=self.configs, **context)
+            request = self.TemplateEnvironment.globals.get('request')
+            user = request.from_session('user') if request else None
+            return self.TemplateEnvironment.from_string(string).render(configs=self.configs,user=user, **context)
         except Exception as e:
-            print(str(e))
+            print(str(e), string)
             return string
             # raise
 
@@ -1089,11 +1108,4 @@ class PyonirThemes:
             themes_map[theme_dir] = theme
         return themes_map if themes_map else None
 
-    # def _get_available_themes(self) -> PyonirCollection | None:
-    #     from pyonir import Site
-    #     if not Site: return None
-    #     fe_ctx = list(Site.app_ctx)
-    #     fe_ctx[2] = Site.frontend_dirpath
-    #     pc = PyonirCollection.query(self.themes_dirpath, fe_ctx,exclude_dirs=('static','layouts'), include_only='README.md', data_model=Theme)
-    #     return pc
 

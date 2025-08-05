@@ -705,9 +705,11 @@ class Parsely:
             has_file_ref = valuestr.startswith(LOOKUP_FILE_PREFIX)
             has_dir_ref = valuestr.startswith(LOOKUP_DIR_PREFIX)
             if '{{' in valuestr:
-                valuestr = self._Filters['jinja'](valuestr, self.data)
+                jinja = self.app_filter('jinja')
+                valuestr = jinja(valuestr, self.data)
             if valuestr.startswith('$') and '{' in valuestr:
-                valuestr = self._Filters['pyformat'](valuestr[1:] if not has_dir_ref else valuestr, self.__dict__)
+                pyformat = self.app_filter('pyformat')
+                valuestr = pyformat(valuestr[1:] if not has_dir_ref else valuestr, self.__dict__) if pyformat else valuestr
             if has_dir_ref:
                 query_params = valuestr.split("?").pop() if "?" in valuestr else False
                 has_attr_path = valuestr.split("#")[-1] if "#" in valuestr else ''
@@ -921,6 +923,10 @@ class Parsely:
             'ERROR': f'{self.file_path} found an error on line {self._cursor}',
             'LINE': f'{self.file_lines[self._cursor]}', **message}
         return msg
+
+    def app_filter(self, filter_name: str):
+        from pyonir import Site
+        return Site.Parsely_Filters.get(filter_name) if Site else {}
 
     def refresh_data(self):
         """Parses file and update data values"""

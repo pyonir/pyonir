@@ -443,14 +443,14 @@ def start_uvicorn_server(app: PyonirApp, endpoints: AppEndpoint):
     import uvicorn
 
     # """Uvicorn web server configurations"""
-    # from pyonir import PYONIR_SSL_KEY, PYONIR_SSL_CRT
+    from pyonir import PYONIR_SSL_KEY, PYONIR_SSL_CRT
     uvicorn_options = {
         "port": app.port,
         "host": app.host
     }
-    # if app.is_secure:
-    #     uvicorn_options["ssl_keyfile"] = PYONIR_SSL_KEY
-    #     uvicorn_options["ssl_certfile"] = PYONIR_SSL_CRT
+    if app.is_secure:
+        uvicorn_options["ssl_keyfile"] = PYONIR_SSL_KEY
+        uvicorn_options["ssl_certfile"] = PYONIR_SSL_CRT
     if not app.is_dev:
         uvicorn_options['uds'] = app.unix_socket_filepath
 

@@ -68,24 +68,36 @@ class Roles:
     def all_roles(cls):
         return [cls.SUPER, cls.ADMIN, cls.AUTHOR, cls.CONTRIBUTOR, cls.GUEST]
 
+@dataclass
+class UserMeta(PyonirSchema):
+    """Represents details about a user"""
+    given_name: str = ''
+    last_name: str = ''
+    gender: str = ''
+    age: int = 0
+    height: int = 0
+    weight: int = 0
+    phone: str = ''
+    about_you: str = ''
 
 @dataclass
 class User(PyonirSchema):
     """Represents an app user"""
-    # user specific fields
+    # user signup fields
     email: str
     password: str = ''
     name: str = ''
-    about_you: str = ''
-    first_name: str = ''
-    last_name: str = ''
-    gender: str = ''
     avatar: str = ''
     signin_locations: list = field(default_factory=list)
+    # private user details
+    meta: UserMeta = field(default_factory=UserMeta)
     # system specific fields
     id: str = ''
+    """Unique identifier for the user"""
     role: str = ''
+    """Role assigned to the user, defaults to 'none'"""
     verified_email: bool = False
+    """Flag indicating if the user's email is verified"""
     file_path: str = ''
     """File path for user-specific files"""
     file_dirpath: str = ''

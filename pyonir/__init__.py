@@ -15,8 +15,8 @@ PYONIR_JINJA_TEMPLATES_DIRPATH = os.path.join(PYONIR_JINJA_DIRPATH, "templates")
 PYONIR_JINJA_EXTS_DIRPATH = os.path.join(PYONIR_JINJA_DIRPATH, "extensions")
 PYONIR_JINJA_FILTERS_DIRPATH = os.path.join(PYONIR_JINJA_DIRPATH, "filters")
 # PYONIR_MESSAGES_FILE = os.path.join(PYONIR_LIBS_DIRPATH, "system-messages.md")
-# PYONIR_SSL_KEY = os.path.join(PYONIR_SETUPS_DIRPATH, "content/certs/server.key")
-# PYONIR_SSL_CRT = os.path.join(PYONIR_SETUPS_DIRPATH, "content/certs/server.crt")
+PYONIR_SSL_KEY = os.path.join(PYONIR_SETUPS_DIRPATH, "server.key")
+PYONIR_SSL_CRT = os.path.join(PYONIR_SETUPS_DIRPATH, "server.crt")
 PYONIR_STATIC_ROUTE = "/pyonir_assets"
 
 __version__: str = '1.0.0'

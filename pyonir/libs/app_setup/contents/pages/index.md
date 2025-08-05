@@ -1,47 +1,29 @@
-@filter.jinja:- content
-title: Pyonir
+@filter.md:- content
+title: Welcome to Pyonir
 menu.group: primary
-entries: $dir/pages?limit=15
-===
-<section class="toc">
-<header class="hanken-grotesk-regular">
-TABLE OF CONTENT
-</header>
-<p>"Learn the rules like a pro, so you can break them like an artist." - Pablo Picasso </p>
-<ul class="chapters">
-{% for p in page.entries %}
-  <li class="chapter">
-    <span class="title"><a href="{{p.url}}">{{loop.index}}. {{p.title}}</a></span>
-    <span class="pgnum">{{p.date.strftime("%b. %d %Y")}}</span>
-  </li>
-{% endfor %}
-</ul>
-</section>
-<style>
-.toc .chapter {
-  display: flex;
-}
-.toc .chapter .title {
-  order: 1;
-}
-.toc .chapter .pgnum {
-  order: 3;
-}
-.toc .chapter::after {
-  background-image: radial-gradient(circle, currentcolor 1px, transparent 1.5px);
-  background-position: bottom;
-  background-size: 1ex 4.5px;
-  background-repeat: space no-repeat;
-  content: "";
-  flex-grow: 1;
-  height: 1em;
-  order: 2;
-}
-.toc {
-    margin: 3rem auto;
-    max-width: 740px;
-    & header {
-    text-underline-offset: 5px;
-    margin-bottom: 3rem; text-decoration: underline; font-size: 2rem;}
-}
-</style>
+content:|
+# Getting Started
+
+This is a demo page for the Pyonir web framework.
+
+You can edit this page by modifying the `contents/pages/index.md` file.
+
+## Features
+
+- Static site generation
+- Flat file content management
+- Plugin architecture
+- Theming support
+
+
+## Next Steps
+
+- Explore the `contents` directory to add more pages and configurations.
+- Create a virtual route by adding a `.routes.md` file in the `contents/pages` directory.
+    - For example, visit the following links to see virtual pages in action:
+    - [Virtual Pages are dope](/pyonir-developers)
+- Check out the `frontend` and `backend` directories for customizing your site's appearance and functionality.
+- Visit the [Pyonir documentation](https://pyonir.dev/) for more information on how to use and extend Pyonir.
+
+
+**Happy coding!**

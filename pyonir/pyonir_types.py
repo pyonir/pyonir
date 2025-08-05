@@ -69,23 +69,6 @@ class ParselyPagination:
         return iter(self.items)
 
 
-@dataclass
-class Theme:
-    _mapper = {'theme_dirname': 'file_dirname', 'theme_dirpath': 'file_dirpath'}
-    name: str
-    theme_dirname: str = ''
-    theme_dirpath: str = ''
-    static_dirname: str = 'static' # path to serve theme's static assets (css,js,images) used to style the UI
-    templates_dirname: str = 'layouts' # path to serve theme's template files used to rendering HTML pages
-
-    @property
-    def static_dirpath(self):
-        """directory to serve static theme assets"""
-        return os.path.join(self.theme_dirpath, self.static_dirname)
-
-    @property
-    def jinja_template_path(self):
-        return os.path.join(self.theme_dirpath, self.templates_dirname)
 
 class PyonirOptions:
     contents_dirpath: str  = '' # base directory path for markdown files
@@ -161,15 +144,21 @@ class PyonirCollection:
     dict_to_class: callable
     collections: list[Parsely]
 
+class Theme:
+    name: str
+    theme_dirname: str
+    theme_dirpath: str
+    static_dirname: str
+    templates_dirname: str
+
 class PyonirThemes:
     """Represents sites available and active theme(s) within the frontend directory."""
-    themes_dirpath: str # directory path to available site themes
-    _available_themes: PyonirCollection | None # collection of themes available in frontend/themes directory
-
-    @property
-    def active_theme(self) -> Theme | None: pass
-
-    def _get_available_themes(self) -> PyonirCollection | None: pass
+    themes_dirpath: str
+    """Path to the themes directory, typically 'frontend/themes'."""
+    available_themes: dict[str, Theme] | None
+    """Dictionary of available themes, keyed by theme name."""
+    active_theme: Theme | None
+    """Currently active theme, if any."""
 
 class TemplateEnvironment:
     themes: PyonirThemes
@@ -309,12 +298,14 @@ class PyonirApp(PyonirBase):
     run: callable
     pyonir_path: type
     endpoint: str
+    name: str
     app_dirpath: str
     app_name: str
     app_account_name: str
     TemplateEnvironment: TemplateEnvironment
     server: PyonirServer
-    available_plugins: dict[str, callable]
+    plugins_installed: dict[str, callable]
+    plugins_activated: dict[str, callable]
 
 class PyonirPlugin(PyonirBase):
 

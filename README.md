@@ -1,6 +1,6 @@
 # Pyonir Web Framework
 
-A static website generator and flat file web framework written in Python.
+Pyonir is a static site generator and flat file web framework written in Python. It allows you to create dynamic websites using simple markdown files and a powerful plugin architecture.
 
 ### Install Pyonir
 
@@ -16,7 +16,8 @@ Manually create a `main.py` file from an empty directory with the following valu
 **Example**
 ```markdown
 your_project/
-    └─ main.py
+    |─ __init__.py # makes this project a package
+    └─ main.py     # entry point to your application
 ```
 
 **Example main.py file**
@@ -104,7 +105,7 @@ virtual routes can return the following response types:
 
 **JSON response** 
 
-any pattern that begins with the default API url are automatically returning JSON.
+any pattern that begins with the default API name are automatically returning JSON.
 
 ```md
 /api/some_data/{data_id:str}: 

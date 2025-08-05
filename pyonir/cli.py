@@ -12,6 +12,7 @@ def pyonir_setup():
     contents_slim_dirpath = os.path.join(PYONIR_SETUPS_DIRPATH, 'contents-slim')
     frontend_dirpath = os.path.join(PYONIR_SETUPS_DIRPATH, 'frontend')
     entry_filepath = os.path.join(PYONIR_SETUPS_DIRPATH, 'main.py')
+    pkg_filepath = os.path.join(PYONIR_SETUPS_DIRPATH, '__init__.py')
 
     project_name = input(f"Whats your project name?").strip()
     project_path = os.path.join(base_path, project_name)
@@ -21,6 +22,7 @@ def pyonir_setup():
     use_frontend = input(f"{PrntColrs.OKBLUE}Do you need a frontend? (y for yes, n for no){PrntColrs.RESET}").strip()
 
     if use_demo.lower() == 'y':
+        copy_assets(pkg_filepath, os.path.join(project_path, '__init__.py'), False)
         copy_assets(entry_filepath, os.path.join(project_path, 'main.py'), False)
         copy_assets(contents_dirpath, os.path.join(project_path, 'contents'), False)
         copy_assets(backend_dirpath, os.path.join(project_path, 'backend'), False)

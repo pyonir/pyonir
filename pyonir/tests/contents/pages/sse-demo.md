@@ -1,5 +1,4 @@
 title: Demo SSE
-menu.group: primary
 ===
 This page demonstrates the functionality of server side events using pycasso
 

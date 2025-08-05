@@ -1,6 +1,5 @@
 from pyonir.pyonir_types import PyonirRequest
-from backend.models.EmailSubscriber import EmailSubscriber
-
+from pyonir.tests.backend.models.EmailSubscriber import EmailSubscriber
 
 async def dynamic_lambda(request: PyonirRequest) -> str:
     return "hello battle rap forever!"

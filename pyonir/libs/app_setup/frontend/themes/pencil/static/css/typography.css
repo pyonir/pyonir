@@ -59,6 +59,7 @@ a {
 a:focus {
   box-shadow: 0 0 0 .2em rgba(87, 100, 198, .15);
 }
+a,
 a:focus,
 a:hover,
 a:active,
@@ -71,10 +72,7 @@ p {
   line-height: 1.4em;
   margin: 0 0 1em;
 }
-a, ins, u {
-  -webkit-text-decoration-skip: ink edges;
-  text-decoration-skip: ink edges;
-}
+
 blockquote {
   border-left: .2em solid #f0f1f4;
   margin-left: 0;
@@ -91,7 +89,7 @@ ul ul,
 ol ul,
 ul ol,
 ol ol {
-  margin: 1.5em 0 1.5em 2em;
+  margin: 0.5em 0 1.5em 1em;
 }
 
 ul {
@@ -112,7 +110,7 @@ dl dt {
 dl dd {
   margin: .5em 0 1.5em 0;
 }
-
+strong{ font-weight: bold; }
 code {
     background: #dedede;
     padding: 0 .534rem;

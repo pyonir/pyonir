@@ -1,7 +1,6 @@
 @filter.md:- content
 @filter.jinja:- js
 title: Websockets Chat demo
-menu.group: primary
 ===
 This page demonstrates the functionality of websockets using pycasso library.
 Visit this page in another browser to test functionality.

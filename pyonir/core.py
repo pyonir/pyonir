@@ -6,7 +6,6 @@ from starlette.requests import Request as StarletteRequest
 
 from pyonir.pyonir_types import PyonirServer, Theme, PyonirHooks, Parsely, ParselyPagination, AppRequestPaths, AppCtx, \
     PyonirRouters, RoutePath, PyonirRestResponse
-from pyonir.utilities import json_serial
 
 # Environments
 DEV_ENV:str = 'LOCAL'
@@ -161,18 +160,21 @@ class PyonirCollection:
         return {"attr": k.strip(), "op":op, "value":PyonirCollection.coerce_bool(v)}
 
     @classmethod
-    def query(cls, query_path: str,
-             app_ctx: PyonirApp = None,
-             data_model: any = None,
-             include_only: str = None,
-             exclude_dirs: list[str] = None,
-             exclude_file: list[str] = None,
-             force_all: bool = True,
-              sort_key: str = None):
+    def query(cls,
+                query_path: str,
+                app_ctx: AppCtx = None,
+                model: object | str = None,
+                name_pattern: str = None,
+                exclude_dirs: tuple = None,
+                exclude_names: tuple = None,
+                force_all: bool = True,
+                sort_key: str = None):
         """queries the file system for list of files"""
-        from pyonir.utilities import get_all_files_from_dir
-        gen_data = get_all_files_from_dir(query_path, app_ctx=app_ctx, entry_type=data_model, include_only=include_only,
-                                          exclude_dirs=exclude_dirs, exclude_file=exclude_file, force_all=force_all)
+        from pyonir.utilities import query_files
+        gen_data = query_files(query_path, app_ctx=app_ctx, model=model, name_pattern=name_pattern,
+                               exclude_dirs=exclude_dirs, exclude_names=exclude_names, force_all=force_all)
+        # gen_data = get_all_files_from_dir(query_path, app_ctx=app_ctx, entry_type=data_model, include_only=include_only,
+        #                                   exclude_dirs=exclude_dirs, exclude_file=exclude_file, force_all=force_all)
         return cls(gen_data, sort_key=sort_key)
 
     def prev_next(self, input_file: Parsely):
@@ -252,8 +254,8 @@ class PyonirCollection:
         from pyonir import Site
         if not Site: return None
         from pyonir.core import ParselyPagination
-        request: PyonirRequest = Site.TemplateEnvironment.globals['request']
-        if not hasattr(request, 'limit'): return None
+        request: PyonirRequest = Site.TemplateEnvironment.globals['request'] if Site.TemplateEnvironment else None
+        if not request or not hasattr(request, 'limit'): return None
         req_pg = self.get_attr(request.query_params, 'pg') or 1
         limit = query_params.get('limit', request.limit)
         curr_pg = int(query_params.get('pg', req_pg)) or 1
@@ -395,7 +397,10 @@ class PyonirRequest:
         from pyonir.parser import ParselyFileStatus
 
         code = 404
-        if self.file.status in (ParselyFileStatus.PROTECTED, ParselyFileStatus.FORBIDDEN):
+        if self.file.is_router:
+            # If the file is a router method, we assume it is valid
+            code = 200
+        elif self.file.status in (ParselyFileStatus.PROTECTED, ParselyFileStatus.FORBIDDEN):
             self.file.data = {'template': '40x.html', 'content': f'Unauthorized access to this resource.', 'url': self.url, 'slug': self.slug}
             code = 401
         elif self.file.file_status == ParselyFileStatus.PUBLIC or is_router_method:
@@ -510,6 +515,7 @@ class PyonirBase:
     THUMBNAIL_DEFAULT = (230, 350)
     PROTECTED_FILES = {'.', '_', '<', '>', '(', ')', '$', '!', '._'}
     IGNORE_FILES = {'.vscode', '.vs', '.DS_Store', '__pycache__', '.git'}
+    IGNORE_WITH_PREFIXES = ('.', '_', '<', '>', '(', ')', '$', '!', '._')
 
     PAGINATE_LIMIT: int = 6
     DATE_FORMAT: str = "%Y-%m-%d %I:%M:%S %p"
@@ -625,7 +631,7 @@ class PyonirBase:
             self.TemplateEnvironment.globals['is_ssg'] = True
             start_time = time.perf_counter()
 
-            all_pages = utilities.get_all_files_from_dir(self.pages_dirpath, app_ctx=self.app_ctx)
+            all_pages = utilities.query_files(self.pages_dirpath, app_ctx=self.app_ctx)
             xmls = []
             for page in all_pages:
                 self.TemplateEnvironment.globals['request'] = page  # pg_req
@@ -771,6 +777,8 @@ class PyonirApp(PyonirBase):
         self.public_assets_dirpath = os.path.join(self.frontend_dirpath, 'static')
         self.Parsely_Filters = {'jinja': self.parse_jinja, 'pyformat': self.parse_pyformat,
                                  'md': parse_markdown}
+        self.serve_frontend = True
+        """Serve frontend files from the frontend directory for HTML requests"""
 
     @property
     def nginx_config_filepath(self):
@@ -876,7 +884,8 @@ class PyonirApp(PyonirBase):
 
     def _activate_plugins(self):
         """Active plugins enabled based on configurations"""
-        is_configured = hasattr(self.configs, 'app') and hasattr(self.configs.app, 'enabled_plugins')
+        from pyonir.utilities import get_attr
+        is_configured = get_attr(self.configs.app, 'enabled_plugins', None)
         for plg_id, plugin in self.plugins_installed.items():
             if is_configured and plg_id not in self.configs.app.enabled_plugins: continue
             self.plugins_activated.add(plugin(self))
@@ -933,9 +942,10 @@ class PyonirApp(PyonirBase):
         self.configs = process_contents(os.path.join(self.contents_dirpath, self.CONFIGS_DIRNAME), self.app_ctx)
         envopts = load_env(os.path.join(self.app_dirpath, '.env'))
         setattr(self.configs, 'env', envopts)
-        self.setup_templates()
+        if self.serve_frontend:
+            self.setup_templates()
 
-    def run(self, routes: PyonirRouters, plugins: list[PyonirPlugin] =None):
+    def run(self, routes: PyonirRouters = None):
         """Runs the Uvicorn webserver"""
         from .server import (setup_starlette_server, start_uvicorn_server,)
 
@@ -954,6 +964,9 @@ class PyonirApp(PyonirBase):
 class TemplateEnvironment(Environment):
 
     def __init__(self, app: PyonirApp):
+        from pyonir.utilities import get_attr
+        if not os.path.exists(app.frontend_dirpath) and app.serve_frontend:
+            raise ValueError(f"Frontend directory {app.frontend_dirpath} does not exist. Please ensure the frontend directory is set up correctly.")
         from jinja2 import FileSystemLoader, ChoiceLoader
         from webassets import Environment as AssetsEnvironment
         from pyonir import PYONIR_JINJA_TEMPLATES_DIRPATH, PYONIR_JINJA_FILTERS_DIRPATH, PYONIR_JINJA_EXTS_DIRPATH
@@ -961,7 +974,8 @@ class TemplateEnvironment(Environment):
         from pyonir.utilities import load_modules_from
 
         self.themes = PyonirThemes(os.path.join(app.frontend_dirpath, PyonirApp.THEMES_DIRNAME))
-
+        if self.themes.active_theme is None:
+            raise ValueError(f"No active theme name {get_attr(app.configs, 'app.theme_name')} found in {app.frontend_dirpath} themes directory. Please ensure a theme is available.")
         jinja_template_paths = ChoiceLoader([FileSystemLoader(self.themes.active_theme.jinja_template_path),
                                              FileSystemLoader(PYONIR_JINJA_TEMPLATES_DIRPATH)])
         sys_filters = load_modules_from(PYONIR_JINJA_FILTERS_DIRPATH)
@@ -998,29 +1012,88 @@ class TemplateEnvironment(Environment):
         self.filters.update({name: filter})
         pass
 
+@dataclass
+class Theme:
+    _mapper = {'theme_dirname': 'file_dirname', 'theme_dirpath': 'file_dirpath'}
+    name: str
+    theme_dirname: str = ''
+    """Directory name for theme folder within frontend/themes directory"""
+    theme_dirpath: str = ''
+    """Directory path for theme folder within frontend/themes directory"""
+    details: Parsely | None = None
+    """Represents a theme available in the frontend/themes directory."""
+
+    def __post_init__(self):
+        self.details = self.readme()
+        for k, v in self.details.data.items():
+            if k in ('static_dirname', 'templates_dirname'):
+                setattr(self, k, v)
+
+    @property
+    def static_dirname(self):
+        """directory name for theme's jinja templates"""
+        return self.details.data.get('static_dirname', 'static') if self.details else 'static'
+
+    @property
+    def templates_dirname(self):
+        """directory name for theme's jinja templates"""
+        return self.details.data.get('templates_dirname', 'layouts') if self.details else 'layouts'
+
+    @property
+    def static_dirpath(self):
+        """directory to serve static theme assets"""
+        return os.path.join(self.theme_dirpath, self.static_dirname)
+
+    @property
+    def jinja_template_path(self):
+        return os.path.join(self.theme_dirpath, self.templates_dirname)
+
+    def readme(self):
+        """Returns the theme's README.md file content if available"""
+        from pyonir.parser import Parsely
+        from pyonir import Site
+        theme_ctx = list(Site.app_ctx)
+        theme_ctx[2] = Site.frontend_dirpath
+        theme_readme = os.path.join(self.theme_dirpath,'README.md')
+        theme_readme =  theme_readme if os.path.exists(theme_readme) else os.path.join(self.theme_dirpath,'readme.md')
+        readme = Parsely(theme_readme, app_ctx=theme_ctx)
+        if not readme.file_exists:
+            raise ValueError(f"Theme {self.name} does not have a README.md file.")
+        return readme
 
 class PyonirThemes:
     """Represents sites available and active theme(s) within the frontend directory."""
 
     def __init__(self, theme_dirpath: str):
+        if not os.path.exists(theme_dirpath):
+            raise ValueError(f"Theme directory {theme_dirpath} does not exist.")
         self.themes_dirpath: str = theme_dirpath # directory path to available site themes
-        self._available_themes: PyonirCollection | None = None # collection of themes available in frontend/themes directory
+        self.available_themes: PyonirCollection | None = self.query_themes() # collection of themes available in frontend/themes directory
 
     @property
     def active_theme(self) -> Theme | None:
         from pyonir import Site
         from pyonir.parser import get_attr
-        if not Site: return None
-        self._available_themes = self._get_available_themes()
+        if not Site or not self.available_themes: return None
+        # self.available_themes = self.query_themes()
         site_theme = get_attr(Site.configs, 'app.theme_name')
-        site_theme = self._available_themes.find(site_theme, from_attr='theme_dirname')
+        site_theme = self.available_themes.get(site_theme)
         return site_theme
 
-    def _get_available_themes(self) -> PyonirCollection | None:
-        from pyonir import Site
-        if not Site: return None
-        fe_ctx = list(Site.app_ctx)
-        fe_ctx[2] = Site.frontend_dirpath
-        pc = PyonirCollection.query(self.themes_dirpath, fe_ctx, include_only='README.md', data_model=Theme)
-        return pc
+    def query_themes(self) -> dict[str, Theme] | None:
+        """Returns a collection of available themes within the frontend/themes directory"""
+        themes_map = {}
+        for theme_dir in os.listdir(self.themes_dirpath):
+            if theme_dir.startswith(PyonirBase.IGNORE_WITH_PREFIXES): continue
+            theme = Theme(name=theme_dir, theme_dirname=theme_dir, theme_dirpath=os.path.join(self.themes_dirpath, theme_dir))
+            themes_map[theme_dir] = theme
+        return themes_map if themes_map else None
+
+    # def _get_available_themes(self) -> PyonirCollection | None:
+    #     from pyonir import Site
+    #     if not Site: return None
+    #     fe_ctx = list(Site.app_ctx)
+    #     fe_ctx[2] = Site.frontend_dirpath
+    #     pc = PyonirCollection.query(self.themes_dirpath, fe_ctx,exclude_dirs=('static','layouts'), include_only='README.md', data_model=Theme)
+    #     return pc
 

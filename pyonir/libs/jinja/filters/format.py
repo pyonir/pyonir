@@ -1,2 +1,2 @@
-def format(input, context={}):
+def format(input, **context):
     return input.format(**context)

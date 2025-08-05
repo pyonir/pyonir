@@ -5,7 +5,7 @@ from typing import get_type_hints
 from starlette.websockets import WebSocket, WebSocketState, WebSocketDisconnect
 
 # from pyonir import ASSETS_ROUTE, UPLOADS_ROUTE, PAGINATE_LIMIT, API_ROUTE, API_DIRNAME
-from pyonir.pyonir_types import PyonirApp, PyonirRequest, PyonirServer, PyonirHooks
+from pyonir.pyonir_types import PyonirApp, PyonirRequest, PyonirServer, PyonirHooks, AppEndpoint
 from pyonir.utilities import create_file, get_attr, cls_mapper
 
 TEXT_RES = 'text/html'
@@ -286,12 +286,10 @@ def _add_route(dec_func: typing.Callable | None,
 
     async def dec_wrapper(star_req):
         from pyonir.core import PyonirRequest
-        # if star_req.url.path == '/favicon.ico': return serve_favicon(Site)
         # Resolve page file route
         pyonir_request = PyonirRequest(star_req)
         if pyonir_request.is_static: return serve_static(Site, pyonir_request)
         await pyonir_request.process_request_data()
-        # app_ctx, req_filepath = resolve_path_to_file(star_req.url.path, Site)
 
         # Update template global
         Site.TemplateEnvironment.globals['request'] = pyonir_request
@@ -415,8 +413,8 @@ def generate_nginx_conf(app: PyonirApp):
     """Generates a NGINX conf file based on App configurations"""
     nginxconf = app.TemplateEnvironment.get_template("nginx.jinja.conf") \
         .render(
-        app_name=app.configs.app.name,
-        app_name_id=app.configs.app.name.replace(' ', '_').lower(),
+        app_name=app.name,
+        app_name_id=app.name.replace(' ', '_').lower(),
         domain=app.domain,
         is_secure=app.is_secure,
         serve_static=True,
@@ -431,7 +429,7 @@ def generate_nginx_conf(app: PyonirApp):
         custom_nginx_locations=get_attr(app.configs, 'nginx_locations')
     )
 
-    create_file(app.app_nginx_conf_filepath, nginxconf, False)
+    create_file(app.nginx_config_filepath, nginxconf, False)
 
 # def gather_file_based_routing(app: PyonirApp):
 #     from pyonir.types import PyonirCollection, PyonirSchema
@@ -440,7 +438,7 @@ def generate_nginx_conf(app: PyonirApp):
 #     router_pages = list(router_pages.where('@routes'))
 #     pass
 
-def start_uvicorn_server(app: PyonirApp, endpoints: 'Endpoints'):
+def start_uvicorn_server(app: PyonirApp, endpoints: AppEndpoint):
     """Starts the webserver"""
     import uvicorn
 
@@ -454,11 +452,11 @@ def start_uvicorn_server(app: PyonirApp, endpoints: 'Endpoints'):
     #     uvicorn_options["ssl_keyfile"] = PYONIR_SSL_KEY
     #     uvicorn_options["ssl_certfile"] = PYONIR_SSL_CRT
     if not app.is_dev:
-        uvicorn_options['uds'] = app.app_socket_filename
+        uvicorn_options['uds'] = app.unix_socket_filepath
 
     # Initialize routers
     # gather_file_based_routing(app)
-    init_app_endpoints(endpoints)
+    if endpoints: init_app_endpoints(endpoints)
     init_pyonir_endpoints(app)
     print(f"/************** ASGI APP SERVER RUNNING on {'http' if app.is_dev else 'sock'} ****************/")
     print(f"\

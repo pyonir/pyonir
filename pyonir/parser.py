@@ -1,11 +1,12 @@
 import os, pytz, re, json
 from datetime import datetime
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from .core import PyonirRequest, PyonirCollection
-from .pyonir_types import ParselyPagination, JSON_RES, PyonirRestResponse
-from .utilities import dict_to_class, get_attr, get_all_files_from_dir, deserialize_datestr, create_file, get_module, \
-    cls_mapper, parse_query_model_to_object, import_module
+from .pyonir_types import ParselyPagination, JSON_RES, PyonirRestResponse, AppCtx
+from .utilities import dict_to_class, get_attr, query_files, deserialize_datestr, create_file, get_module, \
+    cls_mapper, parse_query_model_to_object
 
 ALLOWED_CONTENT_EXTENSIONS = ('prs', 'md', 'json', 'yaml')
 IGNORE_FILES = ('.vscode', '.vs', '.DS_Store', '__pycache__', '.git', '.', '_', '<', '>', '(', ')', '$', '!', '._')
@@ -197,7 +198,7 @@ class ParselyMedia:
         from pyonir import Site
         if self.group != Site.UPLOADS_DIRNAME: self.group = f'{Site.UPLOADS_DIRNAME}/{self.group}'
         thumbs_dir = os.path.join(self.file_dirpath, self.group, Site.UPLOADS_THUMBNAIL_DIRNAME)
-        files = get_all_files_from_dir(str(thumbs_dir), app_ctx=self.app_ctx)
+        files = query_files(str(thumbs_dir), app_ctx=self.app_ctx, model=ParselyMedia)
         target_name = self.file_name
         thumbs = {}
         # filter files based on name
@@ -214,26 +215,24 @@ class Parsely:
     # _Filters = {'md': parse_markdown}  # Global filters that modify scalar values
     default_file_attributes = ['file_name','file_path','file_dirname','file_data_type','file_ctx','file_created_on']
 
-    def __init__(self, abspth: str, app_ctx=None, generic_query_model = None):
+    def __init__(self, abspth: str, app_ctx: AppCtx = None, model: object = None):
         from pyonir import Site
         assert abspth is not None, f"Parsely was not provided. {abspth} is not a valid string!"
-        __skip_parsely_deserialization__ = generic_query_model and hasattr(generic_query_model, '__skip_parsely_deserialization__')
-        self._generic_query_model = generic_query_model # when available this property will only process values in model
+        __skip_parsely_deserialization__ = model and hasattr(model, '__skip_parsely_deserialization__')
+        self.schema = model
+        """Model object associated with file."""
         self._cursor = None
         self._blob_keys = []
         self.resolver = None
         self.is_router = abspth.endswith('.routes.md')
         self.app_ctx = app_ctx # application context for file
-        self.file_path = abspth
+        self.file_path = str(abspth)
         self.file_dirpath = os.path.dirname(abspth) # path to files contents directory
         # file data processing
         self.file_contents = ''
         self.file_lines = None
         self.file_line_count = None
         self.data = {}
-
-        self.schema = None
-        """Model object associated with file."""
 
         ctx_url, ctx_name, ctx_dirpath, ctx_staticpath, contents_relpath, file_name, file_ext = self.process_ctx(app_ctx)
         content_type, *content_subs = os.path.dirname(contents_relpath).split(os.path.sep) # directory at root of contents scope
@@ -347,6 +346,8 @@ class Parsely:
         pass
 
     def map_to_model(self, model, refresh = False):
+        if model is None:
+            model = self.schema
         if model and refresh:
             import sys, importlib
             model_name = model.__name__ if hasattr(model, '__name__') else type(model).__name__
@@ -360,7 +361,7 @@ class Parsely:
 
         if not model:
             file_props = {k: v for k,v in self.__dict__.items() if k in self.default_file_attributes}
-            return dict_to_class({**self.data, **file_props, '@model': 'GenericQueryModel'}, self.file_data_type)
+            return dict_to_class({**self.data, **file_props, '@model': 'GenericQueryModel'}, self.file_data_type, True)
         res = cls_mapper(self, model)
         for key in self.default_file_attributes:
             setattr(res, key, getattr(self, key))
@@ -435,14 +436,15 @@ class Parsely:
         is_not_router = pyonir_request.file.file_exists and not pyonir_request.file.is_router
         if not router_obj or is_not_router or app.endpoint == pyonir_request.url: return None
         from starlette.routing import compile_path
-        base_url = "/".join(pyonir_request.parts[0:pyonir_request.parts.index(app.endpoint.lstrip(os.path.sep))+1])
+        is_home = app.endpoint == '/'
+        base_url = '' if is_home else "/".join(pyonir_request.parts[0:pyonir_request.parts.index(app.endpoint.lstrip(os.path.sep))+1])
         path = pyonir_request.path
         router_method = None
         match = None
         # v_page = Parsely('') # error page by default until route has match
         for r in router_obj.keys():
             if match: break
-            relpath = f"/{base_url}{r}"
+            relpath = f"{base_url}{r}"
             path_regex, path_format, *args = compile_path(relpath)
             match = path_regex.match(path)
             if match:
@@ -462,6 +464,7 @@ class Parsely:
             self.resolver = router_method
         else:
             # When no matching route spec is found we return an error page
+            self.is_router = False
             self.file_path = ''
             pass
 
@@ -560,7 +563,7 @@ class Parsely:
                         self.update_nested(None, _c, pv)
                     parsed_val = _c or pv
 
-            skip_line = hasattr(self._generic_query_model, parsed_key) if parsed_key and self._generic_query_model else None
+            skip_line = hasattr(self.schema, parsed_key) if parsed_key and self.schema else None
             parsed_val = self.process_value_type(parsed_val) if not skip_line else parsed_val
 
             return parsed_key, val_type, parsed_val, methargs
@@ -573,16 +576,6 @@ class Parsely:
             else:
                 return str()
 
-        # def get_stop(cur, curtabs, is_blob=None, stop_str=None):
-        #     if cur == self.file_line_count: return '__STOPLOOKAHEAD__'
-        #     in_limit = cur + 1 < self.file_line_count
-        #     stop_comm_blok = self.file_lines[cur].strip().endswith(stop_str) if in_limit and stop_str else None
-        #     nxt_curs_is_blok = in_limit and self.file_lines[cur + 1].startswith(BLOCK_PREFIX_STR)
-        #     nxt_curs_is_blokfence = in_limit and self.file_lines[cur + 1].strip().startswith(BLOCK_CODE_FENCE)
-        #     nxt_curs_is_blokdelim = in_limit and self.file_lines[cur + 1].strip().endswith(BLOCK_DELIM)
-        #     nxt_curs_tabs = count_tabs(self.file_lines[cur + 1]) if (in_limit and not is_blob) else -1
-        #     return '__STOPLOOKAHEAD__' if stop_comm_blok or nxt_curs_is_blok or nxt_curs_is_blokdelim or (
-        #             nxt_curs_tabs < curtabs and not is_blob) else None
 
         def stop_loop_block(cur, curtabs, is_blob=None, stop_str=None):
             if cur == self.file_line_count: return True
@@ -696,9 +689,9 @@ class Parsely:
                     file_gen = PyonirCollection.query(filepath,
                                         app_ctx=self.app_ctx,
                                         force_all=return_all_files,
-                                        data_model=generic_query_model,
-                                        # Ignore files with same name and index files
-                                        exclude_file=(self.file_name + '.' + self.file_ext, 'index.md'))
+                                        model=generic_query_model,
+                                        exclude_names=(self.file_name + '.' + self.file_ext, 'index.md')
+                                                      )
                     d = file_gen.paginated_collection(query_params)
                 else:
                     rtn_key = has_attr_path or 'data'

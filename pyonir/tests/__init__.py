@@ -1,6 +1,8 @@
 import os, json, textwrap
-from pyonir.parser import Parsely
+from pyonir.parser import Parsely, Page
 from pyonir import init
+from pyonir.pyonir_types import Theme
+from pyonir.utilities import query_files
 
 def generate_pyonir_types():
     from pyonir.core import PyonirApp, PyonirRequest, PyonirPlugin
@@ -51,9 +53,15 @@ def generate_tests(parsely: Parsely):
     parsely.save(os.path.join(os.path.dirname(__file__), 'generated_test.py'), test_class)
 
 if __name__=='__main__':
+    app_dirpath = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'libs', 'app_setup')
     # generate_pyonir_types()
     App = init(__file__)
-    file = App.parse_file(os.path.join(os.path.dirname(__file__),'contents','test.md'))
-    generate_tests(file)
+    App.serve_frontend = False
+    App.setup_configs()
+    configs = query_files(os.path.join(app_dirpath, 'contents', 'configs'), app_ctx=App.app_ctx)
+    pages = query_files(os.path.join(app_dirpath, 'contents'), app_ctx=App.app_ctx, model=Page)
+    themes = query_files(os.path.join(app_dirpath, 'frontend'), app_ctx=App.app_ctx, model=Theme)
+    # file = App.parse_file(os.path.join(os.path.dirname(__file__),'contents','test.md'))
+    # generate_tests(file)
     # print(file.data)
     pass

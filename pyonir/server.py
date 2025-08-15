@@ -3,9 +3,9 @@ import os, typing, json, inspect
 from typing import get_type_hints
 
 from starlette.websockets import WebSocket, WebSocketState, WebSocketDisconnect
-
-# from pyonir import ASSETS_ROUTE, UPLOADS_ROUTE, PAGINATE_LIMIT, API_ROUTE, API_DIRNAME
-from pyonir.pyonir_types import PyonirApp, PyonirRequest, PyonirServer, PyonirHooks, AppEndpoint
+from pyonir.core import PyonirApp
+from pyonir.pyonir_types import PyonirRequest, PyonirServer, PyonirHooks, AppEndpoint, PyonirRouters, \
+    PyonirRestResponse
 from pyonir.utilities import create_file, get_attr, cls_mapper
 
 TEXT_RES = 'text/html'
@@ -65,6 +65,7 @@ async def pyonir_ws_handler(websocket: WebSocket):
         del ConnClients[active_id]
         print(f"WebSocket connection closed: {active_id}")
 
+
 async def pyonir_sse_handler(request: PyonirRequest) -> typing.AsyncGenerator:
     """Handles sse web request by pyonir"""
     from pyonir.utilities import generate_id
@@ -101,9 +102,11 @@ async def pyonir_sse_handler(request: PyonirRequest) -> typing.AsyncGenerator:
         res = process_sse(last_client)
         yield res
 
+
 async def pyonir_docs_handler(request: PyonirRequest):
     """Documentation for every endpoint by pyonir"""
     return request.server_request.app.url_map
+
 
 def pyonir_index(request: PyonirRequest):
     """Catch all routes for all web request"""
@@ -114,13 +117,11 @@ def setup_starlette_server(iapp: PyonirApp) -> PyonirServer:
     """Setup Starlette web server"""
 
     from starlette_wtf import CSRFProtectMiddleware
-    # from starlette_session import SessionMiddleware
     from starlette.middleware.sessions import SessionMiddleware
 
     from starlette.middleware.trustedhost import TrustedHostMiddleware
     from starlette.middleware.gzip import GZipMiddleware
     from starlette.responses import Response, StreamingResponse
-    # from starlette.requests import Request
     from starlette.routing import Router, Route
 
     def render_response(value, media_type):
@@ -178,8 +179,10 @@ def init_app_endpoints(endpoints: 'Endpoints'):
 
 
 def init_pyonir_endpoints(app: PyonirApp):
-    app_theme = app.TemplateEnvironment.themes.active_theme
-    for r, static_abspath in ((app.ASSETS_ROUTE, app_theme.static_dirpath), (app.UPLOADS_ROUTE, app.uploads_dirpath)):
+    app_frontend = (app.frontend_assets_route, app.frontend_assets_dirpath)
+    app_public = (app.public_assets_route, app.public_assets_dirpath)
+    app_uploads = (app.uploads_route, app.uploads_dirpath)
+    for r, static_abspath in (app_frontend, app_uploads, app_public):
         if not os.path.exists(static_abspath): continue
         _add_route(None, r, static_path=static_abspath)
 
@@ -200,27 +203,30 @@ def process_sse(data: dict) -> str:
 
 def serve_static(app: PyonirApp, request: PyonirRequest):
     from starlette.responses import FileResponse, PlainTextResponse
-    base_path = app.public_assets_dirpath if request.path.startswith('/static') else app.TemplateEnvironment.themes.active_theme.static_dirpath
+    from_frontend = request.path.startswith(app.public_assets_route)
+    base_path = app.frontend_assets_dirpath if from_frontend else app.public_assets_dirpath
     req_path = request.parts[1:] if len(request.parts) > 1 else request.parts
     path = os.path.join(base_path, *req_path)
-    return FileResponse(path, 200) if os.path.exists(path) else PlainTextResponse(f"{request.path} not found", status_code=404)
+    return FileResponse(path, 200) if os.path.exists(path) else PlainTextResponse(f"{request.path} not found",
+                                                                                  status_code=404)
+
 
 def route(dec_func: typing.Callable | None,
-               path: str = '',
-               methods=None,
-               models: dict = None,
-               auth: bool = None,
-               ws: bool = None,
-               sse: bool = None,
-               static_path: str = None) -> typing.Callable | None:
+          path: str = '',
+          methods=None,
+          models: dict = None,
+          auth: bool = None,
+          ws: bool = None,
+          sse: bool = None,
+          static_path: str = None) -> typing.Callable | None:
     if dec_func is None and static_path is None:
         dec_func = pyonir_index
     return _add_route(dec_func, path, methods, models, auth, ws, sse, static_path)
 
+
 def _add_route(dec_func: typing.Callable | None,
                path: str = '',
                methods=None,
-               models: dict = None,
                auth: bool = None,
                ws: bool = None,
                sse: bool = None,
@@ -249,15 +255,8 @@ def _add_route(dec_func: typing.Callable | None,
     route_path = path.split('/{')[0]
     name = route_name
     endpoint_route = path.split('/', 1)[0]
-    default_system_router = dec_func.__name__ == 'pyonir_index'
-    req_models = Site.server.url_map.get(route_name, {}).get('models') or {}
-    if models:
-        for req_param, req_model in models.items():
-            req_models[req_param] = req_model.__name__
-            if hasattr(Site.server, 'models'):
-                Site.server.models.update({req_model.__name__, req_model})
-            else:
-                Site.server.models = {req_model.__name__, req_model}
+    # req_models = Site.server.url_map.get(route_name, {}).get('models') or {}
+
     new_route = {
         "doc": docs,
         "endpoint": endpoint_route,
@@ -265,7 +264,7 @@ def _add_route(dec_func: typing.Callable | None,
         "route": path,  # has regex pattern
         "path": route_path,
         "methods": methods,
-        "models": models or req_models,
+        # "models": req_models,
         "name": name,
         "auth": auth,
         "sse": sse,
@@ -286,78 +285,160 @@ def _add_route(dec_func: typing.Callable | None,
 
     async def dec_wrapper(star_req):
         from pyonir.core import PyonirRequest
-        # Resolve page file route
-        pyonir_request = PyonirRequest(star_req)
-        if pyonir_request.is_static: return serve_static(Site, pyonir_request)
-        await pyonir_request.process_request_data()
+        pyonir_request = PyonirRequest(star_req, Site)
+        return await create_response(pyonir_request, dec_func)
 
-        # Update template global
-        Site.TemplateEnvironment.globals['request'] = pyonir_request
-        pyonir_request.is_api = pyonir_request.parts and pyonir_request.parts[0] == Site.API_DIRNAME
-
-        # Query File system for Page from request
-        app_ctx, req_file = pyonir_request.resolve_request_to_file(star_req.url.path, Site)
-        pyonir_request.file = req_file
-        pyonir_request.app_ctx_name = app_ctx.name
-
-        # Preprocess routes or resolver endpoint from file
-        await req_file.process_route(pyonir_request, app_ctx)
-        await req_file.process_resolver(pyonir_request)
-        route_func = dec_func if not req_file.resolver else req_file.resolver
-
-
-        # Get router endpoint from map
-        if callable(route_func):
-            is_async = inspect.iscoroutinefunction(route_func)
-
-            default_args = dict(typing.get_type_hints(route_func))
-            default_args.update(**pyonir_request.path_params)
-            default_args.update(**pyonir_request.query_params.__dict__)
-            default_args.update(**pyonir_request.form)
-            args = cls_mapper(default_args, route_func, from_request=pyonir_request)
-            pyonir_request.router_args = args
-
-            # Resolve route decorator methods
-            pyonir_request.server_response = await route_func(**args) if is_async else route_func(**args)
-
-        else:
-            pyonir_request.server_response = req_file.resolver or req_file.route
-        try:
-
-            # Execute plugins hooks initial request
-            pyonir_request.derive_status_code(Site.server.url_map.get(route_func.__name__) and not default_system_router)
-            await Site.run_async_plugins(PyonirHooks.ON_REQUEST, pyonir_request)
-
-            # Finalize response output
-            if pyonir_request.path not in Site.server.sse_routes + Site.server.ws_routes:
-                pyonir_request.server_response = await req_file.process_response(pyonir_request)
-
-        except Exception as e:
-            raise
-            # pyonir_request.server_response = json.dumps({"error": f"{e}"})
-        if pyonir_request.redirect_to:
-            return Site.server.serve_redirect(pyonir_request.redirect_to)
-
-        return build_response(pyonir_request)
+    # async def dec_wrapper(star_req):
+    #     from pyonir.core import PyonirRequest
+    #     # Resolve page file route
+    #     pyonir_request = PyonirRequest(star_req)
+    #     if pyonir_request.is_static: return serve_static(Site, pyonir_request)
+    #     await pyonir_request.process_request_data()
+    #
+    #     # Update template global
+    #     Site.TemplateEnvironment.globals['request'] = pyonir_request
+    #     # pyonir_request.is_api = pyonir_request.parts and pyonir_request.parts[0] == Site.API_DIRNAME
+    #
+    #     # Query File system for Page from request
+    #     app_ctx, req_file = pyonir_request.resolve_request_to_file(star_req.url.path, Site)
+    #     pyonir_request.file = req_file
+    #     pyonir_request.app_ctx_name = app_ctx.name
+    #
+    #     # Preprocess routes or resolver endpoint from file
+    #     await req_file.process_route(pyonir_request, app_ctx)
+    #     await req_file.process_resolver(pyonir_request)
+    #     route_func = dec_func if not req_file.resolver else req_file.resolver
+    #
+    #     # Get router endpoint from map
+    #     if callable(route_func):
+    #         is_async = inspect.iscoroutinefunction(route_func)
+    #
+    #         default_args = dict(typing.get_type_hints(route_func))
+    #         default_args.update(**pyonir_request.path_params)
+    #         default_args.update(**pyonir_request.query_params.__dict__)
+    #         default_args.update(**pyonir_request.form)
+    #         args = cls_mapper(default_args, route_func, from_request=pyonir_request)
+    #         pyonir_request.router_args = args
+    #
+    #         # Check resolver route security
+    #
+    #         # Resolve route decorator methods
+    #         pyonir_request.server_response = await route_func(**args) if is_async else route_func(**args)
+    #
+    #     else:
+    #         pyonir_request.server_response = req_file.resolver or req_file.route
+    #     # Execute plugins hooks initial request
+    #     pyonir_request.derive_status_code(Site.server.url_map.get(route_func.__name__) and not default_system_router)
+    #     await Site.run_async_plugins(PyonirHooks.ON_REQUEST, pyonir_request)
+    #     # Finalize response output
+    #     if pyonir_request.path not in Site.server.sse_routes + Site.server.ws_routes:
+    #         pyonir_request.server_response = await req_file.process_response(pyonir_request)
+    #
+    #     if pyonir_request.redirect_to:
+    #         return Site.server.serve_redirect(pyonir_request.redirect_to)
+    #
+    #     return build_response(pyonir_request)
 
     dec_wrapper.__name__ = dec_func.__name__
     dec_wrapper.__doc__ = dec_func.__doc__
     Site.server.add_route(path, dec_wrapper, methods=methods)
 
 
-def build_response(request: PyonirRequest):
-    """Create web response for web server"""
+async def create_response(pyonir_request: PyonirRequest, dec_func: callable):
     from pyonir import Site
-    force_fresh = "no-store, no-cache, must-revalidate, max-age=0"
-    # force_cache = "public"
+    from pyonir.models.auth import Auth
 
-    response = Site.server.response_renderer(request.server_response, media_type=request.type)
-    response.headers['Cache-Control'] = force_fresh
-    response.headers['Pragma'] = "no-cache"
-    response.headers['Expires'] = "0"
-    response.headers['Server'] = "Pyonir Web Framework"
-    response.status_code = request.status_code
-    return response
+    star_req = pyonir_request.server_request
+    Site.server.request = pyonir_request
+    default_system_router = dec_func.__name__ == 'pyonir_index'
+    # Serve static urls
+    if pyonir_request.is_static:
+        return serve_static(Site, pyonir_request)
+
+    # Preprocess request data
+    await pyonir_request.process_request_data()
+    pyonir_request.auth = Auth(pyonir_request, Site)
+
+    # Update template globals
+    Site.TemplateEnvironment.globals['request'] = pyonir_request
+
+    # Process file associated with request
+    app_ctx, req_file = pyonir_request.resolve_request_to_file(star_req.url.path, Site)
+    pyonir_request.file = req_file
+    pyonir_request.app_ctx_name = app_ctx.name
+
+    # Preprocess routes or resolver endpoint from file
+    await Site.virtual_router(pyonir_request)
+    # await req_file.process_route(pyonir_request, app_ctx)
+    await req_file.process_resolver(pyonir_request)
+
+    route_func = None if not callable(req_file.resolver) else req_file.resolver
+
+    # Check resolver route security
+    security = pyonir_request.auth.security.check(pyonir_request.auth)
+    if security and not security.accepted:
+        return Site.server.serve_redirect(security.redirect_to or '/')
+
+    # Get router endpoint from map
+    if callable(route_func):
+        is_async = inspect.iscoroutinefunction(route_func)
+
+        default_args = dict(typing.get_type_hints(route_func))
+        default_args.update(**pyonir_request.path_params)
+        default_args.update(**pyonir_request.query_params.__dict__)
+        default_args.update(**pyonir_request.form)
+        args = cls_mapper(default_args, route_func, from_request=pyonir_request)
+        pyonir_request.router_args = args
+
+        # Resolve route decorator methods
+        pyonir_request.server_response = await route_func(**args) if is_async else route_func(**args)
+
+    else:
+        pyonir_request.server_response = req_file.resolver or req_file.data
+
+    # Perform redirects
+    if pyonir_request.redirect_to:
+        return Site.server.serve_redirect(pyonir_request.redirect_to)
+
+    # Derive status code
+    pyonir_request.derive_status_code(Site.server.url_map.get(route_func.__name__ if route_func else '') and not default_system_router)
+
+    # Execute plugins hooks initial request
+    await Site.run_async_plugins(PyonirHooks.ON_REQUEST, pyonir_request)
+
+    # Finalize response output
+    is_auth_res = isinstance(pyonir_request.server_response, PyonirRestResponse)
+    pyonir_response = pyonir_request.server_response if is_auth_res else PyonirRestResponse(status_code=pyonir_request.status_code)
+    if not is_auth_res:
+        if pyonir_request.type == JSON_RES:
+            pyonir_response.set_json(pyonir_request.server_response if req_file.resolver else req_file.data)
+        else:
+            pyonir_response.set_html(req_file.output_html(pyonir_request))
+
+    # Set headers
+    pyonir_response.set_media(pyonir_request.type)
+    pyonir_response.set_header('Server', 'Pyonir Web Framework')
+    pyonir_response.set_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+    pyonir_response.set_header("Pragma", "no-cache")
+    pyonir_response.set_header("Expires", "0")
+
+    # Generate response
+    pyonir_response.set_server_response()
+    return pyonir_response.render()
+
+# def build_response(request: PyonirRequest):
+#     """Create web response for web server"""
+#     from pyonir import Site
+#     force_fresh = "no-store, no-cache, must-revalidate, max-age=0"
+#     # force_cache = "public"
+#
+#     response = Site.server.response_renderer(request.server_response, media_type=request.type)
+#     response.headers['Cache-Control'] = force_fresh
+#     response.headers['Pragma'] = "no-cache"
+#     response.headers['Expires'] = "0"
+#     response.headers['Server'] = "Pyonir Web Framework"
+#     response.status_code = request.status_code
+#     return response
 
 
 def get_route_ctx(app: PyonirApp, path_str: str) -> tuple:
@@ -387,12 +468,13 @@ def resolve_path_to_file(path_str: str, app: PyonirApp, skip_vanity: bool = Fals
         if path_result: return plg, path_result
 
     ctx_route, ctx_paths = app.request_paths
-    check_wildcard = ctx_route!='/' and (path_str.startswith(ctx_route) or path_str.replace('/api','').startswith(ctx_route))
+    check_wildcard = ctx_route != '/' and (
+                path_str.startswith(ctx_route) or path_str.replace('/api', '').startswith(ctx_route))
     # ctx_route = ctx_route.replace('/*','')
     ctx_slug = ctx_route[1:]
     path_slug = path_str[1:]
     reqst_path = [p for p in path_slug.split('/') if p not in ('api', ctx_slug)]
-    if path_str.startswith('/api'): path_str = path_str.replace('/api','')
+    if path_str.startswith('/api'): path_str = path_str.replace('/api', '')
     if not is_home and not path_str.startswith(ctx_route): return app, None
 
     for rootp in ctx_paths:
@@ -404,58 +486,57 @@ def resolve_path_to_file(path_str: str, app: PyonirApp, skip_vanity: bool = Fals
             break
         if path_result: break
     if path_result is None and check_wildcard:
-        dynamic_paths = [os.path.join(app.pages_dirpath, *reqst_path[:i],"index.md") for i in range(len(reqst_path), -1, -1) if os.path.exists(os.path.join(app.pages_dirpath, *reqst_path[:i],"index.md"))]
+        dynamic_paths = [os.path.join(app.pages_dirpath, *reqst_path[:i], "index.md") for i in
+                         range(len(reqst_path), -1, -1) if
+                         os.path.exists(os.path.join(app.pages_dirpath, *reqst_path[:i], "index.md"))]
         path_result = dynamic_paths[0]
     return app, path_result
 
 
-def generate_nginx_conf(app: PyonirApp):
+def generate_nginx_conf(app: PyonirApp) -> bool:
     """Generates a NGINX conf file based on App configurations"""
-    nginxconf = app.TemplateEnvironment.get_template("nginx.jinja.conf") \
+
+    nginx_conf = app.TemplateEnvironment.get_template("nginx.jinja.conf") \
         .render(
         app_name=app.name,
         app_name_id=app.name.replace(' ', '_').lower(),
         domain=app.domain,
         is_secure=app.is_secure,
-        serve_static=True,
+        ssl_cert_file=app.ssl_cert_file,
+        ssl_key_file=app.ssl_key_file,
         site_dirpath=app.app_dirpath,
         site_logs_dirpath=app.logs_dirpath,
         app_socket_filepath=app.unix_socket_filepath,
-        site_assets_route=app.ASSETS_ROUTE,
-        site_theme_assets_dirpath=app.TemplateEnvironment.themes.active_theme.static_dirpath,
-        site_uploads_route=app.UPLOADS_ROUTE,
+        app_ignore_logs=f"{app.PUBLIC_ASSETS_DIRNAME}|{app.UPLOADS_DIRNAME}|{app.FRONTEND_ASSETS_DIRNAME}",
+        frontend_assets_route=app.frontend_assets_route,
+        frontend_assets_dirpath=app.frontend_assets_dirpath,
+        public_assets_route=app.public_assets_route,
+        public_assets_dirpath=app.public_assets_dirpath,
+        site_uploads_route=app.uploads_route,
         site_uploads_dirpath=app.uploads_dirpath,
         site_ssg_dirpath=app.ssg_dirpath,
         custom_nginx_locations=get_attr(app.configs, 'nginx_locations')
     )
 
-    create_file(app.nginx_config_filepath, nginxconf, False)
+    return create_file(app.nginx_config_filepath, nginx_conf, False)
 
-# def gather_file_based_routing(app: PyonirApp):
-#     from pyonir.types import PyonirCollection, PyonirSchema
-#     router_pages = PyonirCollection.query(app.pages_dirpath, app_ctx=app.app_ctx,
-#                                           include_only="index.md")
-#     router_pages = list(router_pages.where('@routes'))
-#     pass
 
-def start_uvicorn_server(app: PyonirApp, endpoints: AppEndpoint):
+def start_uvicorn_server(app: PyonirApp, endpoints: PyonirRouters = None):
     """Starts the webserver"""
     import uvicorn
 
     # """Uvicorn web server configurations"""
-    from pyonir import PYONIR_SSL_KEY, PYONIR_SSL_CRT
     uvicorn_options = {
         "port": app.port,
         "host": app.host
     }
     if app.is_secure:
-        uvicorn_options["ssl_keyfile"] = PYONIR_SSL_KEY
-        uvicorn_options["ssl_certfile"] = PYONIR_SSL_CRT
+        uvicorn_options["ssl_keyfile"] = app.ssl_key_file
+        uvicorn_options["ssl_certfile"] = app.ssl_cert_file
     if not app.is_dev:
         uvicorn_options['uds'] = app.unix_socket_filepath
 
     # Initialize routers
-    # gather_file_based_routing(app)
     if endpoints: init_app_endpoints(endpoints)
     init_pyonir_endpoints(app)
     print(f"/************** ASGI APP SERVER RUNNING on {'http' if app.is_dev else 'sock'} ****************/")
@@ -466,6 +547,8 @@ def start_uvicorn_server(app: PyonirApp, endpoints: AppEndpoint):
     \n\t- App host: {app.host}\
     \n\t- App port: {app.port}\
     \n\t- App sock: {app.unix_socket_filepath}\
+    \n\t- App ssl_key: {app.ssl_key_file}\
+    \n\t- App ssl_cert: {app.ssl_cert_file}\
     \n\t- App Server: Uvicorn \
     \n\t- NGINX config: {app.nginx_config_filepath} \
     \n\t- System Version: {app.SOFTWARE_VERSION}")

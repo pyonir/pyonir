@@ -1,5 +1,5 @@
-from pyonir.pyonir_types import PyonirRequest
-from pyonir.tests.backend.models.EmailSubscriber import EmailSubscriber
+from pyonir.pyonir_types import PyonirRequest, PyonirApp
+from pyonir.tests.backend.models.email_subscriber import EmailSubscriber
 
 async def dynamic_lambda(request: PyonirRequest) -> str:
     return "hello battle rap forever!"
@@ -18,5 +18,18 @@ async def subscriber_values(email: str, subscriptions: list[str]):
     print(email, subscriptions)
     return f"subscribing {email} to {subscriptions}"
 
-async def some_route(request: PyonirRequest):
-    return "hello router annotation"
+async def some_route(name: str = 'pyonir'):
+    return f"hello router annotation {name}"
+
+class DemoService:
+
+    def __init__(self, app: PyonirApp):
+        self.items = ['python','javascript']
+        self.app = app
+
+    @staticmethod
+    def get_numbers(num: int):
+        return 42, num or 88, 86
+
+    def get_items(self):
+        return self.items + ['purejs','optimljs']

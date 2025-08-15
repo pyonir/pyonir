@@ -14,19 +14,20 @@ PYONIR_JINJA_DIRPATH = os.path.join(PYONIR_LIBS_DIRPATH, 'jinja')
 PYONIR_JINJA_TEMPLATES_DIRPATH = os.path.join(PYONIR_JINJA_DIRPATH, "templates")
 PYONIR_JINJA_EXTS_DIRPATH = os.path.join(PYONIR_JINJA_DIRPATH, "extensions")
 PYONIR_JINJA_FILTERS_DIRPATH = os.path.join(PYONIR_JINJA_DIRPATH, "filters")
-# PYONIR_MESSAGES_FILE = os.path.join(PYONIR_LIBS_DIRPATH, "system-messages.md")
-PYONIR_SSL_KEY = os.path.join(PYONIR_SETUPS_DIRPATH, "server.key")
-PYONIR_SSL_CRT = os.path.join(PYONIR_SETUPS_DIRPATH, "server.crt")
+
 PYONIR_STATIC_ROUTE = "/pyonir_assets"
 
 __version__: str = '1.0.0'
 Site: PyonirApp | None = None
 
-def init(entry_file_path: str, options: dict = None):
+def init(entry_file_path: str, serve_frontend: bool = None):
     """Initializes existing Pyonir application"""
     global Site
     # Set Global Site instance
     # if options: options = PyonirOptions(**(options or {}))
     sys.path.insert(0, os.path.dirname(os.path.dirname(entry_file_path)))
-    Site = PyonirApp(entry_file_path)
+    Site = PyonirApp(entry_file_path, serve_frontend=serve_frontend)
+    Site.setup_configs()
+    if Site.serve_frontend:
+        Site.setup_themes()
     return Site

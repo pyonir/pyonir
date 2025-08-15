@@ -1,6 +1,9 @@
 from dataclasses import dataclass
 from pyonir.core import PyonirSchema
 
+def some_model_func(name: str):
+    return f"you want the {name} model huh?!"
+
 @dataclass(frozen=True)
 class EmailSubscriber(PyonirSchema):
     """

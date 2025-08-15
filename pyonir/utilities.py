@@ -6,7 +6,6 @@ from collections.abc import Iterable as ABCIterable
 
 from pyonir.pyonir_types import PyonirRequest, PyonirApp, AppCtx
 
-
 def is_iterable(tp):
     if not isinstance(tp, Iterable): return False
     origin = get_origin(tp) or tp
@@ -41,7 +40,8 @@ def is_optional_type(t):
 def is_callable_type(pt) -> bool:
     return get_origin(pt) is Callable or pt.__name__=='callable'
 
-def cls_mapper(file_obj: any, cls: typing.Callable, from_request: PyonirRequest = None):
+def cls_mapper(file_obj: object, cls: typing.Callable, from_request: PyonirRequest = None):
+    from pyonir.core import PyonirRequest, PyonirApp
     param_name, param_type, param_value = ['','','']
     try:
         if hasattr(cls, '__skip_parsely_deserialization__'): return file_obj
@@ -69,8 +69,7 @@ def cls_mapper(file_obj: any, cls: typing.Callable, from_request: PyonirRequest 
                 from pyonir import Site
                 use_value = True
                 param_value = Site if param_type == PyonirApp else from_request
-            # if param_type == PyonirRequest and from_request:
-            #     param_value = from_request
+
             if (param_value==param_type) or param_value is None or param_name[0]=='_' or param_name=='return':
                 continue
             if is_callable_type(param_type):
@@ -105,12 +104,12 @@ def cls_mapper(file_obj: any, cls: typing.Callable, from_request: PyonirRequest 
                 if key[0]=='_': continue
                 value = get_attr(data, key) or get_attr(file_obj, key)
                 setattr(res, key, value)
-        if hasattr(cls, '_mapper_merge'):
-            # Sets non class attributes onto the model instance
-            for key, value in data.items():
-                if isinstance(getattr(cls, key, None), property): continue # skip active attributes
-                if param_type_map.get(key) or key[0]=='_': continue # skip private attributes
-                setattr(res, key, value)
+        # if hasattr(cls, '_mapper_merge'):
+        #     # Sets non class attributes onto the model instance
+        #     for key, value in data.items():
+        #         if isinstance(getattr(cls, key, None), property): continue # skip active attributes
+        #         if param_type_map.get(key) or key[0]=='_': continue # skip private attributes
+        #         setattr(res, key, value)
 
     except Exception as e:
         print(f"Cls Mapper failed to create a {cls.__name__} instance due to map '{param_name}' parameter wasn't a type of {param_type} : {type(param_value)}")
@@ -464,7 +463,8 @@ def import_module(pkg_path: str, callable_name: str) -> typing.Callable:
     """Imports a module and returns the callable by name"""
     import importlib
     mod_pkg = importlib.import_module(pkg_path)
-    mod = getattr(mod_pkg, callable_name, None)
+    importlib.reload(mod_pkg)
+    mod = get_attr(mod_pkg, callable_name, None)
     return mod
 
 def get_module(pkg_path: str, callable_name: str) -> tuple[typing.Any, typing.Callable]:

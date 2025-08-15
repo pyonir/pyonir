@@ -1,8 +1,10 @@
 import os, json, textwrap
+import subprocess
+import sys
+
 from pyonir.parser import Parsely, Page
 from pyonir import init
-from pyonir.pyonir_types import Theme
-from pyonir.utilities import query_files
+from pyonir.tests.backend.demo_controller import DemoService
 
 def generate_pyonir_types():
     from pyonir.core import PyonirApp, PyonirRequest, PyonirPlugin
@@ -45,7 +47,7 @@ def generate_tests(parsely: Parsely):
         f"{indent}def setUpClass(cls):\n"
         f"{indent*2}from pyonir.parser import Parsely\n"
         f"{indent*2}from pyonir import init\n"
-        f"{indent*2}App = init(__file__)\n"
+        f"{indent*2}App = init(__file__, serve_frontend=False)\n"
         f"{indent*2}cls.parselyFile = Parsely(os.path.join(os.path.dirname(__file__),'contents', 'test.md'), App.app_ctx)\n\n"
         f"{case_meths}"
     )
@@ -55,13 +57,41 @@ def generate_tests(parsely: Parsely):
 if __name__=='__main__':
     app_dirpath = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'libs', 'app_setup')
     # generate_pyonir_types()
-    App = init(__file__)
-    App.serve_frontend = False
-    App.setup_configs()
-    configs = query_files(os.path.join(app_dirpath, 'contents', 'configs'), app_ctx=App.app_ctx)
-    pages = query_files(os.path.join(app_dirpath, 'contents'), app_ctx=App.app_ctx, model=Page)
-    themes = query_files(os.path.join(app_dirpath, 'frontend'), app_ctx=App.app_ctx, model=Theme)
+    App = init(__file__, serve_frontend=False)
+    DemoService(App)
+    # # full path to module function
+    # mod = Parsely.import_module('backend.demo_controller.subscriber_values')
+    # # path to static class method
+    # static_mod = Parsely.import_module('backend.demo_controller.DemoService.get_numbers', App.app_dirpath)
+    # # path to init package class method
+    # pkg_mod = Parsely.import_module('backend.models.EmailSubscriber', App.app_dirpath)
+    def paste_from_clipboard():
+        process = subprocess.Popen('pbpaste', env={'LANG': 'en_US.UTF-8'}, stdout=subprocess.PIPE)
+        output, error = process.communicate()
+        return output.decode('utf-8')
+
+    my_mod = None
+    while True:
+
+        mod_pth = input(f"Whats your module?").strip()
+        if not mod_pth:
+            mod_pth = paste_from_clipboard()
+        my_mod = Parsely.import_module(mod_pth, App.app_dirpath)
+        if my_mod is None:
+            break
+        else:
+            res = my_mod()
+            print(res)
+            print(f"Module {mod_pth} is now loaded")
+
     # file = App.parse_file(os.path.join(os.path.dirname(__file__),'contents','test.md'))
+    # filex = App.parse_file(os.path.join(os.path.dirname(__file__),'contents','pages','form-demo.md'))
+
+
     # generate_tests(file)
     # print(file.data)
+
+    # configs = query_files(os.path.join(app_dirpath, 'contents', 'configs'), app_ctx=App.app_ctx)
+    # pages = query_files(os.path.join(app_dirpath, 'contents'), app_ctx=App.app_ctx, model=Page)
+    # themes = query_files(os.path.join(app_dirpath, 'frontend'), app_ctx=App.app_ctx, model=Theme)
     pass

@@ -5,7 +5,7 @@ class ParselyTests(unittest.TestCase):
     def setUpClass(cls):
         from pyonir.parser import Parsely
         from pyonir import init
-        App = init(__file__)
+        App = init(__file__, serve_frontend=False)
         cls.parselyFile = Parsely(os.path.join(os.path.dirname(__file__),'contents', 'test.md'), App.app_ctx)
 
     def test_basic(self):
@@ -33,7 +33,7 @@ class ParselyTests(unittest.TestCase):
         self.assertEqual("What is this here? Content types enable you to organize and manage content in a consistent way for specific kinds of pages.\nthere is no such thing as a Python JSON object. JSON is a language independent file \nformat that finds its roots in JavaScript, and is supported by many languages. end of mulitiline block.\n", self.parselyFile.data.get('multiline_block'))
 
     def test_js(self):
-        self.assertEqual("if ('serviceWorker' in navigator) {\n  navigator.serviceWorker.register('/public/pwa/js/service-worker.js');\n", self.parselyFile.data.get('js'))
+        self.assertEqual("if ('serviceWorker' in navigator) {\n  window.addEventListener('load', function() {\n    navigator.serviceWorker.register('/public/pwa/js/service-worker.js');\n  });\n}\n", self.parselyFile.data.get('js'))
 
     def test_content(self):
         self.assertEqual("What is this here? Content types enable you to organize and manage content in a consistent way for specific kinds of pages.\nthere is no such thing as a Python JSON object. JSON is a language independent file \nformat that finds its roots in JavaScript, and is supported by many languages. If your YAML\n", self.parselyFile.data.get('content'))

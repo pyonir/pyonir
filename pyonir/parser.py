@@ -75,11 +75,11 @@ def parse_markdown(content, kwargs):
 class Page:
     """Represents a single page returned from a web request"""
     _mapper = {'created_on': 'file_created_on', 'modified_on': 'file_modified_on'}
-    _mapper_merge = True # merges additional data properties to model
+    # _mapper_merge = True # merges additional data properties to model
     url: str
     is_router: bool = False
     created_on: datetime = None
-    modified_on: datetime = None
+    modified_on: datetime = 'modified_on'
     tags: list = None
     date: datetime = None
     category: str = ''
@@ -90,9 +90,10 @@ class Page:
     author: str = 'pyonir'
     entries: ParselyPagination = None
     gallery: dict = None
-    file_name: str = ''
-    file_path: str = ''
-    file_created_on: datetime = None
+    file_name: str = 'file_name'
+    file_path: str = 'file_path'
+    file_dirname: str = 'file_dirname'
+    file_created_on: datetime = 'file_created_on'
     contents_relpath: str = ''
     generate_static_file: callable = None
     status: str = ParselyFileStatus.PUBLIC
@@ -317,12 +318,12 @@ class Parsely:
         if self.file_ext.endswith(ALLOWED_CONTENT_EXTENSIONS): return
         from PIL import Image
         from pyonir import Site
-        group = self.file_dirpath.lstrip('/').split(f'/{Site.UPLOADS_DIRNAME}', 1).pop()
+        group = self.file_dirpath.lstrip('/').split(Site.uploads_route, 1).pop()
         group_name = group.lstrip('/').split(os.path.sep)[0]
         image_name, *image_captions = self.file_name.replace('.' + self.file_ext, '').split(IMG_FILENAME_DELIM)
         formatted_name = re.sub(r'[^a-zA-Z0-9]+', ' ', image_name).title()
         formated_caption = "".join(image_captions or formatted_name).title()
-        _slug = f"{Site.UPLOADS_ROUTE}/{group_name+'/' if group else ''}{image_name}.{self.file_ext}"
+        _slug = f"{Site.UPLOADS_DIRNAME}/{group_name+'/' if group else ''}{image_name}.{self.file_ext}"
         _url = f"{_slug}"
         is_thumb = Site.UPLOADS_THUMBNAIL_DIRNAME in self.file_dirname
         full_url = _slug.replace(Site.UPLOADS_THUMBNAIL_DIRNAME + '/', '').split('--')[0] + f".{self.file_ext}" if is_thumb else _url
@@ -363,8 +364,8 @@ class Parsely:
             file_props = {k: v for k,v in self.__dict__.items() if k in self.default_file_attributes}
             return dict_to_class({**self.data, **file_props, '@model': 'GenericQueryModel'}, self.file_data_type, True)
         res = cls_mapper(self, model)
-        for key in self.default_file_attributes:
-            setattr(res, key, getattr(self, key))
+        # for key in self.default_file_attributes:
+        #     setattr(res, key, getattr(self, key))
         return res
 
     def to_json(self) -> dict:
@@ -376,37 +377,71 @@ class Parsely:
         if not bool(self.data): return
         filters = self.data.get(FILTER_KEY)
         if not filters: return
-        from pyonir import Site
+        # from pyonir import Site
         for filtr, datakeys in filters.items():
-            ifiltr = Site.Parsely_Filters.get(filtr)
+            ifiltr = self.app_filter(filtr)
             if not ifiltr: continue
             for key in datakeys:
                 mod_val = ifiltr(get_attr(self.data, key), {"page": self.data})
                 self.update_nested(key, self.data, data_update=mod_val)
         del self.data[FILTER_KEY]
 
-    async def process_response(self, req: PyonirRequest) -> str:
-        """process web request into response"""
-        from pyonir.server import JSON_RES, TEXT_RES
-        if not self.file_exists and not req.server_response and not req.form:
-            self.data = req.render_error()
-        elif req.server_response and not self.file_exists:
-            self.data = {
-                "url": req.url, "slug": req.slug, "template": "base.html"
-            }
-            if isinstance(req.server_response, str):
-                self.data['content'] = req.server_response
-        else:
-            if req.type == JSON_RES:
-                api_res = req.api_response()
-                return self.output_json(api_res)
-        return self.output_html(req) if req.type in (TEXT_RES, '*/*') else self.output_json() \
-            if req.type == JSON_RES else req.server_response
+    # async def process_response(self, req: PyonirRequest) -> str:
+    #     """process web request into response"""
+    #     from pyonir.server import JSON_RES, TEXT_RES
+    #     if not self.file_exists and not req.server_response and not req.form:
+    #         self.data = req.render_error()
+    #     else:
+    #         if req.type == JSON_RES:
+    #             api_res = req.api_response()
+    #             return self.output_json(api_res)
+    #     return self.output_html(req)
+    #
+    # async def xprocess_response(self, req: PyonirRequest) -> str:
+    #     """process web request into response"""
+    #     from pyonir.server import JSON_RES, TEXT_RES
+    #     if not self.file_exists and not req.server_response and not req.form:
+    #         self.data = req.render_error()
+    #     elif req.server_response and not self.file_exists:
+    #         self.data = {
+    #             "url": req.url, "slug": req.slug
+    #         }
+    #         if isinstance(req.server_response, str):
+    #             self.data['content'] = req.server_response
+    #     else:
+    #         if req.type == JSON_RES:
+    #             api_res = req.api_response()
+    #             return self.output_json(api_res)
+    #     return self.output_html(req) if req.type in (TEXT_RES, '*/*') else self.output_json() \
+    #         if req.type == JSON_RES else req.server_response
 
+    @staticmethod
+    def load_resolver(relative_module_path: str, base_path: str = '', from_system: bool = False):
+        from pyonir.utilities import import_module
+        pkg = relative_module_path.split('.')
+        if from_system: base_path = os.path.dirname(base_path)
+        meth_name = pkg.pop()
+        pkg_path = ".".join(pkg)
+        module_base = pkg[:-1]
+        module_name = pkg[-1]
+        _pkg_dpath = os.path.join(base_path, *module_base) + '.py' # is a /path/to/module
+        _module_dpath = os.path.join(base_path, *module_base, module_name+'.py') # is a /path/to/module.py
+        _module_pkg_dpath = os.path.join(base_path, *pkg, '__init__.py') # is a /path/to/module/__init__.py
+        if os.path.exists(_pkg_dpath):
+            pkg_path = ".".join(module_base)
+            meth_name = f"{module_name}.{meth_name}"
+        elif os.path.exists(_module_dpath):
+            meth_name = f"{module_name}.{meth_name}"
+        elif os.path.exists(_module_pkg_dpath):
+            pass
+        else:
+            return None
+        module_callable = import_module(pkg_path, callable_name=meth_name)
+        return module_callable
 
     async def _access_module_from_request(self, resolver_path: str) -> tuple:
         from pyonir import Site
-        from pyonir.utilities import import_module
+        # from pyonir.utilities import import_module
         if resolver_path.startswith(LOOKUP_DIR_PREFIX):
             return None, self.process_value_type(resolver_path)
         pkg = resolver_path.split('.')
@@ -415,33 +450,40 @@ class Parsely:
 
         app_plugin = list(filter(lambda p: p.module == pkg[0], Site.plugins_activated))
         app_plugin = app_plugin[0] if len(app_plugin) else Site
-        resolver = get_attr(app_plugin, resolver_path)
-        if not resolver:
-            resolver = import_module(".".join(pkg), callable_name=meth_name)
-        if not resolver:
-            namespace = pkg.pop(0)
-            base_pkg_path = app_plugin.app_dirpath if namespace != 'pyonir' else app_plugin.pyonir_path
-            pkg_path = os.path.join(base_pkg_path, *pkg)+'.py'
-            if not os.path.exists(pkg_path): pkg_path = os.path.join(base_pkg_path, *pkg, '__init__.py')
-            if not os.path.exists(pkg_path):
-                meth_name =f'{pkg.pop()}.'+meth_name
-                pkg_path = os.path.join(base_pkg_path,*pkg)+'.py'
-            module, resolver = get_module(str(pkg_path), meth_name)
+        # Attempt to access resolver from application instance
+        # resolver = get_attr(app_plugin, resolver_path)
+        resolver = app_plugin.reload_resolver(resolver_path)
+        # if not resolver:
+        #     # Attempt to import resolver from path. only works for functions and static methods
+        #     resolver = self.load_resolver(resolver_path,
+        #                                   base_path=app_plugin.pyonir_path if is_pyonir else app_plugin.app_dirpath,
+        #                                   from_system=is_pyonir)
+        #     # resolver = import_module(".".join(pkg), callable_name=meth_name)
+        # if not resolver:
+        #     namespace = pkg.pop(0)
+        #     base_pkg_path = app_plugin.app_dirpath if namespace != 'pyonir' else app_plugin.pyonir_path
+        #     pkg_path = os.path.join(base_pkg_path, *pkg)+'.py'
+        #     if not os.path.exists(pkg_path): pkg_path = os.path.join(base_pkg_path, *pkg, '__init__.py')
+        #     if not os.path.exists(pkg_path):
+        #         meth_name =f'{pkg.pop()}.'+meth_name
+        #         pkg_path = os.path.join(base_pkg_path,*pkg)+'.py'
+        #     module, resolver = get_module(str(pkg_path), meth_name)
 
         return module, resolver
 
     async def process_route(self, pyonir_request: PyonirRequest, app: 'PyonirApp'):
         """Processes dynamic routes from @routes property"""
-        router_obj: dict | None = self.data.get('@routes') or self.data
-        is_not_router = pyonir_request.file.file_exists and not pyonir_request.file.is_router
-        if not router_obj or is_not_router or app.endpoint == pyonir_request.url: return None
         from starlette.routing import compile_path
-        is_home = app.endpoint == '/'
-        base_url = '' if is_home else "/".join(pyonir_request.parts[0:pyonir_request.parts.index(app.endpoint.lstrip(os.path.sep))+1])
-        path = pyonir_request.path
+        router_obj: dict | None = self.data.get('@routes') or self.data
+        is_not_router = not self.is_router
+        # is_not_router = pyonir_request.file.file_exists and not pyonir_request.file.is_router
+        if not router_obj or is_not_router or pyonir_request.is_home: return None
+        # is_home = app.endpoint == '/'
+        endpoint_slug = app.endpoint.lstrip(os.path.sep)
+        base_url = '' if pyonir_request.is_home or not endpoint_slug else "/".join(pyonir_request.parts[0:pyonir_request.parts.index(endpoint_slug)+1])
+        path = pyonir_request.path if not pyonir_request.is_api else "/"+"/".join(pyonir_request.parts[1:])
         router_method = None
         match = None
-        # v_page = Parsely('') # error page by default until route has match
         for r in router_obj.keys():
             if match: break
             relpath = f"{base_url}{r}"
@@ -454,6 +496,9 @@ class Parsely:
                 virtual_req = value.get(pyonir_request.method) or value.get('page')
                 method_mod_path = value.get('call')
                 is_page = value.get('page') is not None
+                if self.is_router and pyonir_request.file and not pyonir_request.file.is_router:
+                    # we merge our virtual page spec into the request file spec
+                    pyonir_request.file.data.update(value)
                 if is_page:
                     self.data = virtual_req
                 if method_mod_path:
@@ -489,6 +534,8 @@ class Parsely:
             request.form.update(resolver_args)
         if resolver and resolver_redirect:
             request.form['redirect'] = resolver_redirect
+        if not resolver:
+            resolver = request.auth.responses.ERROR.response(message=f"Unable to resolve endpoint")
         self.resolver = resolver
 
     def deserializer(self):
@@ -555,11 +602,12 @@ class Parsely:
             force_scalr = delim and delim.endswith('`') or parsed_val.startswith(LOOKUP_DIR_PREFIX)
             if parsed_key and parsed_val and not force_scalr:
                 has_dotpath = "." in parsed_key
-                if has_dotpath or (isinstance(val_type, (list, dict)) or ("," in parsed_val)):  # inline list
+                if has_dotpath or (isinstance(val_type, (list, dict)) or (", " in parsed_val)):  # inline list
                     _c = [] if delim is None else get_container_type(delim)
-                    for x in parsed_val.split(','):
+                    for x in parsed_val.split(', '):
                         pk, vtype, pv, pmethArgs = process_iln_frag(x)
-                        if vtype != '' and pk: _, pv = self.update_nested(pk, vtype, pv)
+                        if vtype != '' and pk:
+                            _, pv = self.update_nested(pk, vtype, pv)
                         self.update_nested(None, _c, pv)
                     parsed_val = _c or pv
 
@@ -686,19 +734,19 @@ class Parsely:
                 generic_query_model = parse_query_model_to_object(generic_model_properties)
 
                 if as_dir:
-                    file_gen = PyonirCollection.query(filepath,
+                    collection = PyonirCollection.query(filepath,
                                         app_ctx=self.app_ctx,
                                         force_all=return_all_files,
                                         model=generic_query_model,
                                         exclude_names=(self.file_name + '.' + self.file_ext, 'index.md')
                                                       )
-                    d = file_gen.paginated_collection(query_params)
+                    data = collection.paginated_collection(query_params)
                 else:
                     rtn_key = has_attr_path or 'data'
                     p = Parsely(filepath, self.app_ctx)
-                    d = get_attr(p, rtn_key) or p
+                    data = get_attr(p, rtn_key) or p
                 # EmbeddedTypes[filepath] = d
-                return d
+                return data
 
             cvaluestr = valuestr.strip()
             valuestr = valuestr.strip()
@@ -728,7 +776,7 @@ class Parsely:
                         'ISSUE': f'FileNotFound while processing {cvaluestr}',
                         'SOLUTION': f'Make sure the `{lookup_fpath}` file exists. Note that only valid md and json files can be processed.'
                     })
-                    return cvaluestr
+                    return None
                 return EmbeddedTypes.get(lookup_fpath, parse_ref_to_files(lookup_fpath, os.path.isdir(lookup_fpath)))
 
         return valuestr.lstrip('$')
@@ -887,11 +935,17 @@ class Parsely:
             k = attr_path[-1].strip()
             if find:
                 return True, data_src.get(k)
-            if data_update: return completed, update_value(data_src, {k: data_update})
-            has_mapping_key = isinstance(data_src, (dict,)) and data_src.get(k)
-            if not has_mapping_key: data_merge = {k: data_merge}
-            update_value(data_src.get(k, data_src), data_merge) if isinstance(data_src, dict) else update_value(
-                data_src, data_merge)
+            if data_update:
+                return completed, update_value(data_src, {k: data_update})
+            has_mapping_key = isinstance(data_src, (dict,)) and data_src.get(k) is not None
+            if not has_mapping_key:
+                data_merge = {k: data_merge}
+            if isinstance(data_merge, (str, int, float, bool)):
+                data_src[k] = data_merge
+            if isinstance(data_src, dict):
+                update_value(data_src.get(k, data_src), data_merge)
+            else:
+                update_value(data_src, data_merge)
 
         return completed, (data_src if not find else _data)
 
@@ -946,10 +1000,10 @@ class Parsely:
         if not as_str: return data
         return json.dumps(data, default=json_serial)
 
-    def output_html(self, req: PyonirRequest):
+    def output_html(self, req: PyonirRequest) -> str:
         """Renders and html output"""
         from pyonir import Site
-        page = self.map_to_model(Page, get_attr(req, 'query_params.rmodel'))
+        page = self.map_to_model(Page, get_attr(req, 'query_params.refresh_model'))
         Site.TemplateEnvironment.globals['prevNext'] = self.prev_next
         Site.TemplateEnvironment.globals['page'] = page
         html = Site.TemplateEnvironment.get_template(page.template).render()

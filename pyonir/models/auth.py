@@ -1,36 +1,112 @@
 import os, time
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
+from typing import Optional, Tuple
 
 from starlette_wtf import csrf_token
 
-from pyonir.models.user import UserCredentials, User
+from pyonir.models.user import User, Role, PermissionLevel, Roles, UserSignIn
 from pyonir.pyonir_types import PyonirRequest, PyonirApp, PyonirRestResponse
 
-def validate_credentials(method):
+
+@dataclass
+class UserCredentials:
+    """Represents user credentials for login"""
+    email: str
+    """User's email address is required for login"""
+
+    password: str = ''
+    """User's password for login is optional, can be empty for SSO"""
+
+    remember_me: bool = False
+    """Flag to remember user session, defaults to False"""
+
+    has_session: bool = False
+    """Flag to indicate if the login is via Single Sign-On (SSO)"""
+
+    token: str = ''
+    """User auth token"""
+
+    @classmethod
+    def from_request(cls, request: PyonirRequest) -> 'UserCredentials':
+        """New sign in user"""
+        email = request.form.get('email')
+        password = request.form.get('password')
+        remember_me = request.form.get('remember_me')
+        if not email and not password: return cls(email='***')
+        return cls(email=email, password=password, remember_me=remember_me)
+
+    @classmethod
+    def from_session(cls, session_data: dict) -> 'UserCredentials':
+        """Create an instance from session data."""
+        uid = session_data.get('user')
+        return cls(email='***', has_session=bool(uid), token=uid) if uid else None
+
+    @classmethod
+    def from_header(cls, auth_header: str) -> 'UserCredentials':
+        """Decodes the authorization header to extract user credentials."""
+        from pyonir.models.auth import decode_jwt
+
+        if auth_header is None:
+            return None
+        username = ''
+        password = ''
+        auth_type, auth_token = auth_header.split(' ', 1)
+        if auth_type.startswith('Basic '):
+            import base64
+            decoded = base64.b64decode(auth_token).decode('utf-8')
+            email, password = decoded.split(':', 1)
+        if auth_type.startswith('Bearer '):
+            # Handle Bearer token if needed
+            user_creds = decode_jwt(auth_token)
+            email, password = user_creds.get('username'), user_creds.get('password')
+            pass
+        return cls(email=username, password=password, has_session=True) if username and password else None
+
+
+def auth_required(role: Role = None, perms: PermissionLevel = None):
     """
     Decorator for Auth methods to ensure the instance model is valid
     before executing the method.
     Raises ValueError if validation fails.
     """
     from functools import wraps
-    @wraps(method)
-    def wrapper(self, *args, **kwargs):
-        if self.user_creds and not self.user_creds.is_valid():
-            formatted_msg = self.responses.ERROR.message.format(
-                user=self.user_creds,
-                request=self.request
-            )
-            self.response = self.responses.ERROR.response(message=formatted_msg)
-            self.response.data = self.user_creds.errors
-            return self.response
-        return method(self, *args, **kwargs)
-    return wrapper
 
-def generate_id(email=None) -> str:
-    """Generates a unique identifier based on the email address."""
+    def decorator(func):
+        @wraps(func)
+        async def wrapper(*args, **kwargs):
+            from pyonir import Site
+            import inspect
+            is_async = inspect.iscoroutinefunction(func)
+
+            authorizer = Auth(request=Site.server.request, app=Site)
+            if not authorizer.user:
+                formatted_msg = authorizer.responses.UNAUTHORIZED.message.format(
+                    user=authorizer.user_creds,
+                    request=authorizer.request
+                )
+                authorizer.response = authorizer.responses.UNAUTHORIZED.response(message=formatted_msg)
+                # authorizer.response.data = authorizer.user_creds._errors
+                return authorizer.response
+            return await func(*args, **kwargs) if is_async else func(*args, **kwargs)
+        return wrapper
+
+    return decorator
+
+@auth_required()
+def test_auth(request: PyonirRequest, app: PyonirApp) -> 'AuthResponse':
+    authorizer = Auth(request, app)
+    authorizer.response = authorizer.responses.SUCCESS if authorizer.user else authorizer.responses.UNAUTHORIZED
+    if authorizer.user:
+        authorizer.response.data = authorizer.user
+    return authorizer.response
+
+def generate_id(from_email=None) -> str:
+    """Generates a unique identifier based on the from_email address."""
     import uuid
-    if email is None:
+    if from_email is None:
         return str(uuid.uuid1())
-    (name, domain) = email.strip().split('@')
+    (name, domain) = from_email.strip().split('@') if '@' in from_email else (from_email, 'no_domain_specified')
     ext = domain.split('.').pop()
     return f"{ext}_{name}@{domain.replace('.' + ext, '')}"
 
@@ -53,18 +129,7 @@ def check_pass(protected_hash: str, password_str: str) -> bool:
         print(f"Password verification failed: {e}")
         return False
 
-def encode_jwt(jwt_data):
-    """Returns base64 encoded jwt token"""
-    import jwt
-    from pyonir import Site
-    try:
-        enc_jwt = jwt.encode(jwt_data, Site.SECRET_SAUCE, algorithms=['HS256'])
-        return enc_jwt
-    except Exception as e:
-        print(f"Something went wrong refreshing jwt token. {e}")
-        raise
-
-def decode_jwt(jwt_token):
+def decode_jwt(jwt_token) -> dict | None:
     """Returns decoded jwt object"""
     from pyonir import Site
     import jwt
@@ -72,7 +137,6 @@ def decode_jwt(jwt_token):
         return jwt.decode(jwt_token, Site.SECRET_SAUCE, algorithms=['HS256'])
     except Exception as e:
         print(f"{__name__} method - {str(e)}: {type(e).__name__}")
-        return False
 
 def auth_decode(authorization_header: str) -> UserCredentials | None:
     """Decodes the authorization header to extract user credentials."""
@@ -92,23 +156,19 @@ def auth_decode(authorization_header: str) -> UserCredentials | None:
         pass
     return UserCredentials(email, password)
 
-def sign_up(request: PyonirRequest, app: PyonirApp) -> 'AuthResponse':
-    """Registers a new user with the provided credentials."""
-    authorizer = Auth(request, app)
-    authorizer.create_email_account()
-    if request.redirect_to:
-        authorizer.session['sign_up'] = authorizer.response.to_json()
-    return authorizer.response
+def format_time_remaining(time_remaining):
+    # Format time in human-readable way
+    mins, secs = divmod(int(time_remaining), 60)
+    hrs, mins = divmod(mins, 60)
 
-def sign_in(request: PyonirRequest, app: PyonirApp) -> 'AuthResponse':
-    """Logs in a user with the provided credentials."""
-    authorizer = Auth(request, app)
-    authorizer.create_signin()
-    authorizer.session['sign_in'] = authorizer.response.to_json()
-    return authorizer.response
+    if hrs:
+        time_str = f"{hrs}h {mins}m {secs}s"
+    elif mins:
+        time_str = f"{mins}m {secs}s"
+    else:
+        time_str = f"{secs}s"
+    return time_str
 
-def sign_out(request: PyonirRequest) -> None:
-    raise NotImplementedError()
 
 def client_location(request: PyonirRequest) -> dict | None:
     """Returns the requester's location information."""
@@ -122,6 +182,7 @@ def client_location(request: PyonirRequest) -> dict | None:
         return j
     except Exception:
         return None
+
 
 class AuthResponse(PyonirRestResponse):
     """
@@ -139,7 +200,6 @@ class AuthResponse(PyonirRestResponse):
         )
 
 
-
 class AuthResponses:
     """Enum-like class that provides standardized authentication responses."""
 
@@ -149,11 +209,23 @@ class AuthResponses:
     )
     """AuthResponse: Indicates an authentication error due to invalid credentials or bad input (HTTP 400)."""
 
+    INVALID_CREDENTIALS = AuthResponse(
+        message="The credentials provided is incorrect.",
+        status_code=401
+    )
+    """AuthResponse: Indicates failed credential authentication (HTTP 401)."""
+
     SUCCESS = AuthResponse(
         message="Authentication successful",
         status_code=200
     )
     """AuthResponse: Indicates successful authentication (HTTP 200)."""
+
+    ACTIVE_SESSION = AuthResponse(
+        message="Authentication successful. session is active",
+        status_code=200
+    )
+    """AuthResponse: Active authentication session (HTTP 200)."""
 
     UNAUTHORIZED = AuthResponse(
         message="Unauthorized access",
@@ -161,13 +233,19 @@ class AuthResponses:
     )
     """AuthResponse: Indicates missing or invalid authentication credentials (HTTP 401)."""
 
+    NO_ACCOUNT_EXISTS = AuthResponse(message="Account not found.", status_code=409)
+    """Error: The requested action cannot be completed because the user does not have an account."""
+
+    USER_SIGNED_OUT = AuthResponse(message="User signed out", status_code=200)
+    """AuthResponse: User signed out"""
+
     ACCOUNT_EXISTS = AuthResponse(message="Account already exists", status_code=409)
     """AuthResponse: Indicates that the user account already exists (HTTP 409)."""
 
     SOMETHING_WENT_WRONG = AuthResponse(message="Something went wrong, please try again later", status_code=422)
     """AuthResponse: Indicates a general error occurred during authentication (HTTP 422)."""
 
-    TOO_MANY_REQUESTS = AuthResponse(message="Too many requests", status_code=429)
+    TOO_MANY_REQUESTS = AuthResponse(message="Too many requests. Try again later", status_code=429)
     """AuthResponse: Indicates too many requests have been made, triggering rate limiting (HTTP 429)."""
 
     def __init__(self, responses: dict = None) -> None:
@@ -179,6 +257,55 @@ class AuthResponses:
             setattr(self, key.upper(), AuthResponse(message=message, status_code=status_code))
 
 
+class AuthSecurity:
+    """Handles authentication security settings for a web request."""
+
+    def __init__(self, authorizer: "Auth") -> None:
+        self._is_authorized = None
+        self._is_authenticated = None
+        self._accepted: bool | None = None
+        self.type: str = ""  # Allowed values: basic | oauth2 | saml
+        self.redirect_to: str = ""
+        self.role: str | None = None
+        self.perms: list[PermissionLevel] = []
+
+        definitions = getattr(authorizer.request.file, "data", {}).get("@auth") \
+            if getattr(authorizer.request, "file", None) else None
+
+        if definitions:
+            for key, value in definitions.items():
+                if key=='role': key = key.upper()
+                setattr(self, key, value)
+
+    @property
+    def is_authenticated(self) -> bool:
+        return self._is_authenticated
+
+    @property
+    def is_authorized(self) -> bool:
+        return self._is_authorized
+
+    @property
+    def accepted(self) -> bool:
+        return self._accepted
+
+    @property
+    def is_required(self) -> bool:
+        return bool(self.type)
+
+    def check(self, authorizer: "Auth") -> 'AuthSecurity':
+        """Checks if route requires authentication and if the user is authorized."""
+        if not self.is_required: return None # nothing is required here
+        requires_authentication = self.type in {"basic", "oauth2", "saml"}
+        route_perms = getattr(Roles, self.role) if self.role else None
+        has_authentication = requires_authentication and authorizer.user is not None
+        has_authorization = has_authentication and route_perms and authorizer.user.has_perms(route_perms)
+        self._accepted = has_authorization or has_authentication
+        self._is_authorized = has_authorization
+        self._is_authenticated = has_authentication
+        return self
+
+
 class Auth:
     """Handles user authentication and account management."""
     SIGNIN_ATTEMPTS = 3
@@ -187,78 +314,154 @@ class Auth:
     LOCKOUT_TIME = 300
     """Time in seconds to lock the account after exceeding sign-in attempts."""
 
-    def __init__(self, request: PyonirRequest, app: PyonirApp, from_sso: bool = False):
+    user_model = User
+    """User model used for authentication, defaults to User class."""
+
+    def __init__(self, request: PyonirRequest, app: PyonirApp):
         self.app: PyonirApp = app
         self.request: PyonirRequest = request
-        self.user_creds: UserCredentials = self.get_user_creds(from_sso)
-        """User credentials extracted from the request."""
 
-        self.request_token = self.request.headers.get('csrf_token', self.request.form.get('csrf_token')) or csrf_token(request.server_request)
+        # self.security: AuthSecurity = AuthSecurity(self)
+        self.request_token = self.request.headers.get('X-CSRF-Token', self.request.form.get('csrf_token'))
         """CSRF token for the request, used to prevent cross-site request forgery."""
-
-        self.responses = AuthResponses(request.file.data.get('responses'))
-        """AuthResponses: Provides standardized authentication responses. Overrides can be provided via request data."""
 
         self.response: AuthResponse | None = None
         """AuthResponse: The current authentication response."""
 
+        self.user_creds: UserCredentials | None = self.get_user_creds()
+        """User credentials extracted from the request."""
+
         self.user: User | None = None
         """"User: The authenticated user object."""
+
+        if self.user_creds and self.user_creds.has_session:
+            self.user = self.get_auth_user()
+
+        self.app.TemplateEnvironment.globals['user'] = self.user
+
+
+    @property
+    def security(self) -> AuthSecurity:
+        return AuthSecurity(self)
 
     @property
     def session(self) -> dict | None:
         """Returns the session object from the request."""
         return self.request.server_request.session if self.request.server_request else None
 
-    @validate_credentials
-    def create_signin(self):
+    @property
+    def responses(self) -> AuthResponses:
+        """AuthResponses: Provides standardized authentication responses. Overrides can be provided via request data."""
+        return AuthResponses(self.request.file.data.get('responses') if self.request.file else None)
+
+    def create_jwt(self, user_id: str = None, user_role: str = '', exp_time=None):
+        """Returns session jwt object based on profile info"""
+        import datetime
+        exp_time = exp_time or self.LOCKOUT_TIME
+        exp_in = (datetime.datetime.now() + datetime.timedelta(minutes=exp_time)).timestamp()
+        user_jwt = {
+            "sub": user_id or self.user.id,
+            "role": user_role or self.user.role,
+            "remember_for": exp_time,
+                "iat": datetime.datetime.now(),
+                "iss": self.app.domain,
+                "exp": exp_in
+            }
+        jwt_token = self._encode_jwt(user_jwt)
+        return jwt_token
+
+    def _encode_jwt(self, jwt_data: dict):
+        """Returns base64 encoded jwt token encoded with pyonir app secret"""
+        import jwt
+        try:
+            enc_jwt = jwt.encode(jwt_data, self.app.SECRET_SAUCE, algorithm='HS256')
+            return enc_jwt
+        except Exception as e:
+            print(f"Something went wrong refreshing jwt token. {e}")
+            raise
+
+    def create_signin(self, user: User = None):
         """Signs in a user account based on the provided credentials."""
-        if self.signin_attempt_exceeded():
-            self.session['locked_until'] = time.time() + self.LOCKOUT_TIME
-            self.response = self.responses.TOO_MANY_REQUESTS
-            return False
-        self.signin_log_attempt()
-        self.response = self.responses.ERROR
-        user = self.query_account()
-        self.user = user
+        if self.user:
+            self.response = self.responses.ACTIVE_SESSION
+            return
+        if self.signin_has_exceeded(): return
+        self.response = self.responses.SOMETHING_WENT_WRONG
+
+        user = self.query_account() if not user else user
+        if not user:
+            self.response = self.responses.NO_ACCOUNT_EXISTS
         if user:
-            salt = self.app.configs.env.salt
-            requested_passw = Auth.harden_password(salt, self.user_creds.password, user.auth_token)
-            has_valid_creds = Auth.verify_password(user.password, requested_passw)
-            if has_valid_creds:
-                user_login_location = client_location(self.request)
-                user.signin_locations.append(user_login_location)
-                # update auth token after successful login for better security
-                user.auth_token = self.request_token
-                user.password = self.hash_password()
+            if user.auth_from == 'oauth2':
+                # TODO: handle checking oauth
+                user_jwt = self.create_jwt(user.id, user.role)
+                self.log_user_location(user)
                 user.save_to_file(user.file_path)
-                user.save_to_session(self.request, user.id)
-                self.response = self.responses.SUCCESS
+                user.save_to_session(self.request, value=user_jwt)
                 pass
 
-    @validate_credentials
-    def create_email_account(self) -> bool:
-        """Creates a new user account based on the provided credentials onto the filesystem."""
-        user_creds: UserCredentials = self.user_creds
-        hashed_password = self.hash_password()
-        new_user = User(email=user_creds.email, password=hashed_password, auth_token=self.request_token)
-        self.user = new_user
-        return self.create_profile(new_user)
+            elif user.auth_from == 'basic':
+                salt = self.app.configs.env.salt
+                requested_passw = Auth.harden_password(salt, self.user_creds.password, user.auth_token)
+                has_valid_creds = Auth.verify_password(user.password, requested_passw)
+                if has_valid_creds:
+                    user_jwt = self.create_jwt(user.id, user.role)
+                    # update csrf token after successful login for better security
+                    user.auth_token = csrf_token(self.request.server_request)
+                    user.password = self.hash_password(self.user_creds.password, with_token=user.auth_token)
+                    user.save_to_session(self.request, key='csrf_token', value=user.auth_token)
+                    user.save_to_session(self.request, value=user_jwt)
+                    self.log_user_location(user)
+                    user.save_to_file(user.file_path)
 
 
-    def create_profile(self, user: User) -> bool:
+                    self.response = self.responses.SUCCESS
+                    self.response.data['auth_token'] = user_jwt
+                    self.response.data['access_token'] = user.auth_token
+                else:
+                    self.response = self.responses.INVALID_CREDENTIALS
+
+    def log_user_location(self, user: User):
+        """logs user signin location"""
+        new_location = client_location(self.request)
+        match_keys = ["ip", "device"]
+        locations = user.signin_locations
+        # Find matches using list comprehension
+        matches = [loc for loc in locations if all(loc[k] == new_location[k] for k in match_keys)]
+
+        if matches:
+            matches[0]["signin_count"] = matches[0].get("signin_count", 0) + 1
+        else:
+            new_loc = dict(new_location)
+            new_loc["signin_count"] = 1
+            locations.append(new_loc)
+
+
+    def refresh(self) -> bool:
+        new_jwt = self.create_jwt()
+        self.user.save_to_session(self.request, value=new_jwt)
+
+    def create_profile(self, user: User = None) -> bool:
         """Creates a user profile and saves it to the filesystem."""
+        if self.user:
+            self.response = self.responses.ACTIVE_SESSION
+            return False
+
+        user_token = csrf_token(self.request.server_request)
+        if not user:
+            hashed_password = self.hash_password(self.user_creds.password, with_token=user_token)
+            user = User(email=self.user_creds.email, password=hashed_password, auth_token=user_token)
         uid = generate_id(user.email)
         user_account_path = os.path.join(self.app.contents_dirpath, 'users', uid, 'profile.json')
+        user.id = uid
+        user.file_path = user_account_path
         if os.path.exists(user_account_path):
             self.response = self.responses.ACCOUNT_EXISTS
             return False
 
-        user_login_location = client_location(self.request)
-        user.signin_locations.append(user_login_location)
-        user.id = uid
+        self.log_user_location(user)
 
-        created = user.save_to_file(os.path.join(user_account_path))
+        created = user.save_to_file(user_account_path)
         if created:
             formated_msg = self.responses.SUCCESS.message.format(user=user, request=self.request)
             self.response = self.responses.SUCCESS.response(formated_msg)
@@ -267,39 +470,71 @@ class Auth:
             print(f"Failed to create user account at {user_account_path}")
         return created
 
-    def signin_log_attempt(self):
+    def signin_has_exceeded(self):
         """Logs a user login attempt."""
         if not self.request.server_request: return
+        time_remaining, lockout_expired = self.signin_lockout_expired()
+        max_attempts = self.signin_attempt_exceeded()
+        if max_attempts and not time_remaining:
+            # start the lock out timer
+            self.session['locked_until'] = time.time() + self.LOCKOUT_TIME
+
+        if max_attempts and time_remaining:
+            print("LOCKOOUT FOR TOO MANY REQUREST")
+            self.response = self.responses.TOO_MANY_REQUESTS
+            return True
         current_session = self.session.get('login_attempts', 0)
         self.session['login_attempts'] = current_session + 1
+        return False
+
+    def signin_lockout_expired(self) -> Tuple[str, bool]:
+        """Checks if lockout time has expired to allow signin"""
+        if not self.request.server_request: return '', False
+        lock_timeout = self.session.get('locked_until', 0)
+        if lock_timeout:
+            now = time.time()
+            time_remaining = lock_timeout - now
+            fmt_remaining = format_time_remaining(time_remaining)
+            print(fmt_remaining)
+            if time_remaining <= 0:
+                print("time expired!!")
+                self.session['login_attempts'] = 0
+                self.session.pop('locked_until')
+                return fmt_remaining, True
+            return fmt_remaining, False
+        return '', False
 
     def signin_attempt_exceeded(self) -> bool:
         """Checks if the user has exceeded the maximum number of sign-in attempts."""
         if not self.request.server_request: return False
-        lock_timeout = self.session.get('locked_until', 0)
-        has_exceeded = self.session.get('login_attempts', 0) >= self.SIGNIN_ATTEMPTS
-        if lock_timeout and time.time() > lock_timeout:
-            self.session['login_attempts'] = 0
-            has_exceeded = False
-        return has_exceeded
+        return self.session.get('login_attempts', 0) >= self.SIGNIN_ATTEMPTS
 
-    def get_user_creds(self, from_sso = False) -> UserCredentials:
-        """Returns user credentials from request"""
-        if from_sso:
-            return UserCredentials.sso()
-        authorization_header = self.request.headers.get('authorization')
-        auth_creds = auth_decode(authorization_header)
-        if not auth_creds: auth_creds = UserCredentials(email=self.request.form.get('email'), password=self.request.form.get('password',''))
-        return auth_creds
-
-    def query_account(self) -> User | None:
-        """Queries the user account based on the provided credentials."""
-        uid = generate_id(self.user_creds.email)
-        user_account_path = os.path.join(self.app.contents_dirpath, 'users', uid, 'profile.json')
-        if not os.path.exists(user_account_path):
-            self.response = self.responses.ERROR
+    def get_auth_user(self) -> User | None:
+        if not self.user_creds:
+            self.response = self.responses.UNAUTHORIZED
             return None
-        user_account = User.from_file(user_account_path, app_ctx=self.app.app_ctx)
+        session_user = decode_jwt(self.user_creds.token)
+        if not session_user:
+            self.response = self.responses.UNAUTHORIZED
+            return None
+        # self.user_creds.email = session_user.get('sub')
+        user = self.query_account(user_email=session_user.get('sub'))
+        # update jwt expiration time
+        user.save_to_session(self.request, value=self.create_jwt(user.id, user.role))
+        self.response = self.responses.ACTIVE_SESSION
+        return user
+
+    def get_user_creds(self) -> UserCredentials:
+        """Returns authenticated user from request header token or session"""
+        authorization_header = self.request.headers.get('authorization')
+        auth_creds = UserCredentials.from_header(authorization_header) if authorization_header else UserCredentials.from_session(self.session)
+        return UserCredentials.from_request(self.request) if not auth_creds else auth_creds
+
+    def query_account(self, user_email: str = None) -> User | None:
+        """Queries the user account based on the provided credentials."""
+        uid =  generate_id(user_email or self.user_creds.email) if not self.user_creds.token or not user_email else user_email
+        user_account_path = os.path.join(self.app.contents_dirpath, 'users', uid, 'profile.json')
+        user_account = User.from_file(user_account_path, app_ctx=self.app.app_ctx) if os.path.exists(user_account_path) else None
         return user_account
 
     def send_email(self):
@@ -310,12 +545,17 @@ class Auth:
         """Checks if the user is authenticated."""
         raise NotImplementedError()
 
-    def hash_password(self) -> str:
+    def hash_password(self, password: str = None, with_token: str = None) -> str:
+        """Rehashes the user's password with the current site salt and request token."""
+        salt = self.app.configs.env.salt
+        return hash_password(self.harden_password(salt, password, with_token or self.request.session_token))
+
+    def _hash_password(self, with_token: str = None) -> str:
         """Rehashes the user's password with the current site salt and request token."""
         if not self.user_creds or not self.user_creds.password:
             return ''
         salt = self.app.configs.env.salt
-        return hash_password(self.harden_password(salt, self.user_creds.password, self.request_token))
+        return hash_password(self.harden_password(salt, self.user_creds.password, with_token or self.request.session_token))
 
     @staticmethod
     def verify_password(encrypted_pwd, input_password) -> bool:
@@ -328,3 +568,130 @@ class Auth:
         if not site_salt or not password or not token:
             raise ValueError("site_salt, password, and token must be provided")
         return f"{site_salt}${password}${token}"
+
+
+class AuthService(ABC):
+    """
+    Abstract base class defining authentication and authorization route resolvers,
+    including role and permission checks.
+    """
+
+    @abstractmethod
+    async def sign_up(self, request: PyonirRequest) -> AuthResponse:
+        """
+        Handles the user sign-up process for the authentication system.
+        ---
+        @resolvers.POST:
+            call: {method_import_path}
+            responses:
+                account_exists:
+                    message: An account with this email already exists. Please use a different email or <a href="/sign-in">Sign In</a>.
+                success:
+                    status_code: 200
+                    message: Account created successfully with {user.email}.Try signing in to your account. here <a href="/sign-in">Sign In</a>.
+                error:
+                    status_code: 400
+                    message: Validation errors occurred. {user.errors}
+                unauthorized:
+                    status_code: 401
+                    message: Unauthorized access. Please log in.
+        ---
+        Args:
+            request (PyonirRequest):
+                The incoming request object containing authentication data,
+                including `authorizer` with `user_creds` (email and password) and
+                a `response` object to be returned to the client.
+
+        Returns:
+            AuthResponse:
+                An authentication response containing status, message, and
+                additional data (e.g., user ID or error details).
+        """
+        authorizer = request.auth
+        # perform model validation on request
+        signin_creds = UserSignIn(email=authorizer.user_creds.email, password=authorizer.user_creds.password)
+        if signin_creds.is_valid():
+            authorizer.create_profile()
+            authorizer.request.add_flash('sign_up', authorizer.response.to_dict())
+        return authorizer.response
+
+    @abstractmethod
+    async def sign_in(self, request: PyonirRequest) -> AuthResponse:
+        """
+        Authenticate a user and return a JWT or session token.
+        ---
+        @resolvers.POST:
+            call: {method_import_path}
+            responses:
+                success:
+                    status_code: 200
+                    message: You have signed in successfully.
+        ---
+        :param request: PyonirRequest - The web request
+        :return: AuthResponse - A JWT or session token if authentication is successful, otherwise None.
+        """
+        authorizer = request.auth
+        authorizer.create_signin()
+        authorizer.request.add_flash('sign_in', authorizer.response.to_dict())
+        return authorizer.response
+
+    @abstractmethod
+    async def sign_out(self, request: PyonirRequest) -> AuthResponse | None:
+        """
+        Invalidate a user's active session or token.
+        ---
+        @resolvers.GET:
+            call: {call_path}
+            redirect: /sign-in
+        ---
+        :param request: PyonirRequest - The web request
+        :return: bool - True if sign_out succeeded, otherwise False.
+        """
+        authorizer = request.auth
+        authorizer.session.clear()
+        return authorizer.responses.USER_SIGNED_OUT
+
+    @abstractmethod
+    async def refresh_token(self, request: PyonirRequest) -> Optional[str]:
+        """
+        Refresh an expired access token.
+
+        :param request: PyonirRequest - The web request.
+        :return: Optional[str] - A new access token if successful, otherwise None.
+        """
+        authorizer = request.auth
+        authorizer.refresh()
+        return authorizer.response
+
+    @abstractmethod
+    async def verify_authority(self, token: str, permission: str) -> bool:
+        """
+        Verify if the provided token grants the requested permission.
+
+        :param token: str - The access token to check.
+        :param permission: str - The permission to validate.
+        :return: bool - True if the user has the permission, otherwise False.
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    async def check_role(self, token: str, role: str) -> bool:
+        """
+        Check if the user has the specified role.
+
+        :param token: str - The access token.
+        :param role: str - The required role.
+        :return: bool - True if the user has the role, otherwise False.
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    async def get_current_user(self, token: str) -> Optional[dict]:
+        """
+        Retrieve the current user's details from a token.
+
+        :param token: str - The authentication token.
+        :return: Optional[dict] - A dictionary of user details, or None if invalid.
+        """
+        raise NotImplementedError
+

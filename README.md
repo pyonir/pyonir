@@ -1,6 +1,6 @@
 # Pyonir Web Framework
 
-A static website generator and flat file web framework written in Python.
+Pyonir is a static site generator and flat file web framework written in Python. It allows you to create dynamic websites using simple markdown files and a powerful plugin architecture.
 
 ### Install Pyonir
 
@@ -16,21 +16,20 @@ Manually create a `main.py` file from an empty directory with the following valu
 **Example**
 ```markdown
 your_project/
-    └─ main.py
+    |─ __init__.py # makes this project a package
+    └─ main.py     # entry point to your application
 ```
 
 **Example main.py file**
 ```python
 import pyonir
 app = pyonir.init(__file__)
-
-app.run()
 ```
 
 or scaffold a demo web application from the cli:
 
 ```bash
-> pyonir-create
+> pyonir init
 ```
 
 This will generate the following directory structure
@@ -38,9 +37,16 @@ This will generate the following directory structure
 ```md
 your_project/
     ├─ backend/
+    |  └─ README.md
+    |  └─ __init__.py
     ├─ contents/
+    |  ├─ pages/
+    |     └─ index.md
     ├─ frontend/
+    |  └─ README.md
+    |  └─ pages.html
     └─ main.py
+    └─ __init__.py
 ```
 
 ### Configure Contents
@@ -77,15 +83,50 @@ app = pyonir.init(__file__)
 app.generate_static_website()
 ```
 
+### Configure Route Controllers
+
+Configuration based routing defined at startup. All routes live in one place — easier for introspection or auto-generation.
+This allows flexibility for functions to be access from virtual routes and registered at startup.
+
+```python
+def demo_route(user_id: int = 5):
+    # perform logic using the typed arguments passed to this function on request
+    return f"user id is {user_id}"
+
+routes: list['PyonirRoute'] = [
+    ['/user/{user_id:int}', demo_route, ["GET"]],
+]
+
+# Define an endpoint routers
+router: 'PyonirRouters' = [
+    ('/api/demo', routes)
+]
+```
+
 ### Run Web server
 
-Pyonir uses the starlette webserver by default.
+Pyonir uses the starlette webserver by default to process web request. Below is an example of how to install a route
+handler.
 
 ```python
 import pyonir
+
+def demo_route(user_id: int = 5):
+    # perform logic using the typed arguments passed to this function on request
+    return f"user id is {user_id}"
+
+routes: list['PyonirRoute'] = [
+    ['/user/{user_id:int}', demo_route, ["GET"]],
+]
+
+# Define an endpoint routers
+router: 'PyonirRouters' = [
+    ('/api/demo', routes)
+]
+
 app = pyonir.init(__file__)
 
-app.run(routes=[])
+app.run(routes=router)
 ```
 
 ### Configure Virtual Page Routes
@@ -104,7 +145,7 @@ virtual routes can return the following response types:
 
 **JSON response** 
 
-any pattern that begins with the default API url are automatically returning JSON.
+any pattern that begins with the default API name are automatically returning JSON.
 
 ```md
 /api/some_data/{data_id:str}: 
@@ -146,25 +187,12 @@ Any scalar values will be passed as the page contents value. Only GET requests p
 
 ```md
 /api/ws/user/chat:
-    GET.call: path/to/websocket.py#module
+    GET.call: path.to.websocket.module
     GET.headers.accept: text/event-stream
 ```
 
 
-### Configure Route Controllers
 
-Configuration based routing defined at startup. All routes live in one place — easier for introspection or auto-generation.
-This allows flexibility for functions to be access from virtual routes and registered at startup.
-
-```python
-def find_user(user_id: int):
-    # perform logic using the typed arguments passed to this function on request
-    pass
-
-routes: list[PyonirRoute] = [
-    ['/user/{user_id:int}', find_user, ["GET"]],
-]
-```
 
 ### Configure Frontend
 

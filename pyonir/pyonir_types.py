@@ -2,6 +2,7 @@ from dataclasses import dataclass, field
 import os
 from typing import Optional, Union, Callable, List, Tuple, Iterator
 
+from jinja2 import Environment
 from starlette.applications import Starlette
 
 TEXT_RES: str = 'text/html'
@@ -69,23 +70,6 @@ class ParselyPagination:
         return iter(self.items)
 
 
-@dataclass
-class Theme:
-    _mapper = {'theme_dirname': 'file_dirname', 'theme_dirpath': 'file_dirpath'}
-    name: str
-    theme_dirname: str = ''
-    theme_dirpath: str = ''
-    static_dirname: str = 'static' # path to serve theme's static assets (css,js,images) used to style the UI
-    templates_dirname: str = 'layouts' # path to serve theme's template files used to rendering HTML pages
-
-    @property
-    def static_dirpath(self):
-        """directory to serve static theme assets"""
-        return os.path.join(self.theme_dirpath, self.static_dirname)
-
-    @property
-    def jinja_template_path(self):
-        return os.path.join(self.theme_dirpath, self.templates_dirname)
 
 class PyonirOptions:
     contents_dirpath: str  = '' # base directory path for markdown files
@@ -102,22 +86,6 @@ class PyonirHooks(str):
     AFTER_INIT = 'AFTER_INIT'
     ON_REQUEST = 'ON_REQUEST'
     ON_PARSELY_COMPLETE = 'ON_PARSELY_COMPLETE'
-
-class PyonirServer(Starlette):
-    ws_routes = []
-    sse_routes = []
-    auth_routes = []
-    endpoints = []
-    url_map = {}
-    resolvers = {}
-    services = {}
-    paginate: Pagination = Pagination()
-
-    def response_renderer(self): pass
-    def serve_redirect(self): pass
-    def create_endpoint(self): pass
-    def create_route(self): pass
-    def serve_static(self): pass
 
 
 class Parsely:
@@ -154,6 +122,10 @@ class Parsely:
 
     async def process_response(self, pyonir_request): pass
 
+    def output_html(self, pyonir_request): pass
+
+    def output_json(self): pass
+
 
 class PyonirCollection:
     SortedList: list
@@ -161,22 +133,32 @@ class PyonirCollection:
     dict_to_class: callable
     collections: list[Parsely]
 
+class Theme:
+    name: str
+    theme_dirname: str
+    theme_dirpath: str
+    static_dirname: str
+    templates_dirname: str
+    static_dirpath: str
+
 class PyonirThemes:
     """Represents sites available and active theme(s) within the frontend directory."""
-    themes_dirpath: str # directory path to available site themes
-    _available_themes: PyonirCollection | None # collection of themes available in frontend/themes directory
+    themes_dirpath: str
+    """Path to the themes directory, typically 'frontend/themes'."""
+    available_themes: dict[str, Theme] | None
+    """Dictionary of available themes, keyed by theme name."""
+    active_theme: Theme | None
+    """Currently active theme, if any."""
 
-    @property
-    def active_theme(self) -> Theme | None: pass
+class TemplateEnvironment(Environment):
 
-    def _get_available_themes(self) -> PyonirCollection | None: pass
-
-class TemplateEnvironment:
     themes: PyonirThemes
+    get_template: callable
 
 @dataclass
 class PyonirRestResponse:
     """Represents a REST response from the server."""
+    
     status_code: int = 000
     """HTTP status code of the response, e.g., 200 for success, 404 for not found."""
 
@@ -186,17 +168,78 @@ class PyonirRestResponse:
     data: dict = field(default_factory=dict)
     """Response data, typically a dictionary containing the response payload."""
 
-    def to_json(self) -> dict:
-        """Converts the response to a JSON serializable dictionary."""
-        return self.__dict__ if isinstance(self, PyonirRestResponse) else {
+    _cookies: list = field(default_factory=list)
+    _html: str = None
+    _stream: any = None
+    _media_type: str = None
+    _server_response: object = None
+    _headers: dict = field(default_factory=dict)
+
+    def to_dict(self) -> dict:
+        return {
             'status_code': self.status_code,
             'message': self.message,
             'data': self.data
         }
 
+    def to_json(self) -> str:
+        """Converts the response to a JSON serializable dictionary."""
+        from .utilities import json_serial
+        import json
+        return json.dumps(self.to_dict(), default=json_serial)
+
+    def render(self):
+        return self._server_response
+
+    def set_header(self, key, value):
+        """Sets header values"""
+        self._headers[key] = value
+
+    def set_json(self, value: dict):
+        # json = request.file.output_json()
+        self.data = value
+    
+    def set_html(self, value: str):
+        """Sets the html response value"""
+        # html = request.file.output_html(request)
+        self._html = value
+
+    def set_server_response(self):
+        """Renders the starlette web response"""
+        from starlette.responses import Response, StreamingResponse
+
+        if self._media_type == EVENT_RES and self._stream:
+            return StreamingResponse(content=self._stream, media_type=EVENT_RES)
+
+        content = self._html if self._html else self.to_json()
+        media_type = TEXT_RES if self._html else JSON_RES
+        self._server_response = Response(content=content, media_type=media_type)
+        if self._headers:
+            self._server_response.headers.update(self._headers)
+        # if self._cookies:
+        #     for cookie in self._cookies:
+        #         self._server_response.set_cookie(**cookie)
+
+
+    def set_media(self, media_type: str):
+        self._media_type = media_type
+
+    def set_cookie(self, cookie: dict):
+        """
+        :param cookie:
+            key="access_token"
+            value=jwt_token,
+            httponly=True,
+            secure=True,
+            samesite="strict",
+            max_age=3600,
+        :return:
+        """
+        self._cookies.append(cookie)
+
 class PyonirRequest:
 
-    server_response: any
+    server_response: PyonirRestResponse
     file: Optional[Parsely]
     server_request: Optional['StarletteRequest']
     raw_path: str
@@ -211,6 +254,7 @@ class PyonirRequest:
     model: str
     is_home: bool
     is_api: bool
+    is_static: bool
     form: dict
     files: list
     ip: str
@@ -220,6 +264,8 @@ class PyonirRequest:
     browser :str
     type: Union[TEXT_RES, JSON_RES, EVENT_RES]
     status_code: int
+    auth: 'Auth'
+    session_token: Optional[str]
     redirect_to: Optional[str]
     """URL to redirect to after processing the request."""
 
@@ -246,6 +292,21 @@ class PyonirRequest:
     @staticmethod
     def get_params(url):pass
 
+class PyonirServer(Starlette):
+    ws_routes = []
+    sse_routes = []
+    auth_routes = []
+    endpoints = []
+    url_map = {}
+    resolvers = {}
+    services = {}
+    paginate: Pagination = Pagination()
+    request: PyonirRequest = None
+    def response_renderer(self): pass
+    def serve_redirect(self, url: str): pass
+    def create_endpoint(self): pass
+    def create_route(self): pass
+    def serve_static(self): pass
 
 class PyonirBase:
     PAGINATE_LIMIT: str
@@ -274,11 +335,23 @@ class PyonirBase:
 
 
 class PyonirApp(PyonirBase):
+
+    PUBLIC_ASSETS_DIRNAME: str
+    FRONTEND_ASSETS_DIRNAME: str
+    uploads_route: str
+
+    frontend_route: str
+    assets_route: str
+
+    ssl_key_file: str | None
+    ssl_cert_file: str | None
+
     SECRET_SAUCE: str
     configs: object
     request_paths: str
     nginx_config_filepath: str
     unix_socket_filepath: str
+    static_assets_dirpath: str
     ssg_dirpath: str
     logs_dirpath: str
     backend_dirpath: str
@@ -292,11 +365,11 @@ class PyonirApp(PyonirBase):
     jinja_filters_dirpath: str
     app_ctx: str
     env: str
-    is_dev: str
+    is_dev: bool
     host: str
     port: str
     protocol: str
-    is_secure: str
+    is_secure: bool
     domain: str
     parse_jinja: callable
     parse_pyformat: callable
@@ -306,15 +379,19 @@ class PyonirApp(PyonirBase):
     run_plugins: callable
     run_async_plugins: callable
     setup_configs: callable
+    generate_resolvers: callable
     run: callable
     pyonir_path: type
     endpoint: str
+    name: str
     app_dirpath: str
     app_name: str
     app_account_name: str
     TemplateEnvironment: TemplateEnvironment
+    themes: PyonirThemes
     server: PyonirServer
-    available_plugins: dict[str, callable]
+    plugins_installed: dict[str, callable]
+    plugins_activated: dict[str, callable]
 
 class PyonirPlugin(PyonirBase):
 

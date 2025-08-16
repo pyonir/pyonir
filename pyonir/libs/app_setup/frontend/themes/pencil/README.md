@@ -1,6 +1,5 @@
 name: Pencil theme
 author: Pablo Pyonir
-static: public
 ===
 # Pencil
 

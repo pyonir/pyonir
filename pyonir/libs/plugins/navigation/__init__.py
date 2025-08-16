@@ -53,20 +53,20 @@ class Navigation(PyonirPlugin):
 
 
     def build_plugins_navigation(self, app: PyonirApp):
-        if app.available_plugins:
-            for plgn in app.available_plugins:
+        if app.plugins_activated:
+            for plgn in app.plugins_activated:
+                if isinstance(plgn, Navigation):continue
                 if not hasattr(plgn, 'pages_dirpath'): continue
                 self.build_navigation(plgn)
                 pass
 
     def build_navigation(self, app: PyonirApp):
-        from pyonir.utilities import get_all_files_from_dir
-        from pyonir import Site
+        from pyonir.utilities import query_files
         if app is None: return None
         assert hasattr(app, 'pages_dirpath'), "Get menus 'app' parameter does not have a pages dirpath property"
         menus = {}
         submenus = {}
-        file_list = get_all_files_from_dir(app.pages_dirpath, app_ctx=app.app_ctx, entry_type=Menu)  # return files using menu schema model
+        file_list = query_files(app.pages_dirpath, app_ctx=app.app_ctx, model=Menu)
 
         for menu in file_list:
             # menu = self.schemas.menu.map_input_to_model(pg)

@@ -6,7 +6,6 @@ from starlette.requests import Request as StarletteRequest
 
 from pyonir.pyonir_types import PyonirServer, Theme, PyonirHooks, Parsely, ParselyPagination, AppRequestPaths, AppCtx, \
     PyonirRouters, RoutePath, PyonirRestResponse
-from pyonir.utilities import json_serial
 
 # Environments
 DEV_ENV:str = 'LOCAL'
@@ -31,13 +30,13 @@ class PyonirSchema:
 
     def __init__(self):
         # Each instance gets its own validation error list
-        self.errors: list[str] = []
+        self._errors: list[str] = []
         self._deleted: bool = False
         self._private_keys: list[str] = []
 
     def is_valid(self) -> bool:
         """Returns True if there are no validation errors."""
-        return not self.errors
+        return not self._errors
 
     def validate(self):
         """
@@ -57,7 +56,7 @@ class PyonirSchema:
         Ensures validation runs for each instance.
         """
         # Reset errors for new instance
-        self.errors = []
+        self._errors = []
         self.validate()
 
     # --- Database helpers ---
@@ -66,9 +65,9 @@ class PyonirSchema:
         from pyonir.utilities import create_file
         return create_file(file_path, self.to_json(obfuscate=False))
 
-    def save_to_session(self: T, request: PyonirRequest, value: any) -> None:
+    def save_to_session(self: T, request: PyonirRequest,key: str = None, value: any = None) -> None:
         """Convert instance to a serializable dict."""
-        request.server_request.session[self.__class__.__name__.lower()] = value
+        request.server_request.session[key or self.__class__.__name__.lower()] = value
 
     @classmethod
     def create(cls: Type[T], **data) -> T:
@@ -83,20 +82,6 @@ class PyonirSchema:
         parsely = Parsely(file_path, app_ctx=app_ctx)
         return parsely.map_to_model(cls)
 
-    @classmethod
-    def from_session(cls: Type[T], session_data: dict) -> T:
-        """Create an instance from session data."""
-        return cls(**session_data)
-
-    # --- ORM binding ---
-    @classmethod
-    def _orm_model(cls):
-        raise NotImplementedError
-
-    @classmethod
-    def _from_orm(cls: Type[T], orm_obj) -> T:
-        raise NotImplementedError
-
     def patch(self: T, **changes) -> T:
         """Return a new instance with updated fields (no DB)."""
         return replace(self, **changes)
@@ -108,8 +93,11 @@ class PyonirSchema:
     def _to_orm(self):
         raise NotImplementedError
 
-    def to_json(self, obfuscate):
-        pass
+    def to_json(self, obfuscate = True) -> dict:
+        """Returns the user data as a JSON serializable dictionary"""
+        # obfuscate = self._private_keys
+        return {key: ('***' if obfuscate and hasattr(self,'_private_keys') and key in self._private_keys else value) for key, value in self.__dict__.items() if key[0] != '_'}
+
 
 
 class PyonirCollection:
@@ -161,18 +149,21 @@ class PyonirCollection:
         return {"attr": k.strip(), "op":op, "value":PyonirCollection.coerce_bool(v)}
 
     @classmethod
-    def query(cls, query_path: str,
-             app_ctx: PyonirApp = None,
-             data_model: any = None,
-             include_only: str = None,
-             exclude_dirs: list[str] = None,
-             exclude_file: list[str] = None,
-             force_all: bool = True,
-              sort_key: str = None):
+    def query(cls,
+                query_path: str,
+                app_ctx: AppCtx = None,
+                model: object | str = None,
+                name_pattern: str = None,
+                exclude_dirs: tuple = None,
+                exclude_names: tuple = None,
+                force_all: bool = True,
+                sort_key: str = None):
         """queries the file system for list of files"""
-        from pyonir.utilities import get_all_files_from_dir
-        gen_data = get_all_files_from_dir(query_path, app_ctx=app_ctx, entry_type=data_model, include_only=include_only,
-                                          exclude_dirs=exclude_dirs, exclude_file=exclude_file, force_all=force_all)
+        from pyonir.utilities import query_files
+        gen_data = query_files(query_path, app_ctx=app_ctx, model=model, name_pattern=name_pattern,
+                               exclude_dirs=exclude_dirs, exclude_names=exclude_names, force_all=force_all)
+        # gen_data = get_all_files_from_dir(query_path, app_ctx=app_ctx, entry_type=data_model, include_only=include_only,
+        #                                   exclude_dirs=exclude_dirs, exclude_file=exclude_file, force_all=force_all)
         return cls(gen_data, sort_key=sort_key)
 
     def prev_next(self, input_file: Parsely):
@@ -252,8 +243,8 @@ class PyonirCollection:
         from pyonir import Site
         if not Site: return None
         from pyonir.core import ParselyPagination
-        request: PyonirRequest = Site.TemplateEnvironment.globals['request']
-        if not hasattr(request, 'limit'): return None
+        request: PyonirRequest = Site.TemplateEnvironment.globals['request'] if Site.TemplateEnvironment else None
+        if not request or not hasattr(request, 'limit'): return None
         req_pg = self.get_attr(request.query_params, 'pg') or 1
         limit = query_params.get('limit', request.limit)
         curr_pg = int(query_params.get('pg', req_pg)) or 1
@@ -292,7 +283,7 @@ class PyonirCollection:
 
 class PyonirRequest:
 
-    def __init__(self, server_request: StarletteRequest):
+    def __init__(self, server_request: StarletteRequest, app: PyonirApp):
         from pyonir.utilities import get_attr
 
         self.server_response = None
@@ -309,7 +300,7 @@ class PyonirRequest:
         self.limit = get_attr(self.query_params, 'limit', PAGINATE_LIMIT)
         self.model = get_attr(self.query_params, 'model')
         self.is_home = (self.path == '')
-        self.is_api = False
+        self.is_api = self.parts and self.parts[0] == app.API_DIRNAME
         self.is_static = bool(list(os.path.splitext(self.path)).pop())
         self.form = {}
         self.files = []
@@ -322,6 +313,14 @@ class PyonirRequest:
         self.type: TEXT_RES | JSON_RES | EVENT_RES = self.headers.get('accept')
         self.status_code: int = 200
         self.app_ctx_name: str = ''
+        self.auth: Auth | None = None #Auth(self, app)
+        self.flashes: dict = self.get_flash_messages()
+
+    @property
+    def session_token(self):
+        """Returns active csrf token for user session"""
+        if self.server_request and self.server_request.session:
+            return self.server_request.session.get('csrf_token')
 
     @property
     def previous_url(self):
@@ -330,15 +329,32 @@ class PyonirRequest:
     @property
     def redirect_to(self):
         """Returns the redirect URL from the request form data"""
-        return self.form.get('redirect_to', self.form.get('redirect'))
+        file_redirect = self.file.data.get('redirect_to', self.file.data.get('redirect'))
+        return self.form.get('redirect_to', self.form.get('redirect', file_redirect))
 
     def redirect(self, url: str):
         """Sets the redirect URL in the request form data"""
         self.form['redirect_to'] = url
 
-    def messages(self, session_key: str):
-        """Returns messages from the session"""
-        return self.server_request.session.pop(session_key, '')
+    def get_flash_messages(self) -> dict:
+        """Pops and returns all flash messages from session"""
+        if self.server_request and self.server_request.session:
+            session_data = self.server_request.session
+            flashes = session_data.pop('__flash__') if session_data.get('__flash__') else {}
+            return flashes
+        return {}
+
+    def pull_flash(self, key):
+        return self.flashes.get(key)
+
+    def add_flash(self, key: str, value: any):
+        flash_obj = self.server_request.session.get('__flash__') or {}
+        flash_obj[key] = value
+        self.server_request.session['__flash__'] = flash_obj
+
+    def from_session(self, session_key: str) -> any:
+        """Returns data from the session"""
+        return self.server_request.session.get(session_key, None)
 
     async def process_request_data(self):
         """Get form data and file upload contents from request"""
@@ -395,7 +411,10 @@ class PyonirRequest:
         from pyonir.parser import ParselyFileStatus
 
         code = 404
-        if self.file.status in (ParselyFileStatus.PROTECTED, ParselyFileStatus.FORBIDDEN):
+        if self.file.is_router:
+            # If the file is a router method, we assume it is valid
+            code = 200
+        elif self.file.status in (ParselyFileStatus.PROTECTED, ParselyFileStatus.FORBIDDEN):
             self.file.data = {'template': '40x.html', 'content': f'Unauthorized access to this resource.', 'url': self.url, 'slug': self.slug}
             code = 401
         elif self.file.file_status == ParselyFileStatus.PUBLIC or is_router_method:
@@ -436,8 +455,6 @@ class PyonirRequest:
         path_slug = path_str[1:]
         app_scope, *path_segments = path_slug.split('/')
         is_api_request = (len(path_segments) and path_segments[0] == app.API_DIRNAME) or path_str.startswith(app.API_ROUTE)
-        # if is_api_request and app_has_plugins and any(plg.module == app_scope for plg in app.plugins_activated):
-        #     pass
 
         # First, check plugins if available and not home
         if not is_home and app_has_plugins:
@@ -476,12 +493,14 @@ class PyonirRequest:
                     return app, Parsely(candidate, app.app_ctx)
 
         # Fallback: check for .routes.md inside pages_dirpath
-        if hasattr(app, 'pages_dirpath'):
-            fallback_route = os.path.join(app.pages_dirpath, '.routes.md')
-            if os.path.exists(fallback_route):
-                return app, Parsely(fallback_route, app.app_ctx)
+        # if hasattr(app, 'pages_dirpath'):
+        #     fallback_route = os.path.join(app.pages_dirpath, '.routes.md')
+        #     if os.path.exists(fallback_route):
+        #         return app, Parsely(fallback_route, app.app_ctx)
 
-        return app, Parsely('404_ERROR', app.app_ctx)
+        errorpage = Parsely('404_ERROR', app.app_ctx)
+        errorpage.data = self.render_error()
+        return app, errorpage
 
     @staticmethod
     def process_header(headers):
@@ -510,6 +529,7 @@ class PyonirBase:
     THUMBNAIL_DEFAULT = (230, 350)
     PROTECTED_FILES = {'.', '_', '<', '>', '(', ')', '$', '!', '._'}
     IGNORE_FILES = {'.vscode', '.vs', '.DS_Store', '__pycache__', '.git'}
+    IGNORE_WITH_PREFIXES = ('.', '_', '<', '>', '(', ')', '$', '!', '._')
 
     PAGINATE_LIMIT: int = 6
     DATE_FORMAT: str = "%Y-%m-%d %I:%M:%S %p"
@@ -547,7 +567,10 @@ class PyonirBase:
     # Contents sub directory default names
     UPLOADS_THUMBNAIL_DIRNAME: str = "thumbnails" # resized image directory name
     UPLOADS_DIRNAME: str = "uploads" # url name for serving uploaded assets
-    ASSETS_DIRNAME: str = "public" # url name for serving static assets css and js
+    PUBLIC_ASSETS_DIRNAME: str = "public"
+    """Global static assets directory name for serving static files"""
+    FRONTEND_ASSETS_DIRNAME: str = "static"
+    """Theme assets directory name for serving static files"""
     API_DIRNAME: str = "api" # directory for serving API endpoints and resolver routes
     PAGES_DIRNAME: str = "pages" # directory for serving HTML endpoints with file based routing
     CONFIG_FILENAME: str = "app" # main application configuration file name within contents/configs directory
@@ -559,10 +582,19 @@ class PyonirBase:
 
     # Application routes
     API_ROUTE = f"/{API_DIRNAME}"  # Api base path for accessing pages as JSON
-    ASSETS_ROUTE = f"/{ASSETS_DIRNAME}"  # serves static assets from configured theme
-    UPLOADS_ROUTE = f"/{UPLOADS_DIRNAME}"  # Upload base path to access resources within upload directory
     TemplateEnvironment: TemplateEnvironment = None # Template environment configurations
     routing_paths: list[RoutePath] | None = []
+
+    _resolvers = {}
+
+    @property
+    def frontend_assets_route(self) -> str: return f"/{self.FRONTEND_ASSETS_DIRNAME}"
+
+    @property
+    def public_assets_route(self) -> str: return f"/{self.PUBLIC_ASSETS_DIRNAME}"
+
+    @property
+    def uploads_route(self) -> str: return f"/{self.UPLOADS_DIRNAME}"
 
     @property
     def request_paths(self) -> AppRequestPaths:
@@ -576,29 +608,137 @@ class PyonirBase:
     @property
     def app_ctx(self) -> AppCtx: pass
 
+    async def virtual_router(self, pyonir_request: PyonirRequest) -> Parsely | None:
+        virtual_route_path = os.path.join(self.pages_dirpath, '.routes.md')
+        if not os.path.exists(virtual_route_path):
+            return None
+        virtual_route = self.parse_file(virtual_route_path)
+        res = await virtual_route.process_route(pyonir_request, self)
+        return res
+
+    def register_resolver(self, name: str, cls_or_path, args=(), kwargs=None, hot_reload=False):
+        import inspect
+        """
+        Register a class for later instantiation.
+
+        cls_or_path - Either a class object or dotted path string
+        hot_reload  - Only applies if cls_or_path is a dotted path
+        """
+        if inspect.isclass(cls_or_path):
+            class_path = f"{cls_or_path.__module__}.{cls_or_path.__qualname__}"
+            # hot_reload = False  # No reload possible if you pass the class directly
+        elif isinstance(cls_or_path, str):
+            class_path = cls_or_path
+        else:
+            raise TypeError("cls_or_path must be a class object or dotted path string")
+
+        self._resolvers[name] = {
+            "class_path": class_path,
+            "args": args,
+            "kwargs": kwargs or {},
+            "hot_reload": hot_reload
+        }
+
+    def reload_resolver(self, name) -> callable | None:
+        """
+        Instantiate the registered class.
+        Reload if hot_reload is enabled and class was registered by path.
+        """
+        import importlib, sys
+        from pyonir.utilities import get_attr
+        from pyonir.parser import Parsely
+
+        cls_path, meth_name = name.rsplit(".", 1)
+        is_pyonir = name.startswith('pyonir')
+        entry = get_attr(self._resolvers, cls_path)
+
+        # access module instance
+        if entry:
+            module_path, cls_name = entry["class_path"].rsplit(".", 1)
+
+            if entry["hot_reload"] and module_path in sys.modules:
+                importlib.reload(sys.modules[module_path])
+            elif module_path not in sys.modules:
+                importlib.import_module(module_path)
+
+            cls = getattr(sys.modules[module_path], cls_name)
+            new_instance = cls(*entry["args"], **entry["kwargs"])
+            # setattr(self, name, new_instance)
+            return getattr(new_instance, meth_name)
+
+        # access constant value or methods on application instance
+        resolver = get_attr(self, name)
+
+        # access modules from loader
+        if not resolver:
+            resolver = Parsely.load_resolver(name,
+                                          base_path=self.pyonir_path if is_pyonir else self.app_dirpath,
+                                          from_system=is_pyonir)
+        if not resolver:
+            print(f"Unable to load {name}")
+
+        return resolver
+
     @staticmethod
-    def generate_resolvers(cls: callable, output_dirpath: str, namespace: str):
-        """Automatically generate api endpoints from service class."""
-        import textwrap
+    def generate_resolvers(cls: callable, output_dirpath: str, namespace: str = ''):
+        """Automatically generate api endpoints from service class or module."""
+        import textwrap, inspect
         from pyonir.utilities import create_file
 
-        resolver_template = textwrap.dedent("""\
+        def process_docs(meth: callable):
+            docs = meth.__doc__
+            if not docs: return '', docs
+            res = textwrap.dedent(docs).strip()
+            _r = res.split('---')
+            meta = _r.pop(1) if '---' in res else ''
+            return meta, "".join(_r)
+
+        default_template = textwrap.dedent("""\
         @resolvers:
-            GET.call: {call_path}
+            POST.call: {method_import_path}
         ===
         {docs}
         """).strip()
-        name = cls.__class__.__name__
-        endpoint_meths = [a for a in dir(cls) if not a.startswith('_') and hasattr(getattr(cls, a), '__call__')]
-        formatted_cls_name = name[0].lower()+name[1:]
+
+        resolver_template = textwrap.dedent("""\
+        {meta}
+        ===
+        {docs}
+        """).strip()
+
+        name = ''
+        # endpoint_meths = []
+
+        if inspect.ismodule(cls):
+            name = cls.__name__
+            endpoint_meths = [
+                m for m, obj in inspect.getmembers(cls, inspect.isfunction)
+                if obj.__module__ == name
+            ]
+            call_path_fn = lambda meth_name: f"{namespace}.{name}.{meth_name}"
+
+        else:  # Means cls is an instance
+            klass = type(cls)
+            name = klass.__name__
+            output_dirpath = os.path.join(output_dirpath, namespace)
+
+            # call_path = name[0].lower() + name[1:]
+            call_path_fn = lambda meth_name: f"{namespace}.{meth_name}"
+            endpoint_meths = [
+                m for m in dir(cls)
+                if not m.startswith('_') and callable(getattr(cls, m))
+            ]
+
         print(f"Generating {name} API endpoint definitions for:")
         for meth_name in endpoint_meths:
             file_path = os.path.join(output_dirpath, meth_name+'.md')
-            if os.path.exists(file_path): continue
+            # if os.path.exists(file_path): continue
+            method_import_path = call_path_fn(meth_name)
             meth: callable = getattr(cls, meth_name)
-            namespace_instance_path = f"{namespace}.{formatted_cls_name}.{meth_name}"
-            docs = textwrap.dedent(meth.__doc__).strip() if meth.__doc__ else ''
-            m_temp = resolver_template.format(call_path=namespace_instance_path, docs=docs)
+            meta, docs = process_docs(meth)
+            if not meta: continue
+            meta = textwrap.dedent(meta.replace('{method_import_path}', method_import_path)).strip()
+            m_temp = resolver_template.format(docs=docs, meta=meta)
             create_file(file_path, m_temp)
             print(f"\t{meth_name} at {file_path}")
 
@@ -610,7 +750,7 @@ class PyonirBase:
     def generate_static_website(self):
         """Generates Static website into the specified static_site_dirpath"""
         import time
-        from pyonir.server import generate_nginx_conf
+        # from pyonir.server import generate_nginx_conf
         from pyonir import utilities
 
         self.SSG_IN_PROGRESS = True
@@ -625,7 +765,7 @@ class PyonirBase:
             self.TemplateEnvironment.globals['is_ssg'] = True
             start_time = time.perf_counter()
 
-            all_pages = utilities.get_all_files_from_dir(self.pages_dirpath, app_ctx=self.app_ctx)
+            all_pages = utilities.query_files(self.pages_dirpath, app_ctx=self.app_ctx)
             xmls = []
             for page in all_pages:
                 self.TemplateEnvironment.globals['request'] = page  # pg_req
@@ -642,7 +782,7 @@ class PyonirBase:
             # utilities.copy_assets(PYONIR_STATIC_DIRPATH, os.path.join(self.ssg_dirpath, PYONIR_STATIC_ROUTE.lstrip('/')))
 
             # Copy theme static css, js files into ssg directory
-            utilities.copy_assets(self.TemplateEnvironment.themes.active_theme.static_dirpath, os.path.join(self.ssg_dirpath, self.ASSETS_DIRNAME))
+            utilities.copy_assets(self.TemplateEnvironment.themes.active_theme.static_dirpath, os.path.join(self.ssg_dirpath, self.FRONTEND_ASSETS_DIRNAME))
 
             end_time = time.perf_counter() - start_time
             ms = end_time * 1000
@@ -755,8 +895,8 @@ class PyonirApp(PyonirBase):
     plugins_activated: set = set()
     """All enabled plugins instances"""
 
-    def __init__(self, app_entrypoint: str):
-        from pyonir.utilities import generate_id, get_attr, process_contents
+    def __init__(self, app_entrypoint: str, serve_frontend: bool = None):
+        from pyonir.utilities import generate_id, get_attr
         from pyonir import __version__
         from pyonir.parser import parse_markdown
         self.SOFTWARE_VERSION = __version__
@@ -766,11 +906,15 @@ class PyonirApp(PyonirBase):
         self.name: str = os.path.basename(self.app_dirpath) # web url to serve application pages
         self.SECRET_SAUCE = generate_id()
         self.SESSION_KEY = f"pyonir_{self.name}"
-        self.configs = None
+        self.configs: object = None
+        self.themes: PyonirThemes | None = None
         self.routing_paths = [self.pages_dirpath, self.api_dirpath]
-        self.public_assets_dirpath = os.path.join(self.frontend_dirpath, 'static')
         self.Parsely_Filters = {'jinja': self.parse_jinja, 'pyformat': self.parse_pyformat,
                                  'md': parse_markdown}
+
+        self.serve_frontend = serve_frontend if serve_frontend is not None else True
+        """Serve frontend files from the frontend directory for HTML requests"""
+        self.TemplateEnvironment = TemplateEnvironment(self)
 
     @property
     def nginx_config_filepath(self):
@@ -780,6 +924,17 @@ class PyonirApp(PyonirBase):
     def unix_socket_filepath(self):
         """WSGI socket file reference"""
         return os.path.join(self.app_dirpath, self.name+'.sock')
+
+    @property
+    def frontend_assets_dirpath(self) -> str:
+        """Directory path for site's static generated files"""
+        theme_assets_dirpath = self.themes.active_theme.static_dirpath if self.themes else None
+        return theme_assets_dirpath or os.path.join(self.frontend_dirpath, self.FRONTEND_ASSETS_DIRNAME)
+
+    @property
+    def public_assets_dirpath(self) -> str:
+        """Directory path for site's static generated files"""
+        return os.path.join(self.frontend_dirpath, self.PUBLIC_ASSETS_DIRNAME)
 
     @property
     def ssg_dirpath(self) -> str:
@@ -832,33 +987,46 @@ class PyonirApp(PyonirBase):
         return os.path.join(self.backend_dirpath, "filters")
 
     @property
+    def ssl_cert_file(self):
+        """Path to the SSL certificate file for the application"""
+        return os.path.join(self.app_dirpath, "server.crt")
+
+    @property
+    def ssl_key_file(self):
+        """Path to the SSL key file for the application"""
+        return os.path.join(self.app_dirpath, "server.key")
+
+    @property
     def app_ctx(self) -> AppCtx:
         return self.name, self.endpoint, self.contents_dirpath, self.ssg_dirpath
 
     @property
-    def env(self): return os.getenv('APPENV')
+    def env(self) -> str: return os.getenv('APPENV')
 
     @property
-    def is_dev(self): return self.env == DEV_ENV
+    def is_dev(self) -> bool: return self.env == DEV_ENV
 
     @property
-    def host(self): return self.get_attr(self.configs, 'app.host', '0.0.0.0') #if self.configs else '0.0.0.0'
+    def host(self) -> str: return self.get_attr(self.configs, 'app.host', '0.0.0.0') #if self.configs else '0.0.0.0'
 
     @property
-    def port(self):
+    def port(self) -> int:
         return self.get_attr(self.configs, 'app.port', 5000) #if self.configs else 5000
 
     @property
-    def protocol(self):return 'https' if self.is_secure else 'http'
+    def protocol(self) -> str: return 'https' if self.is_secure else 'http'
 
     @property
-    def is_secure(self):return self.get_attr(self.configs, 'app.use_ssl', False) #if self.configs else None
+    def is_secure(self) -> bool:
+        """Check if the application is configured to use SSL"""
+        has_ssl_files = os.path.exists(self.ssl_cert_file) and os.path.exists(self.ssl_key_file)
+        return has_ssl_files and self.get_attr(self.configs, 'app.use_ssl', False)
 
     @property
-    def domain_name(self): return self.get_attr(self.configs, 'app.domain', self.host) # if self.configs else self.host
+    def domain_name(self) -> str: return self.get_attr(self.configs, 'app.domain', self.host) # if self.configs else self.host
 
     @property
-    def domain(self): return f"{self.protocol}://{self.domain_name}{':'+str(self.port) if self.is_dev else ''}".replace('0.0.0.0','localhost') # if self.configs else self.host
+    def domain(self) -> str: return f"{self.protocol}://{self.domain_name}{':'+str(self.port) if self.is_dev else ''}".replace('0.0.0.0','localhost') # if self.configs else self.host
 
     def load_plugin(self, plugin: callable | list[callable]):
         """Make the plugin known to the pyonir application"""
@@ -869,14 +1037,11 @@ class PyonirApp(PyonirBase):
             plg_pkg_name = plugin.__module__.split('.').pop()
             self.plugins_installed[plg_pkg_name] = plugin
 
-    # def _load_plugins(self):
-    #     """Loads the plugin initializing object into runtime"""
-    #     self.plugins_installed = load_modules_from(self.plugins_dirpath, only_packages=True)
-    #     pass
 
     def _activate_plugins(self):
         """Active plugins enabled based on configurations"""
-        is_configured = hasattr(self.configs, 'app') and hasattr(self.configs.app, 'enabled_plugins')
+        from pyonir.utilities import get_attr
+        is_configured = get_attr(self.configs.app, 'enabled_plugins', None)
         for plg_id, plugin in self.plugins_installed.items():
             if is_configured and plg_id not in self.configs.app.enabled_plugins: continue
             self.plugins_activated.add(plugin(self))
@@ -904,14 +1069,18 @@ class PyonirApp(PyonirBase):
 
     def parse_jinja(self, string, context=None) -> str:
         """Render jinja template fragments"""
+        from pyonir.utilities import dict_to_class
+
         if not context: context = {}
         if not self.TemplateEnvironment: return string
         try:
+            # request = self.TemplateEnvironment.globals.get('request')
+            # user = request.auth.user if request and request.auth else None
+            # page = dict_to_class(context.pop('page'), 'page') if context.get('page') else None
             return self.TemplateEnvironment.from_string(string).render(configs=self.configs, **context)
         except Exception as e:
-            print(str(e))
-            return string
-            # raise
+            raise
+
 
     def parse_pyformat(self, string, context=None) -> str:
         """Formats python template string"""
@@ -926,6 +1095,23 @@ class PyonirApp(PyonirBase):
     def setup_templates(self):
         self.TemplateEnvironment = TemplateEnvironment(self)
 
+    def setup_themes(self):
+        """Configure site themes"""
+        from pyonir.utilities import get_attr
+
+        themes_dir_path = os.path.join(self.frontend_dirpath, PyonirApp.THEMES_DIRNAME)
+        if not self.serve_frontend or not os.path.exists(themes_dir_path):
+            print(f"Site is not configured to serve themes. {themes_dir_path} is not created or app isn't serving a frontend")
+            return
+
+        self.themes = PyonirThemes(themes_dir_path)
+        app_active_theme = self.themes.active_theme
+        if app_active_theme is None:
+            raise ValueError(f"No active theme name {get_attr(self.configs, 'app.theme_name')} found in {self.frontend_dirpath} themes directory. Please ensure a theme is available.")
+
+        # Configure theme templates
+        self.TemplateEnvironment.load_template_path(app_active_theme.jinja_template_path)
+
 
     def setup_configs(self):
         """Setup site configurations and template environment"""
@@ -933,19 +1119,23 @@ class PyonirApp(PyonirBase):
         self.configs = process_contents(os.path.join(self.contents_dirpath, self.CONFIGS_DIRNAME), self.app_ctx)
         envopts = load_env(os.path.join(self.app_dirpath, '.env'))
         setattr(self.configs, 'env', envopts)
-        self.setup_templates()
+        self.TemplateEnvironment.globals['configs'] = self.configs.app
 
-    def run(self, routes: PyonirRouters, plugins: list[PyonirPlugin] =None):
+
+
+    def run(self, routes: PyonirRouters = None):
         """Runs the Uvicorn webserver"""
         from .server import (setup_starlette_server, start_uvicorn_server,)
+        from pyonir.server import generate_nginx_conf
 
         # Initialize Server instance
         self.server = setup_starlette_server(self)
         # Initialize Application settings and templates
         self.setup_configs()
+        self.setup_themes()
         self.install_sys_plugins()
         self._activate_plugins()
-
+        generate_nginx_conf(self)
         # Run uvicorn server
         if self.SSG_IN_PROGRESS: return
         start_uvicorn_server(self, routes)
@@ -954,16 +1144,15 @@ class PyonirApp(PyonirBase):
 class TemplateEnvironment(Environment):
 
     def __init__(self, app: PyonirApp):
+
+        if not os.path.exists(app.frontend_dirpath) and app.serve_frontend:
+            raise ValueError(f"Frontend directory {app.frontend_dirpath} does not exist. Please ensure the frontend directory is set up correctly.")
         from jinja2 import FileSystemLoader, ChoiceLoader
-        from webassets import Environment as AssetsEnvironment
         from pyonir import PYONIR_JINJA_TEMPLATES_DIRPATH, PYONIR_JINJA_FILTERS_DIRPATH, PYONIR_JINJA_EXTS_DIRPATH
         from webassets.ext.jinja2 import AssetsExtension
         from pyonir.utilities import load_modules_from
 
-        self.themes = PyonirThemes(os.path.join(app.frontend_dirpath, PyonirApp.THEMES_DIRNAME))
-
-        jinja_template_paths = ChoiceLoader([FileSystemLoader(self.themes.active_theme.jinja_template_path),
-                                             FileSystemLoader(PYONIR_JINJA_TEMPLATES_DIRPATH)])
+        jinja_template_paths = ChoiceLoader([FileSystemLoader(PYONIR_JINJA_TEMPLATES_DIRPATH),FileSystemLoader(app.frontend_dirpath)])
         sys_filters = load_modules_from(PYONIR_JINJA_FILTERS_DIRPATH)
         app_filters = load_modules_from(app.jinja_filters_dirpath)
         installed_extensions = load_modules_from(PYONIR_JINJA_EXTS_DIRPATH, True)
@@ -971,26 +1160,24 @@ class TemplateEnvironment(Environment):
         app_filters = {**sys_filters, **app_filters}
         super().__init__(loader=jinja_template_paths, extensions=app_extensions)
 
-        def url_for(path):
-            rmaps = app.server.url_map if app.server else {}
-            return rmaps.get(path, {}).get('path', app.ASSETS_ROUTE)
-
-        app_active_theme = self.themes.active_theme
         #  Custom filters
         self.filters.update(**app_filters)
-        # load assests tag
-        self.assets_environment = AssetsEnvironment(app_active_theme.static_dirpath, app.ASSETS_ROUTE)
-        # Add paths containing static assets
-        # self.assets_environment.load_path.append(app_active_theme.static_dirpath)
-        self.url_expire = False
+
+        def url_for(path):
+            rmaps = app.server.url_map if app.server else {}
+            return rmaps.get(path, {}).get('path', app.public_assets_route)
+
+        # Include globals
         self.globals['url_for'] = url_for
-        self.globals['configs'] = app.configs.app
         self.globals['request'] = None
-        # self.globals.update(**app.jinja_template_globals)
+        self.globals['user'] = None
 
 
-    def add_jinja_path(self, path: str):
-        pass
+    def load_template_path(self, template_path: str):
+        """Adds template path to file loader"""
+        app_loader = self.loader.loaders[0]
+        if not app_loader: return
+        app_loader.searchpath.append(template_path)
 
     def add_filter(self, filter: callable):
         name = filter.__name__
@@ -998,29 +1185,81 @@ class TemplateEnvironment(Environment):
         self.filters.update({name: filter})
         pass
 
+@dataclass
+class Theme:
+    _mapper = {'theme_dirname': 'file_dirname', 'theme_dirpath': 'file_dirpath'}
+    name: str
+    theme_dirname: str = ''
+    """Directory name for theme folder within frontend/themes directory"""
+    theme_dirpath: str = ''
+    """Directory path for theme folder within frontend/themes directory"""
+    details: Parsely | None = None
+    """Represents a theme available in the frontend/themes directory."""
+
+    def __post_init__(self):
+        self.details = self.readme()
+        for k, v in self.details.data.items():
+            if k in ('static_dirname', 'templates_dirname'):
+                setattr(self, k, v)
+
+    @property
+    def static_dirname(self):
+        """directory name for theme's jinja templates"""
+        return self.details.data.get('static_dirname', 'static') if self.details else 'static'
+
+    @property
+    def templates_dirname(self):
+        """directory name for theme's jinja templates"""
+        return self.details.data.get('templates_dirname', 'layouts') if self.details else 'layouts'
+
+    @property
+    def static_dirpath(self):
+        """directory to serve static theme assets"""
+        return os.path.join(self.theme_dirpath, self.static_dirname)
+
+    @property
+    def jinja_template_path(self):
+        return os.path.join(self.theme_dirpath, self.templates_dirname)
+
+    def readme(self):
+        """Returns the theme's README.md file content if available"""
+        from pyonir.parser import Parsely
+        from pyonir import Site
+        theme_ctx = list(Site.app_ctx)
+        theme_ctx[2] = Site.frontend_dirpath
+        theme_readme = os.path.join(self.theme_dirpath,'README.md')
+        theme_readme =  theme_readme if os.path.exists(theme_readme) else os.path.join(self.theme_dirpath,'readme.md')
+        readme = Parsely(theme_readme, app_ctx=theme_ctx)
+        if not readme.file_exists:
+            raise ValueError(f"Theme {self.name} does not have a README.md file.")
+        return readme
 
 class PyonirThemes:
     """Represents sites available and active theme(s) within the frontend directory."""
 
     def __init__(self, theme_dirpath: str):
+        if not os.path.exists(theme_dirpath):
+            raise ValueError(f"Theme directory {theme_dirpath} does not exist.")
         self.themes_dirpath: str = theme_dirpath # directory path to available site themes
-        self._available_themes: PyonirCollection | None = None # collection of themes available in frontend/themes directory
+        self.available_themes: PyonirCollection | None = self.query_themes() # collection of themes available in frontend/themes directory
 
     @property
     def active_theme(self) -> Theme | None:
         from pyonir import Site
         from pyonir.parser import get_attr
-        if not Site: return None
-        self._available_themes = self._get_available_themes()
+        if not Site or not self.available_themes: return None
+        # self.available_themes = self.query_themes()
         site_theme = get_attr(Site.configs, 'app.theme_name')
-        site_theme = self._available_themes.find(site_theme, from_attr='theme_dirname')
+        site_theme = self.available_themes.get(site_theme)
         return site_theme
 
-    def _get_available_themes(self) -> PyonirCollection | None:
-        from pyonir import Site
-        if not Site: return None
-        fe_ctx = list(Site.app_ctx)
-        fe_ctx[2] = Site.frontend_dirpath
-        pc = PyonirCollection.query(self.themes_dirpath, fe_ctx, include_only='README.md', data_model=Theme)
-        return pc
+    def query_themes(self) -> dict[str, Theme] | None:
+        """Returns a collection of available themes within the frontend/themes directory"""
+        themes_map = {}
+        for theme_dir in os.listdir(self.themes_dirpath):
+            if theme_dir.startswith(PyonirBase.IGNORE_WITH_PREFIXES): continue
+            theme = Theme(name=theme_dir, theme_dirname=theme_dir, theme_dirpath=os.path.join(self.themes_dirpath, theme_dir))
+            themes_map[theme_dir] = theme
+        return themes_map if themes_map else None
+
 

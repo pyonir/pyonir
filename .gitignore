@@ -12,6 +12,9 @@ venv/
 /pyonir/libs/app_setup/plugins
 /pyonir/libs/app_setup/static_site
 pip-wheel-metadata/
+*.crt
+*.csr
+*.key
 
 # IntelliJ / PyCharm project files
 .idea/

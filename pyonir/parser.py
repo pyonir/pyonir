@@ -2,10 +2,11 @@ import os, pytz, re, json
 from datetime import datetime
 from dataclasses import dataclass, field
 
+
 from .core import PyonirRequest, PyonirCollection
-from .pyonir_types import ParselyPagination, JSON_RES, PyonirRestResponse
-from .utilities import dict_to_class, get_attr, get_all_files_from_dir, deserialize_datestr, create_file, get_module, \
-    cls_mapper, parse_query_model_to_object, import_module
+from .pyonir_types import ParselyPagination, JSON_RES, AppCtx
+from .utilities import dict_to_class, get_attr, query_files, deserialize_datestr, create_file, get_module, \
+    cls_mapper, parse_query_model_to_object
 
 ALLOWED_CONTENT_EXTENSIONS = ('prs', 'md', 'json', 'yaml')
 IGNORE_FILES = ('.vscode', '.vs', '.DS_Store', '__pycache__', '.git', '.', '_', '<', '>', '(', ')', '$', '!', '._')
@@ -73,12 +74,12 @@ def parse_markdown(content, kwargs):
 @dataclass
 class Page:
     """Represents a single page returned from a web request"""
-    _mapper = {'created_on': 'file_created_on', 'modified_on': 'file_modified_on'}
-    _mapper_merge = True # merges additional data properties to model
+    # _mapper = {'created_on': 'file_created_on', 'modified_on': 'file_modified_on'}
+    __orm_options__ = {"mapper": {'created_on': 'file_created_on', 'modified_on': 'file_modified_on'}} # avoids merging additional data properties to model
     url: str
     is_router: bool = False
     created_on: datetime = None
-    modified_on: datetime = None
+    modified_on: datetime = 'modified_on'
     tags: list = None
     date: datetime = None
     category: str = ''
@@ -89,9 +90,10 @@ class Page:
     author: str = 'pyonir'
     entries: ParselyPagination = None
     gallery: dict = None
-    file_name: str = ''
-    file_path: str = ''
-    file_created_on: datetime = None
+    file_name: str = 'file_name'
+    file_path: str = 'file_path'
+    file_dirname: str = 'file_dirname'
+    file_created_on: datetime = 'file_created_on'
     contents_relpath: str = ''
     generate_static_file: callable = None
     status: str = ParselyFileStatus.PUBLIC
@@ -197,7 +199,7 @@ class ParselyMedia:
         from pyonir import Site
         if self.group != Site.UPLOADS_DIRNAME: self.group = f'{Site.UPLOADS_DIRNAME}/{self.group}'
         thumbs_dir = os.path.join(self.file_dirpath, self.group, Site.UPLOADS_THUMBNAIL_DIRNAME)
-        files = get_all_files_from_dir(str(thumbs_dir), app_ctx=self.app_ctx)
+        files = query_files(str(thumbs_dir), app_ctx=self.app_ctx, model=ParselyMedia)
         target_name = self.file_name
         thumbs = {}
         # filter files based on name
@@ -214,26 +216,24 @@ class Parsely:
     # _Filters = {'md': parse_markdown}  # Global filters that modify scalar values
     default_file_attributes = ['file_name','file_path','file_dirname','file_data_type','file_ctx','file_created_on']
 
-    def __init__(self, abspth: str, app_ctx=None, generic_query_model = None):
+    def __init__(self, abspth: str, app_ctx: AppCtx = None, model: object = None):
         from pyonir import Site
         assert abspth is not None, f"Parsely was not provided. {abspth} is not a valid string!"
-        __skip_parsely_deserialization__ = generic_query_model and hasattr(generic_query_model, '__skip_parsely_deserialization__')
-        self._generic_query_model = generic_query_model # when available this property will only process values in model
+        __skip_parsely_deserialization__ = model and hasattr(model, '__skip_parsely_deserialization__')
+        self.schema = model
+        """Model object associated with file."""
         self._cursor = None
         self._blob_keys = []
         self.resolver = None
         self.is_router = abspth.endswith('.routes.md')
         self.app_ctx = app_ctx # application context for file
-        self.file_path = abspth
+        self.file_path = str(abspth)
         self.file_dirpath = os.path.dirname(abspth) # path to files contents directory
         # file data processing
         self.file_contents = ''
         self.file_lines = None
         self.file_line_count = None
         self.data = {}
-
-        self.schema = None
-        """Model object associated with file."""
 
         ctx_url, ctx_name, ctx_dirpath, ctx_staticpath, contents_relpath, file_name, file_ext = self.process_ctx(app_ctx)
         content_type, *content_subs = os.path.dirname(contents_relpath).split(os.path.sep) # directory at root of contents scope
@@ -318,12 +318,12 @@ class Parsely:
         if self.file_ext.endswith(ALLOWED_CONTENT_EXTENSIONS): return
         from PIL import Image
         from pyonir import Site
-        group = self.file_dirpath.lstrip('/').split(f'/{Site.UPLOADS_DIRNAME}', 1).pop()
+        group = self.file_dirpath.lstrip('/').split(Site.uploads_route, 1).pop()
         group_name = group.lstrip('/').split(os.path.sep)[0]
         image_name, *image_captions = self.file_name.replace('.' + self.file_ext, '').split(IMG_FILENAME_DELIM)
         formatted_name = re.sub(r'[^a-zA-Z0-9]+', ' ', image_name).title()
         formated_caption = "".join(image_captions or formatted_name).title()
-        _slug = f"{Site.UPLOADS_ROUTE}/{group_name+'/' if group else ''}{image_name}.{self.file_ext}"
+        _slug = f"{Site.UPLOADS_DIRNAME}/{group_name+'/' if group else ''}{image_name}.{self.file_ext}"
         _url = f"{_slug}"
         is_thumb = Site.UPLOADS_THUMBNAIL_DIRNAME in self.file_dirname
         full_url = _slug.replace(Site.UPLOADS_THUMBNAIL_DIRNAME + '/', '').split('--')[0] + f".{self.file_ext}" if is_thumb else _url
@@ -347,6 +347,8 @@ class Parsely:
         pass
 
     def map_to_model(self, model, refresh = False):
+        if model is None:
+            model = self.schema
         if model and refresh:
             import sys, importlib
             model_name = model.__name__ if hasattr(model, '__name__') else type(model).__name__
@@ -360,10 +362,10 @@ class Parsely:
 
         if not model:
             file_props = {k: v for k,v in self.__dict__.items() if k in self.default_file_attributes}
-            return dict_to_class({**self.data, **file_props, '@model': 'GenericQueryModel'}, self.file_data_type)
+            return dict_to_class({**self.data, **file_props, '@model': 'GenericQueryModel'}, self.file_data_type, True)
         res = cls_mapper(self, model)
-        for key in self.default_file_attributes:
-            setattr(res, key, getattr(self, key))
+        # for key in self.default_file_attributes:
+        #     setattr(res, key, getattr(self, key))
         return res
 
     def to_json(self) -> dict:
@@ -375,74 +377,66 @@ class Parsely:
         if not bool(self.data): return
         filters = self.data.get(FILTER_KEY)
         if not filters: return
-        from pyonir import Site
+        # from pyonir import Site
         for filtr, datakeys in filters.items():
-            ifiltr = Site.Parsely_Filters.get(filtr)
+            ifiltr = self.app_filter(filtr)
             if not ifiltr: continue
             for key in datakeys:
                 mod_val = ifiltr(get_attr(self.data, key), {"page": self.data})
-                self.update_nested(key, self.data, data_update=mod_val)
+                update_nested(key, self.data, data_update=mod_val)
         del self.data[FILTER_KEY]
 
-    async def process_response(self, req: PyonirRequest) -> str:
-        """process web request into response"""
-        from pyonir.server import JSON_RES, TEXT_RES
-        if not self.file_exists and not req.server_response and not req.form:
-            self.data = req.render_error()
-        elif req.server_response and not self.file_exists:
-            self.data = {
-                "url": req.url, "slug": req.slug, "template": "base.html"
-            }
-            if isinstance(req.server_response, str):
-                self.data['content'] = req.server_response
+    @staticmethod
+    def load_resolver(relative_module_path: str, base_path: str = '', from_system: bool = False):
+        from pyonir.utilities import import_module
+        if '.' not in relative_module_path: return None
+        pkg = relative_module_path.split('.')
+        if from_system: base_path = os.path.dirname(base_path)
+        meth_name = pkg.pop()
+        pkg_path = ".".join(pkg)
+        module_base = pkg[:-1]
+        module_name = pkg[-1]
+        _pkg_dpath = os.path.join(base_path, *module_base) + '.py' # is a /path/to/module
+        _module_dpath = os.path.join(base_path, *module_base, module_name+'.py') # is a /path/to/module.py
+        _module_pkg_dpath = os.path.join(base_path, *pkg, '__init__.py') # is a /path/to/module/__init__.py
+        if os.path.exists(_pkg_dpath):
+            pkg_path = ".".join(module_base)
+            meth_name = f"{module_name}.{meth_name}"
+        elif os.path.exists(_module_dpath):
+            meth_name = f"{module_name}.{meth_name}"
+        elif os.path.exists(_module_pkg_dpath):
+            pass
         else:
-            if req.type == JSON_RES:
-                api_res = req.api_response()
-                return self.output_json(api_res)
-        return self.output_html(req) if req.type in (TEXT_RES, '*/*') else self.output_json() \
-            if req.type == JSON_RES else req.server_response
-
+            return None
+        module_callable = import_module(pkg_path, callable_name=meth_name)
+        return module_callable
 
     async def _access_module_from_request(self, resolver_path: str) -> tuple:
         from pyonir import Site
-        from pyonir.utilities import import_module
         if resolver_path.startswith(LOOKUP_DIR_PREFIX):
             return None, self.process_value_type(resolver_path)
-        pkg = resolver_path.split('.')
-        meth_name = pkg.pop()
-        module = None
-
-        app_plugin = list(filter(lambda p: p.module == pkg[0], Site.plugins_activated))
+        app_plugin = list(filter(lambda p: p.module == resolver_path.split('.')[0], Site.plugins_activated))
         app_plugin = app_plugin[0] if len(app_plugin) else Site
-        resolver = get_attr(app_plugin, resolver_path)
-        if not resolver:
-            resolver = import_module(".".join(pkg), callable_name=meth_name)
-        if not resolver:
-            namespace = pkg.pop(0)
-            base_pkg_path = app_plugin.app_dirpath if namespace != 'pyonir' else app_plugin.pyonir_path
-            pkg_path = os.path.join(base_pkg_path, *pkg)+'.py'
-            if not os.path.exists(pkg_path): pkg_path = os.path.join(base_pkg_path, *pkg, '__init__.py')
-            if not os.path.exists(pkg_path):
-                meth_name =f'{pkg.pop()}.'+meth_name
-                pkg_path = os.path.join(base_pkg_path,*pkg)+'.py'
-            module, resolver = get_module(str(pkg_path), meth_name)
+        resolver = app_plugin.reload_resolver(resolver_path)
 
-        return module, resolver
+        return None, resolver
 
     async def process_route(self, pyonir_request: PyonirRequest, app: 'PyonirApp'):
         """Processes dynamic routes from @routes property"""
-        router_obj: dict | None = self.data.get('@routes') or self.data
-        is_not_router = pyonir_request.file.file_exists and not pyonir_request.file.is_router
-        if not router_obj or is_not_router or app.endpoint == pyonir_request.url: return None
         from starlette.routing import compile_path
-        base_url = "/".join(pyonir_request.parts[0:pyonir_request.parts.index(app.endpoint.lstrip(os.path.sep))+1])
-        path = pyonir_request.path
+        router_obj: dict | None = self.data.get('@routes') or self.data
+        is_not_router = not self.is_router
+        # is_not_router = pyonir_request.file.file_exists and not pyonir_request.file.is_router
+        if not router_obj or is_not_router or pyonir_request.is_home: return None
+        # is_home = app.endpoint == '/'
+        endpoint_slug = app.endpoint.lstrip(os.path.sep)
+        base_url = '' if pyonir_request.is_home or not endpoint_slug else "/".join(pyonir_request.parts[0:pyonir_request.parts.index(endpoint_slug)+1])
+        path = pyonir_request.path if not pyonir_request.is_api else "/"+"/".join(pyonir_request.parts[1:])
         router_method = None
         match = None
-        # v_page = Parsely('') # error page by default until route has match
         for r in router_obj.keys():
             if match: break
-            relpath = f"/{base_url}{r}"
+            relpath = f"{base_url}{r}"
             path_regex, path_format, *args = compile_path(relpath)
             match = path_regex.match(path)
             if match:
@@ -452,6 +446,9 @@ class Parsely:
                 virtual_req = value.get(pyonir_request.method) or value.get('page')
                 method_mod_path = value.get('call')
                 is_page = value.get('page') is not None
+                if self.is_router and pyonir_request.file and not pyonir_request.file.is_router:
+                    # we merge our virtual page spec into the request file spec
+                    pyonir_request.file.data.update(value)
                 if is_page:
                     self.data = virtual_req
                 if method_mod_path:
@@ -462,6 +459,7 @@ class Parsely:
             self.resolver = router_method
         else:
             # When no matching route spec is found we return an error page
+            self.is_router = False
             self.file_path = ''
             pass
 
@@ -486,6 +484,8 @@ class Parsely:
             request.form.update(resolver_args)
         if resolver and resolver_redirect:
             request.form['redirect'] = resolver_redirect
+        if not resolver:
+            resolver = request.auth.responses.ERROR.response(message=f"Unable to resolve endpoint")
         self.resolver = resolver
 
     def deserializer(self):
@@ -552,15 +552,16 @@ class Parsely:
             force_scalr = delim and delim.endswith('`') or parsed_val.startswith(LOOKUP_DIR_PREFIX)
             if parsed_key and parsed_val and not force_scalr:
                 has_dotpath = "." in parsed_key
-                if has_dotpath or (isinstance(val_type, (list, dict)) or ("," in parsed_val)):  # inline list
+                if has_dotpath or (isinstance(val_type, (list, dict)) or (", " in parsed_val)):  # inline list
                     _c = [] if delim is None else get_container_type(delim)
-                    for x in parsed_val.split(','):
+                    for x in parsed_val.split(', '):
                         pk, vtype, pv, pmethArgs = process_iln_frag(x)
-                        if vtype != '' and pk: _, pv = self.update_nested(pk, vtype, pv)
-                        self.update_nested(None, _c, pv)
+                        if vtype != '' and pk:
+                            _, pv = update_nested(pk, vtype, pv)
+                        update_nested(None, _c, pv)
                     parsed_val = _c or pv
 
-            skip_line = hasattr(self._generic_query_model, parsed_key) if parsed_key and self._generic_query_model else None
+            skip_line = hasattr(self.schema, parsed_key) if parsed_key and self.schema else None
             parsed_val = self.process_value_type(parsed_val) if not skip_line else parsed_val
 
             return parsed_key, val_type, parsed_val, methargs
@@ -573,16 +574,6 @@ class Parsely:
             else:
                 return str()
 
-        # def get_stop(cur, curtabs, is_blob=None, stop_str=None):
-        #     if cur == self.file_line_count: return '__STOPLOOKAHEAD__'
-        #     in_limit = cur + 1 < self.file_line_count
-        #     stop_comm_blok = self.file_lines[cur].strip().endswith(stop_str) if in_limit and stop_str else None
-        #     nxt_curs_is_blok = in_limit and self.file_lines[cur + 1].startswith(BLOCK_PREFIX_STR)
-        #     nxt_curs_is_blokfence = in_limit and self.file_lines[cur + 1].strip().startswith(BLOCK_CODE_FENCE)
-        #     nxt_curs_is_blokdelim = in_limit and self.file_lines[cur + 1].strip().endswith(BLOCK_DELIM)
-        #     nxt_curs_tabs = count_tabs(self.file_lines[cur + 1]) if (in_limit and not is_blob) else -1
-        #     return '__STOPLOOKAHEAD__' if stop_comm_blok or nxt_curs_is_blok or nxt_curs_is_blokdelim or (
-        #             nxt_curs_tabs < curtabs and not is_blob) else None
 
         def stop_loop_block(cur, curtabs, is_blob=None, stop_str=None):
             if cur == self.file_line_count: return True
@@ -651,7 +642,7 @@ class Parsely:
                                 output_data.update(parsed_val)
                                 output_data['@extends'] = ln_frag.split(':').pop().strip()
                             else:
-                                _, output_data = self.update_nested(parsed_key, output_data, data_merge=parsed_val)
+                                _, output_data = update_nested(parsed_key, output_data, data_merge=parsed_val)
                 except Exception as e:
                     # raise Exception(f"{self.file_name}: {str(e)}")
                     raise
@@ -690,31 +681,35 @@ class Parsely:
             def parse_ref_to_files(filepath, as_dir=0):
                 # use proper app context for path reference outside of scope is always the root level
                 # Ref parameters with model will return a generic model to represent the data value
-                generic_query_model = parse_query_model_to_object(generic_model_properties)
+                base_path = os.path.dirname(self.app_ctx[2])
+                generic_query_model = self.load_resolver(generic_model_properties, base_path=base_path) if generic_model_properties else None
+                generic_query_model = generic_query_model or parse_query_model_to_object(generic_model_properties)
 
                 if as_dir:
-                    file_gen = PyonirCollection.query(filepath,
+                    collection = PyonirCollection.query(filepath,
                                         app_ctx=self.app_ctx,
                                         force_all=return_all_files,
-                                        data_model=generic_query_model,
-                                        # Ignore files with same name and index files
-                                        exclude_file=(self.file_name + '.' + self.file_ext, 'index.md'))
-                    d = file_gen.paginated_collection(query_params)
+                                        model=generic_query_model,
+                                        exclude_names=(self.file_name + '.' + self.file_ext, 'index.md')
+                                                      )
+                    data = collection.paginated_collection(query_params)
                 else:
                     rtn_key = has_attr_path or 'data'
                     p = Parsely(filepath, self.app_ctx)
-                    d = get_attr(p, rtn_key) or p
+                    data = get_attr(p, rtn_key) or p
                 # EmbeddedTypes[filepath] = d
-                return d
+                return data
 
             cvaluestr = valuestr.strip()
             valuestr = valuestr.strip()
             has_file_ref = valuestr.startswith(LOOKUP_FILE_PREFIX)
             has_dir_ref = valuestr.startswith(LOOKUP_DIR_PREFIX)
             if '{{' in valuestr:
-                valuestr = self._Filters['jinja'](valuestr, self.data)
+                jinja = self.app_filter('jinja')
+                valuestr = jinja(valuestr, self.data)
             if valuestr.startswith('$') and '{' in valuestr:
-                valuestr = self._Filters['pyformat'](valuestr[1:] if not has_dir_ref else valuestr, self.__dict__)
+                pyformat = self.app_filter('pyformat')
+                valuestr = pyformat(valuestr[1:] if not has_dir_ref else valuestr, self.__dict__) if pyformat else valuestr
             if has_dir_ref:
                 query_params = valuestr.split("?").pop() if "?" in valuestr else False
                 has_attr_path = valuestr.split("#")[-1] if "#" in valuestr else ''
@@ -733,7 +728,7 @@ class Parsely:
                         'ISSUE': f'FileNotFound while processing {cvaluestr}',
                         'SOLUTION': f'Make sure the `{lookup_fpath}` file exists. Note that only valid md and json files can be processed.'
                     })
-                    return cvaluestr
+                    return None
                 return EmbeddedTypes.get(lookup_fpath, parse_ref_to_files(lookup_fpath, os.path.isdir(lookup_fpath)))
 
         return valuestr.lstrip('$')
@@ -821,7 +816,7 @@ class Parsely:
                 else:
                     return target_file.read()
             except Exception as e:
-                return {"error": "pyonir.parsely.Parsely.open_file", "message": str(e)} if rtn_as == "json" else []
+                return {"error": __file__, "message": str(e)} if rtn_as == "json" else []
 
     @staticmethod
     def post_process_blocklist(blocklist: list):
@@ -835,7 +830,7 @@ class Parsely:
                     ns.append(k)
                     trg = trg.get(k)
 
-            Parsely.update_nested(ns, src, trg)
+            update_nested(ns, src, trg)
             return src
 
         _temp_list_obj = {}  # used for blocks that have `-` separated maps
@@ -853,52 +848,58 @@ class Parsely:
         blocklist = results
         return blocklist
 
-    @staticmethod
-    def update_nested(attr_path: list, data_src: dict, data_merge=None, data_update=None, find=None) -> dict:
-        """Finds or Updates target value based on attribute path"""
-
-        def update_value(target, val):
-            """updates target object with value parameter"""
-            if isinstance(target, list):
-                if isinstance(val, list):
-                    target += val
-                else:
-                    target.append(val)
-            elif isinstance(target, dict) and isinstance(val, dict):
-                target.update(val)
-            elif isinstance(target, str) and isinstance(val, str):
-                target = val
-
-            return target
-
-        if not attr_path:
-            return True, update_value(data_src, data_merge)
-        attr_path = attr_path.strip().split('.') if isinstance(attr_path, str) else attr_path
-        completed = len(attr_path) == 1
-        if isinstance(data_src, list):
-            _, data_merge = Parsely.update_nested(attr_path, {}, data_merge)
-            return Parsely.update_nested(None, data_src, data_merge)
-        elif not completed:
-            _data = {}
-            for i, k in enumerate(attr_path):
-                if find:
-                    _data = data_src.get(k) if not _data else _data.get(k)
-                else:
-                    completed, _data = Parsely.update_nested(attr_path[i + 1:], data_src.get(k, _data), find=find,
-                                                             data_merge=data_merge, data_update=data_update)
-                    update_value(data_src, {k: _data})
-                    if completed: break
-        else:
-            k = attr_path[-1].strip()
-            if find:
-                return True, data_src.get(k)
-            if data_update: return completed, update_value(data_src, {k: data_update})
-            has_mapping_key = isinstance(data_src, (dict,)) and data_src.get(k)
-            if not has_mapping_key: data_merge = {k: data_merge}
-            update_value(data_src.get(k, data_src), data_merge) if isinstance(data_src, dict) else update_value(
-                data_src, data_merge)
-
-        return completed, (data_src if not find else _data)
+    # @staticmethod
+    # def update_nested(attr_path: list, data_src: dict, data_merge=None, data_update=None, find=None) -> dict:
+    #     """Finds or Updates target value based on attribute path"""
+    #
+    #     def update_value(target, val):
+    #         """updates target object with value parameter"""
+    #         if isinstance(target, list):
+    #             if isinstance(val, list):
+    #                 target += val
+    #             else:
+    #                 target.append(val)
+    #         elif isinstance(target, dict) and isinstance(val, dict):
+    #             target.update(val)
+    #         elif isinstance(target, str) and isinstance(val, str):
+    #             target = val
+    #
+    #         return target
+    #
+    #     if not attr_path:
+    #         return True, update_value(data_src, data_merge)
+    #     attr_path = attr_path.strip().split('.') if isinstance(attr_path, str) else attr_path
+    #     completed = len(attr_path) == 1
+    #     if isinstance(data_src, list):
+    #         _, data_merge = Parsely.update_nested(attr_path, {}, data_merge)
+    #         return Parsely.update_nested(None, data_src, data_merge)
+    #     elif not completed:
+    #         _data = {}
+    #         for i, k in enumerate(attr_path):
+    #             if find:
+    #                 _data = data_src.get(k) if not _data else _data.get(k)
+    #             else:
+    #                 completed, _data = Parsely.update_nested(attr_path[i + 1:], data_src.get(k, _data), find=find,
+    #                                                          data_merge=data_merge, data_update=data_update)
+    #                 update_value(data_src, {k: _data})
+    #                 if completed: break
+    #     else:
+    #         k = attr_path[-1].strip()
+    #         if find:
+    #             return True, data_src.get(k)
+    #         if data_update:
+    #             return completed, update_value(data_src, {k: data_update})
+    #         has_mapping_key = isinstance(data_src, (dict,)) and data_src.get(k) is not None
+    #         if not has_mapping_key:
+    #             data_merge = {k: data_merge}
+    #         if isinstance(data_merge, (str, int, float, bool)):
+    #             data_src[k] = data_merge
+    #         if isinstance(data_src, dict):
+    #             update_value(data_src.get(k, data_src), data_merge)
+    #         else:
+    #             update_value(data_src, data_merge)
+    #
+    #     return completed, (data_src if not find else _data)
 
     @classmethod
     def from_input(cls, input_src: dict, app_ctx: tuple):
@@ -929,6 +930,10 @@ class Parsely:
             'LINE': f'{self.file_lines[self._cursor]}', **message}
         return msg
 
+    def app_filter(self, filter_name: str):
+        from pyonir import Site
+        return Site.Parsely_Filters.get(filter_name) if Site else {}
+
     def refresh_data(self):
         """Parses file and update data values"""
         self.data = {}
@@ -947,10 +952,10 @@ class Parsely:
         if not as_str: return data
         return json.dumps(data, default=json_serial)
 
-    def output_html(self, req: PyonirRequest):
+    def output_html(self, req: PyonirRequest) -> str:
         """Renders and html output"""
         from pyonir import Site
-        page = self.map_to_model(Page, get_attr(req, 'query_params.rmodel'))
+        page = self.map_to_model(Page, get_attr(req, 'query_params.refresh_model'))
         Site.TemplateEnvironment.globals['prevNext'] = self.prev_next
         Site.TemplateEnvironment.globals['page'] = page
         html = Site.TemplateEnvironment.get_template(page.template).render()
@@ -1005,3 +1010,85 @@ class Parsely:
             return html_data, json_data
 
         return count
+
+
+def update_nested(attr_path, data_src: dict, data_merge=None, data_update=None, find=None) -> tuple[bool, dict]:
+    """
+    Finds or updates target value based on an attribute path.
+
+    Args:
+        attr_path (list | str): Attribute path as list or dot-separated string.
+        data_src (dict): Source data to search or update.
+        data_merge (Any, optional): Value to merge.
+        data_update (Any, optional): Value to replace at path.
+        find (bool, optional): If True, only retrieve the value.
+
+    Returns:
+        tuple[bool, Any]: (completed, updated data or found value)
+    """
+
+    def update_value(target, val):
+        """Mutates target with val depending on type compatibility."""
+        if isinstance(target, list):
+            if isinstance(val, list):
+                target.extend(val)
+            else:
+                target.append(val)
+        elif isinstance(target, dict) and isinstance(val, dict):
+            target.update(val)
+        elif isinstance(target, str) and isinstance(val, str):
+            return val
+        return target
+
+    # Normalize attribute path
+    if isinstance(attr_path, str):
+        attr_path = attr_path.strip().split('.')
+    if not attr_path:
+        return True, update_value(data_src, data_merge)
+
+    completed = len(attr_path) == 1
+
+    # Handle list source at top-level
+    if isinstance(data_src, list):
+        _, merged_val = update_nested(attr_path, {}, data_merge)
+        return update_nested(None, data_src, merged_val)
+
+    # Navigate deeper if not at last key
+    if not completed:
+        current_data = {}
+        for i, key in enumerate(attr_path):
+            if find:
+                current_data = (data_src.get(key) if not current_data else current_data.get(key))
+            else:
+                completed, current_data = update_nested(
+                    attr_path[i + 1:],
+                    data_src.get(key, current_data),
+                    find=find,
+                    data_merge=data_merge,
+                    data_update=data_update
+                )
+                update_value(data_src, {key: current_data})
+                if completed:
+                    break
+    else:
+        # Last key operations
+        key = attr_path[-1].strip()
+
+        if find:
+            return True, data_src.get(key)
+
+        if data_update is not None:
+            return completed, update_value(data_src, {key: data_update})
+
+        # If key not in dict, wrap merge value in a dict
+        if isinstance(data_src, dict) and data_src.get(key) is None:
+            data_merge = {key: data_merge}
+
+        if isinstance(data_merge, (str, int, float, bool)):
+            data_src[key] = data_merge
+        elif isinstance(data_src, dict):
+            update_value(data_src.get(key, data_src), data_merge)
+        else:
+            update_value(data_src, data_merge)
+
+    return completed, (data_src if not find else current_data)

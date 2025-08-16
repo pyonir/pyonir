@@ -4,8 +4,7 @@ import typing
 from typing import Union, Generator, Iterable, Callable, Mapping, get_origin, get_args, get_type_hints, Any
 from collections.abc import Iterable as ABCIterable
 
-from pyonir.pyonir_types import PyonirRequest, PyonirApp
-
+from pyonir.pyonir_types import PyonirRequest, PyonirApp, AppCtx
 
 def is_iterable(tp):
     if not isinstance(tp, Iterable): return False
@@ -41,38 +40,49 @@ def is_optional_type(t):
 def is_callable_type(pt) -> bool:
     return get_origin(pt) is Callable or pt.__name__=='callable'
 
-def cls_mapper(file_obj: any, cls: typing.Callable, from_request: PyonirRequest = None):
+def cls_mapper(file_obj: object, cls: typing.Callable, from_request: PyonirRequest = None):
+    from pyonir.core import PyonirRequest, PyonirApp
     param_name, param_type, param_value = ['','','']
+    orm_opts = getattr(cls, "__orm_options__", {})
+    mapper_keys = getattr(cls, "_mapper", None) or orm_opts.get("mapper", {})
     try:
-        if hasattr(cls, '__skip_parsely_deserialization__'): return file_obj
+        if hasattr(cls, '__skip_parsely_deserialization__'):
+            return file_obj
+
         param_type_map = get_type_hints(cls)
         is_generic = cls.__name__ == 'GenericQueryModel'
+
         if is_scalar_type(cls):
             return cls(file_obj)
-        # if is_generic:
-        #     print('isgeneric', file_obj.file_name, file_obj.file_data_type)
-        mapper_keys = cls._mapper if hasattr(cls, '_mapper') else {}
+
+        # mapper_keys = getattr(cls, "_mapper", {})
         data = get_attr(file_obj, 'data') or {}
-        _parsely_data_key = '.'.join(['data', get_attr(cls, '_mapper_key') or cls.__name__.lower()])
-        kdata = get_attr(file_obj, _parsely_data_key)
-        if kdata: data.update(**kdata)
+        # _parsely_data_key = '.'.join(['data', get_attr(cls, '_mapper_key') or cls.__name__.lower()])
+        # kdata = get_attr(file_obj, _parsely_data_key)
+        # if kdata:
+        #     data.update(**kdata)
+
         cls_args = {}
         res = cls() if is_generic else None
-        if hasattr(cls, 'from_dict'): # allows manual mapping of class instance
+
+        if hasattr(cls, 'from_dict'):  # allows manual mapping of class instance
             return cls.from_dict(file_obj)
+
+        # Build constructor args
         for param_name, param_type in param_type_map.items():
             param_type = is_optional_type(param_type)
             mapper_key = get_attr(mapper_keys, param_name) or param_name
             param_value = get_attr(data, mapper_key) or get_attr(file_obj, mapper_key)
             use_value = False
-            if from_request and param_type == PyonirApp or param_type == PyonirRequest:
+
+            if from_request and param_type in (PyonirApp, PyonirRequest):
                 from pyonir import Site
                 use_value = True
                 param_value = Site if param_type == PyonirApp else from_request
-            # if param_type == PyonirRequest and from_request:
-            #     param_value = from_request
-            if (param_value==param_type) or param_value is None or param_name[0]=='_' or param_name=='return':
+
+            if (param_value == param_type) or param_value is None or param_name[0] == '_' or param_name == 'return':
                 continue
+
             if is_callable_type(param_type):
                 cls_args[mapper_key] = param_value
             elif is_iterable(param_type):
@@ -81,8 +91,12 @@ def cls_mapper(file_obj: any, cls: typing.Callable, from_request: PyonirRequest 
                 if is_mapp:
                     ktype, vtype = iter_ptype
                     is_list = is_iterable(vtype)
-                    if is_list: vtype = get_args(vtype)[0]
-                    cls_args[param_name] = {ktype(key): [cls_mapper(lval, vtype) for lval in value] if is_list else cls_mapper(value, vtype) for key, value in param_value.items()}
+                    if is_list:
+                        vtype = get_args(vtype)[0]
+                    cls_args[param_name] = {
+                        ktype(key): [cls_mapper(lval, vtype) for lval in value] if is_list else cls_mapper(value, vtype)
+                        for key, value in param_value.items()
+                    }
                 else:
                     cls_args[param_name] = [cls_mapper(itm, iter_ptype[0]) for itm in param_value]
             else:
@@ -92,51 +106,51 @@ def cls_mapper(file_obj: any, cls: typing.Callable, from_request: PyonirRequest 
                     param_value = cls_mapper(from_request.form, param_type)
                 should_spread = isinstance(param_value, dict)
                 use_value = use_value or is_typed or is_instance
-                v = param_value if use_value else param_type(**param_value) if should_spread else param_type(param_value)
+                v = (
+                    param_value if use_value
+                    else param_type(**param_value) if should_spread
+                    else param_type(param_value)
+                )
                 cls_args[param_name] = v
 
-        if from_request: return cls_args
-        if not from_request and param_type_map: res = cls(**cls_args)
-        # setattr(res, '@model', cls.__name__)
+        if from_request:
+            return cls_args
 
+        if not from_request and param_type_map:
+            res = cls(**cls_args)
+
+        # Generic class post-processing
         if is_generic:
-            # lookup values for class instance
             for key in cls.__dict__.keys():
-                if key[0]=='_': continue
+                if key[0] == '_':
+                    continue
                 value = get_attr(data, key) or get_attr(file_obj, key)
                 setattr(res, key, value)
-        if hasattr(cls, '_mapper_merge'):
-            # Sets non class attributes onto the model instance
+
+        # ✅ Check ORM options for "frozen"
+        if not orm_opts.get("frozen"):
             for key, value in data.items():
-                if isinstance(getattr(cls, key, None), property): continue # skip active attributes
-                if param_type_map.get(key) or key[0]=='_': continue # skip private attributes
+                if isinstance(getattr(cls, key, None), property):
+                    continue  # skip properties
+                if param_type_map.get(key) or key[0] == '_':
+                    continue  # skip private or declared attributes
                 setattr(res, key, value)
+
+        return res
 
     except Exception as e:
         print(f"Cls Mapper failed to create a {cls.__name__} instance due to map '{param_name}' parameter wasn't a type of {param_type} : {type(param_value)}")
         raise
 
-    return res
-
 
 def process_contents(path, app_ctx=None, file_model: any = None):
     """Deserializes all files within the contents directory"""
-    from pyonir.parser import Parsely
-
-    # def update(self):
-    #     for key in self.__dict__.keys():
-    #         val = get_attr(self, key)
-    #         if not hasattr(val, '_path'): continue
-    #         pval = Parsely(val._path, app_ctx)
-    #         setattr(self, key, dict_to_class({**pval.data, '_path': pval.file_path}, key))
-    #     pass
-
     key = os.path.basename(path)
     res = type(key, (object,), {"__name__": key})() # generic map
-    pgs = get_all_files_from_dir(path, app_ctx=app_ctx, entry_type=file_model)
+    pgs = query_files(path, app_ctx=app_ctx, model=file_model)
     for pg in pgs:
         name = getattr(pg, 'file_name')
-        setattr(res, name, pg)
+        setattr(res, name, pg.map_to_model(None))
     return res
 
 
@@ -278,6 +292,7 @@ def sortBykey(listobj, sort_by_key="", limit="", reverse=True):
 def parse_query_model_to_object(model_fields: str) -> object:
     if not model_fields: return None
     from pyonir.parser import Parsely
+    import importlib
     mapper = {}
     params = {"_mapper": mapper}
     for k in Parsely.default_file_attributes+model_fields.split(','):
@@ -287,63 +302,93 @@ def parse_query_model_to_object(model_fields: str) -> object:
         params[k] = None
     return type('GenericQueryModel', (object,), params)
 
-def get_all_files_from_dir(abs_dirpath: str,
-                           app_ctx: list = None,
-                           entry_type: any = None,
-                           include_only: str = None,
-                           exclude_dirs: list[str] = None,
-                           exclude_file: str = None,
-                           force_all: bool = True) -> Generator:
+def query_files(abs_dirpath: str,
+                app_ctx: AppCtx = None,
+                model: object | str = None,
+                name_pattern: str = None,
+                exclude_dirs: tuple = None,
+                exclude_names: tuple = None,
+                force_all: bool = True) -> Generator:
     """Returns a generator of files from a directory path"""
+    from pathlib import Path
+    from pyonir.parser import Parsely, ParselyMedia, Page
+    # results = []
+    hidden_file_prefixes = ('.', '_', '<', '>', '(', ')', '$', '!', '._')
+    allowed_content_extensions = ('prs', 'md', 'json', 'yaml')
+    def get_datatype(filepath) -> object | Parsely | ParselyMedia:
+        if model == 'path': return filepath
+        pf = Parsely(str(filepath), app_ctx=app_ctx, model=model)
+        if pf.is_page and not model: pf.schema = Page
+        res = pf.map_to_model(pf.schema)
+        return res if pf.schema else pf
 
-    from pyonir.parser import ALLOWED_CONTENT_EXTENSIONS, IGNORE_FILES,Page, Parsely, ParselyMedia
-    from pyonir.core import PyonirBase
-    if abs_dirpath in (exclude_dirs or []): return []
-    if exclude_file is None: exclude_file = []
-    _, _, pages_dirpath, _ = app_ctx
+    def skip_file(file_path: Path) -> bool:
+        """Checks if the file should be skipped based on exclude_dirs and exclude_file"""
+        is_private_file = file_path.name.startswith(hidden_file_prefixes)
+        is_excluded_file = exclude_names and file_path.name in exclude_names
+        is_allowed_file = file_path.suffix[1:] in allowed_content_extensions
+        return is_excluded_file or is_private_file or not is_allowed_file
 
-    def get_datatype(parentdir, rel_filepath):
-        filepath = os.path.normpath(os.path.join(parentdir, rel_filepath))
-        if entry_type == 'path':
-            return filepath
-        ismedia = not filepath.endswith(ALLOWED_CONTENT_EXTENSIONS)
-        generic_model = entry_type if entry_type and entry_type.__name__=='GenericQueryModel' else None
-        pf = Parsely(filepath, app_ctx, generic_model)
-        pf.schema = ParselyMedia if ismedia else Page if pf.is_page else generic_model or entry_type
-        return pf.map_to_model(pf.schema)
-        # if ismedia:
-        #     return cls_mapper(pf, ParselyMedia)
-        # return cls_mapper(pf, entry_type or Page ) if entry_type or pf.is_page else pf.map_to_model(None)
+    for path in Path(abs_dirpath).rglob(name_pattern or "*"):
+        if skip_file(path): continue
+        yield get_datatype(path)
+        # results.append(get_datatype(path))
+    # return results
 
-
-    def should_skip(parentdir, filename):
-        parentdir = parentdir.replace(pages_dirpath, "").lstrip(os.path.sep)
-        is_include_only_file = (include_only and filename == include_only)
-        if is_include_only_file: return False
-        is_hidden_dir = parentdir.startswith(IGNORE_FILES)
-        is_media_file = filename.endswith(PyonirBase.MEDIA_EXTENSIONS)
-        is_invalid_file = not is_media_file and not filename.endswith(ALLOWED_CONTENT_EXTENSIONS)
-        is_ignored_file = filename in (IGNORE_FILES + tuple(exclude_file))
-        is_private_file = filename.startswith(IGNORE_FILES)
-        if filename!='.routes.md' and force_all and not is_invalid_file: return False
-        if is_hidden_dir or is_invalid_file or is_ignored_file or is_private_file: return True
-
-    for parentdir, subs, files in os.walk(os.path.normpath(abs_dirpath)):
-        folderRoot = parentdir.replace(pages_dirpath, "").lstrip(os.path.sep)
-        subFolderRoot = os.path.basename(folderRoot)
-        skipRoot = (folderRoot in IGNORE_FILES
-                    or folderRoot.startswith(IGNORE_FILES)
-                    or subFolderRoot.startswith(IGNORE_FILES))
-        skipSubs = subFolderRoot in exclude_dirs if exclude_dirs else 0
-        if skipRoot or skipSubs: continue
-
-        for filename in files:
-            # include_only_file = (include_only and filename != include_only)
-            if should_skip(parentdir, filename): continue
-            # if filename in exclude_file or include_only_file: continue
-            # if not force_all and not filename.endswith(ALLOWED_CONTENT_EXTENSIONS): continue
-            # if not should_skip(parentdir, filename) or filename in IGNORE_FILES: continue
-            yield get_datatype(parentdir, filename)
+# def get_all_files_from_dir(abs_dirpath: str,
+#                            app_ctx: list = None,
+#                            entry_type: any = None,
+#                            include_only: str = None,
+#                            exclude_dirs: list[str] = None,
+#                            exclude_file: str = None,
+#                            force_all: bool = True) -> Generator:
+#     """Returns a generator of files from a directory path"""
+#     from pyonir.parser import ALLOWED_CONTENT_EXTENSIONS, IGNORE_FILES,Page, Parsely, ParselyMedia
+#     from pyonir.core import PyonirBase
+#     if abs_dirpath in (exclude_dirs or []): return []
+#     if exclude_file is None: exclude_file = []
+#     _, _, pages_dirpath, _ = app_ctx
+#
+#     def get_datatype(parentdir, rel_filepath):
+#         filepath = os.path.normpath(os.path.join(parentdir, rel_filepath))
+#         if entry_type == 'path':
+#             return filepath
+#         ismedia = not filepath.endswith(ALLOWED_CONTENT_EXTENSIONS)
+#         generic_model = entry_type if entry_type and entry_type.__name__=='GenericQueryModel' else None
+#         pf = Parsely(filepath, app_ctx, generic_model)
+#         pf.schema = ParselyMedia if ismedia else Page if pf.is_page else generic_model or entry_type
+#         return pf.map_to_model(pf.schema)
+#         # if ismedia:
+#         #     return cls_mapper(pf, ParselyMedia)
+#         # return cls_mapper(pf, entry_type or Page ) if entry_type or pf.is_page else pf.map_to_model(None)
+#
+#
+#     def should_skip(parentdir, filename):
+#         parentdir = parentdir.replace(pages_dirpath, "").lstrip(os.path.sep)
+#         is_include_only_file = (include_only and filename == include_only)
+#         if is_include_only_file: return False
+#         is_hidden_dir = parentdir.startswith(IGNORE_FILES)
+#         is_media_file = filename.endswith(PyonirBase.MEDIA_EXTENSIONS)
+#         is_invalid_file = not is_media_file and not filename.endswith(ALLOWED_CONTENT_EXTENSIONS)
+#         is_ignored_file = filename in (IGNORE_FILES + tuple(exclude_file))
+#         is_private_file = filename.startswith(IGNORE_FILES)
+#         if filename!='.routes.md' and force_all and not is_invalid_file: return False
+#         if is_hidden_dir or is_invalid_file or is_ignored_file or is_private_file: return True
+#
+#     for parentdir, subs, files in os.walk(os.path.normpath(abs_dirpath)):
+#         folderRoot = parentdir.replace(pages_dirpath, "").lstrip(os.path.sep)
+#         subFolderRoot = os.path.basename(folderRoot)
+#         skipRoot = (folderRoot in IGNORE_FILES
+#                     or folderRoot.startswith(IGNORE_FILES)
+#                     or subFolderRoot.startswith(IGNORE_FILES))
+#         contains_skipdir = set(folderRoot.split('/')).intersection(exclude_dirs) if exclude_dirs else None
+#         skipSubs = subFolderRoot in exclude_dirs if exclude_dirs else 0
+#         if skipRoot or skipSubs or contains_skipdir: continue
+#
+#         for filename in files:
+#             # include_only_file = (include_only and filename != include_only)
+#             if should_skip(folderRoot, filename): continue
+#             yield get_datatype(parentdir, filename)
 
 
 def delete_file(full_filepath):
@@ -444,7 +489,8 @@ def import_module(pkg_path: str, callable_name: str) -> typing.Callable:
     """Imports a module and returns the callable by name"""
     import importlib
     mod_pkg = importlib.import_module(pkg_path)
-    mod = getattr(mod_pkg, callable_name, None)
+    importlib.reload(mod_pkg)
+    mod = get_attr(mod_pkg, callable_name, None)
     return mod
 
 def get_module(pkg_path: str, callable_name: str) -> tuple[typing.Any, typing.Callable]:

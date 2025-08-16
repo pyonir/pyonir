@@ -1,7 +1,6 @@
 @filter.jinja:- content
 title: Blogging on Pyonir
-menu.group: primary
-entries: $dir/pages/blogs?limit=3&model=title,url,author,date:file_created_on
+entries: $dir/pages/blogs?model=title,url,author,date:file_created_on
 ===
 Welcome to the blog page.
 

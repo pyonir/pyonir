@@ -104,10 +104,10 @@ title: Pencil Theme style guide
 
     <!-- Medias-->
     <figure>
-      <img src="https://i.pinimg.com/1200x/3c/08/00/3c0800ff4a301affc84b5f5ea11060c6.jpg" alt="Minimal landscape">
+      <img src="https://i.pinimg.com/1200x/3c/08/00/3c0800ff4a301affc84b5f5ea11060c6.jpg" alt="Circuits">
       <figcaption>
         Image from
-        <a href="https://i.pinimg.com/1200x/3c/08/00/3c0800ff4a301affc84b5f5ea11060c6.jpg" target="_blank">unsplash.com</a>
+        <a href="https://i.pinimg.com/1200x/3c/08/00/3c0800ff4a301affc84b5f5ea11060c6.jpg" target="_blank">the internet</a>
       </figcaption>
     </figure>
   </section>

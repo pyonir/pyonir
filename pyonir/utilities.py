@@ -43,35 +43,46 @@ def is_callable_type(pt) -> bool:
 def cls_mapper(file_obj: object, cls: typing.Callable, from_request: PyonirRequest = None):
     from pyonir.core import PyonirRequest, PyonirApp
     param_name, param_type, param_value = ['','','']
+    orm_opts = getattr(cls, "__orm_options__", {})
+    mapper_keys = getattr(cls, "_mapper", None) or orm_opts.get("mapper", {})
     try:
-        if hasattr(cls, '__skip_parsely_deserialization__'): return file_obj
+        if hasattr(cls, '__skip_parsely_deserialization__'):
+            return file_obj
+
         param_type_map = get_type_hints(cls)
         is_generic = cls.__name__ == 'GenericQueryModel'
+
         if is_scalar_type(cls):
             return cls(file_obj)
-        # if is_generic:
-        #     print('isgeneric', file_obj.file_name, file_obj.file_data_type)
-        mapper_keys = cls._mapper if hasattr(cls, '_mapper') else {}
+
+        # mapper_keys = getattr(cls, "_mapper", {})
         data = get_attr(file_obj, 'data') or {}
-        _parsely_data_key = '.'.join(['data', get_attr(cls, '_mapper_key') or cls.__name__.lower()])
-        kdata = get_attr(file_obj, _parsely_data_key)
-        if kdata: data.update(**kdata)
+        # _parsely_data_key = '.'.join(['data', get_attr(cls, '_mapper_key') or cls.__name__.lower()])
+        # kdata = get_attr(file_obj, _parsely_data_key)
+        # if kdata:
+        #     data.update(**kdata)
+
         cls_args = {}
         res = cls() if is_generic else None
-        if hasattr(cls, 'from_dict'): # allows manual mapping of class instance
+
+        if hasattr(cls, 'from_dict'):  # allows manual mapping of class instance
             return cls.from_dict(file_obj)
+
+        # Build constructor args
         for param_name, param_type in param_type_map.items():
             param_type = is_optional_type(param_type)
             mapper_key = get_attr(mapper_keys, param_name) or param_name
             param_value = get_attr(data, mapper_key) or get_attr(file_obj, mapper_key)
             use_value = False
-            if from_request and param_type == PyonirApp or param_type == PyonirRequest:
+
+            if from_request and param_type in (PyonirApp, PyonirRequest):
                 from pyonir import Site
                 use_value = True
                 param_value = Site if param_type == PyonirApp else from_request
 
-            if (param_value==param_type) or param_value is None or param_name[0]=='_' or param_name=='return':
+            if (param_value == param_type) or param_value is None or param_name[0] == '_' or param_name == 'return':
                 continue
+
             if is_callable_type(param_type):
                 cls_args[mapper_key] = param_value
             elif is_iterable(param_type):
@@ -80,8 +91,12 @@ def cls_mapper(file_obj: object, cls: typing.Callable, from_request: PyonirReque
                 if is_mapp:
                     ktype, vtype = iter_ptype
                     is_list = is_iterable(vtype)
-                    if is_list: vtype = get_args(vtype)[0]
-                    cls_args[param_name] = {ktype(key): [cls_mapper(lval, vtype) for lval in value] if is_list else cls_mapper(value, vtype) for key, value in param_value.items()}
+                    if is_list:
+                        vtype = get_args(vtype)[0]
+                    cls_args[param_name] = {
+                        ktype(key): [cls_mapper(lval, vtype) for lval in value] if is_list else cls_mapper(value, vtype)
+                        for key, value in param_value.items()
+                    }
                 else:
                     cls_args[param_name] = [cls_mapper(itm, iter_ptype[0]) for itm in param_value]
             else:
@@ -91,31 +106,41 @@ def cls_mapper(file_obj: object, cls: typing.Callable, from_request: PyonirReque
                     param_value = cls_mapper(from_request.form, param_type)
                 should_spread = isinstance(param_value, dict)
                 use_value = use_value or is_typed or is_instance
-                v = param_value if use_value else param_type(**param_value) if should_spread else param_type(param_value)
+                v = (
+                    param_value if use_value
+                    else param_type(**param_value) if should_spread
+                    else param_type(param_value)
+                )
                 cls_args[param_name] = v
 
-        if from_request: return cls_args
-        if not from_request and param_type_map: res = cls(**cls_args)
-        # setattr(res, '@model', cls.__name__)
+        if from_request:
+            return cls_args
 
+        if not from_request and param_type_map:
+            res = cls(**cls_args)
+
+        # Generic class post-processing
         if is_generic:
-            # lookup values for class instance
             for key in cls.__dict__.keys():
-                if key[0]=='_': continue
+                if key[0] == '_':
+                    continue
                 value = get_attr(data, key) or get_attr(file_obj, key)
                 setattr(res, key, value)
-        # if hasattr(cls, '_mapper_merge'):
-        #     # Sets non class attributes onto the model instance
-        #     for key, value in data.items():
-        #         if isinstance(getattr(cls, key, None), property): continue # skip active attributes
-        #         if param_type_map.get(key) or key[0]=='_': continue # skip private attributes
-        #         setattr(res, key, value)
+
+        # ✅ Check ORM options for "frozen"
+        if not orm_opts.get("frozen"):
+            for key, value in data.items():
+                if isinstance(getattr(cls, key, None), property):
+                    continue  # skip properties
+                if param_type_map.get(key) or key[0] == '_':
+                    continue  # skip private or declared attributes
+                setattr(res, key, value)
+
+        return res
 
     except Exception as e:
         print(f"Cls Mapper failed to create a {cls.__name__} instance due to map '{param_name}' parameter wasn't a type of {param_type} : {type(param_value)}")
         raise
-
-    return res
 
 
 def process_contents(path, app_ctx=None, file_model: any = None):
@@ -267,6 +292,7 @@ def sortBykey(listobj, sort_by_key="", limit="", reverse=True):
 def parse_query_model_to_object(model_fields: str) -> object:
     if not model_fields: return None
     from pyonir.parser import Parsely
+    import importlib
     mapper = {}
     params = {"_mapper": mapper}
     for k in Parsely.default_file_attributes+model_fields.split(','):

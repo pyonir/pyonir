@@ -29,8 +29,7 @@ dependencies = [
 Homepage = "https://pyonir.dev"
 
 [project.scripts]
-pyonir-create = "pyonir:cli.pyonir_setup"
-pyonir = "pyonir:cli.pyonir_install"
+pyonir = "pyonir:cli.pyonir_setup"
 
 [tool.setuptools]
 include-package-data = true

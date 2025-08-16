@@ -1,10 +1,9 @@
 import asyncio
 import os, typing, json, inspect
-from typing import get_type_hints
 
 from starlette.websockets import WebSocket, WebSocketState, WebSocketDisconnect
-from pyonir.core import PyonirApp
-from pyonir.pyonir_types import PyonirRequest, PyonirServer, PyonirHooks, AppEndpoint, PyonirRouters, \
+from pyonir.core import PyonirApp, PyonirRequest
+from pyonir.pyonir_types import PyonirServer, PyonirHooks, AppEndpoint, PyonirRouters, \
     PyonirRestResponse
 from pyonir.utilities import create_file, get_attr, cls_mapper
 
@@ -105,7 +104,7 @@ async def pyonir_sse_handler(request: PyonirRequest) -> typing.AsyncGenerator:
 
 async def pyonir_docs_handler(request: PyonirRequest):
     """Documentation for every endpoint by pyonir"""
-    return request.server_request.app.url_map
+    return {"routes": request.server_request.app.url_map, "configs": request.auth.app.configs}
 
 
 def pyonir_index(request: PyonirRequest):
@@ -163,12 +162,12 @@ def setup_starlette_server(iapp: PyonirApp) -> PyonirServer:
     return star_app
 
 
-def url_for(name, attr='path'):
-    """returns application route value based on named class function name"""
-    from pyonir import Site
-    if not Site: return None
-    urlmap = Site.server.url_map
-    return urlmap.get(name, {}).get(attr)
+# def url_for(name, attr='path'):
+#     """returns application route value based on named class function name"""
+#     from pyonir import Site
+#     if not Site: return None
+#     urlmap = Site.server.url_map
+#     return urlmap.get(name, {}).get(attr)
 
 
 def init_app_endpoints(endpoints: 'Endpoints'):
@@ -372,7 +371,7 @@ async def create_response(pyonir_request: PyonirRequest, dec_func: callable):
     # await req_file.process_route(pyonir_request, app_ctx)
     await req_file.process_resolver(pyonir_request)
 
-    route_func = None if not callable(req_file.resolver) else req_file.resolver
+    route_func = dec_func if not callable(req_file.resolver) else req_file.resolver
 
     # Check resolver route security
     security = pyonir_request.auth.security.check(pyonir_request.auth)
@@ -411,7 +410,7 @@ async def create_response(pyonir_request: PyonirRequest, dec_func: callable):
     pyonir_response = pyonir_request.server_response if is_auth_res else PyonirRestResponse(status_code=pyonir_request.status_code)
     if not is_auth_res:
         if pyonir_request.type == JSON_RES:
-            pyonir_response.set_json(pyonir_request.server_response if req_file.resolver else req_file.data)
+            pyonir_response.set_json(pyonir_request.server_response)
         else:
             pyonir_response.set_html(req_file.output_html(pyonir_request))
 
@@ -425,21 +424,6 @@ async def create_response(pyonir_request: PyonirRequest, dec_func: callable):
     # Generate response
     pyonir_response.set_server_response()
     return pyonir_response.render()
-
-# def build_response(request: PyonirRequest):
-#     """Create web response for web server"""
-#     from pyonir import Site
-#     force_fresh = "no-store, no-cache, must-revalidate, max-age=0"
-#     # force_cache = "public"
-#
-#     response = Site.server.response_renderer(request.server_response, media_type=request.type)
-#     response.headers['Cache-Control'] = force_fresh
-#     response.headers['Pragma'] = "no-cache"
-#     response.headers['Expires'] = "0"
-#     response.headers['Server'] = "Pyonir Web Framework"
-#     response.status_code = request.status_code
-#     return response
-
 
 def get_route_ctx(app: PyonirApp, path_str: str) -> tuple:
     """Gets the routing context from web request"""

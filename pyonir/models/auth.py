@@ -58,7 +58,7 @@ class UserCredentials:
             email, password = decoded.split(':', 1)
         if auth_type.startswith('Bearer '):
             # Handle Bearer token if needed
-            user_creds = decode_jwt(auth_token)
+            user_creds = self.decode_jwt(auth_token)
             email, password = user_creds.get('username'), user_creds.get('password')
             pass
         return cls(email=username, password=password, has_session=True) if username and password else None
@@ -129,14 +129,7 @@ def check_pass(protected_hash: str, password_str: str) -> bool:
         print(f"Password verification failed: {e}")
         return False
 
-def decode_jwt(jwt_token) -> dict | None:
-    """Returns decoded jwt object"""
-    from pyonir import Site
-    import jwt
-    try:
-        return jwt.decode(jwt_token, Site.SECRET_SAUCE, algorithms=['HS256'])
-    except Exception as e:
-        print(f"{__name__} method - {str(e)}: {type(e).__name__}")
+
 
 def auth_decode(authorization_header: str) -> UserCredentials | None:
     """Decodes the authorization header to extract user credentials."""
@@ -151,7 +144,7 @@ def auth_decode(authorization_header: str) -> UserCredentials | None:
         email, password = decoded.split(':', 1)
     if auth_type.startswith('Bearer '):
         # Handle Bearer token if needed
-        user_creds = decode_jwt(auth_token)
+        user_creds = self.decode_jwt(auth_token)
         email, password = user_creds.get('email'), user_creds.get('password')
         pass
     return UserCredentials(email, password)
@@ -229,6 +222,12 @@ class AuthResponses:
 
     UNAUTHORIZED = AuthResponse(
         message="Unauthorized access",
+        status_code=401
+    )
+    """AuthResponse: Indicates missing or invalid authentication credentials (HTTP 401)."""
+
+    SESSION_EXPIRED = AuthResponse(
+        message="Session has expired. New Sign in required",
         status_code=401
     )
     """AuthResponse: Indicates missing or invalid authentication credentials (HTTP 401)."""
@@ -424,6 +423,7 @@ class Auth:
     def log_user_location(self, user: User):
         """logs user signin location"""
         new_location = client_location(self.request)
+        if not new_location: return
         match_keys = ["ip", "device"]
         locations = user.signin_locations
         # Find matches using list comprehension
@@ -513,7 +513,7 @@ class Auth:
         if not self.user_creds:
             self.response = self.responses.UNAUTHORIZED
             return None
-        session_user = decode_jwt(self.user_creds.token)
+        session_user = self.decode_jwt(self.user_creds.token)
         if not session_user:
             self.response = self.responses.UNAUTHORIZED
             return None
@@ -550,12 +550,20 @@ class Auth:
         salt = self.app.configs.env.salt
         return hash_password(self.harden_password(salt, password, with_token or self.request.session_token))
 
-    def _hash_password(self, with_token: str = None) -> str:
-        """Rehashes the user's password with the current site salt and request token."""
-        if not self.user_creds or not self.user_creds.password:
-            return ''
-        salt = self.app.configs.env.salt
-        return hash_password(self.harden_password(salt, self.user_creds.password, with_token or self.request.session_token))
+    def decode_jwt(self, jwt_token) -> dict | None:
+        """Returns decoded jwt object"""
+        from pyonir import Site
+        import jwt
+        from jwt import DecodeError, ExpiredSignatureError
+        try:
+            return jwt.decode(jwt_token, Site.SECRET_SAUCE, algorithms=['HS256'])
+        except ExpiredSignatureError as ee:
+            print(f"JWT token expired: {ee}")
+            # TODO: set user creds from the request perhaps?
+            self.response = self.responses.SESSION_EXPIRED
+            self.session.clear()
+        except Exception as e:
+            print(f"{__name__} method - {str(e)}: {type(e).__name__}")
 
     @staticmethod
     def verify_password(encrypted_pwd, input_password) -> bool:

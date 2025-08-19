@@ -66,7 +66,7 @@ def cls_mapper(file_obj: object, cls: typing.Callable, from_request: PyonirReque
         res = cls() if is_generic else None
 
         if hasattr(cls, 'from_dict'):  # allows manual mapping of class instance
-            return cls.from_dict(file_obj)
+            return cls.from_dict(data)
 
         # Build constructor args
         for param_name, param_type in param_type_map.items():
@@ -553,6 +553,43 @@ def load_env(path=".env") -> object:
 
     return dict_to_class(env_data, 'env')
 
+def expand_dotted_keys(flat_data: dict, return_as_dict: bool = False):
+    """
+    Convert a dict with dotted keys into a nested structure.
+
+    Args:
+        flat_data (dict): Input dictionary with dotted keys.
+        return_as_dict (bool): If True, return a nested dict.
+                               If False, return nested dynamic objects.
+    """
+
+    def make_object(name="Generic"):
+        return type(name, (object,), {"__name__": "generic"})()
+
+    root = {} if return_as_dict else make_object("Root")
+
+    for dotted_key, value in flat_data.items():
+        parts = dotted_key.split(".")
+        current = root
+
+        for i, part in enumerate(parts):
+            # Last part -> assign value
+            if i == len(parts) - 1:
+                if return_as_dict:
+                    current[part] = value
+                else:
+                    setattr(current, part, value)
+            else:
+                if return_as_dict:
+                    if part not in current:
+                        current[part] = {}
+                    current = current[part]
+                else:
+                    if not hasattr(current, part):
+                        setattr(current, part, make_object(part.capitalize()))
+                    current = getattr(current, part)
+
+    return root
 
 class PrntColrs:
     RESET = '\033[0m'

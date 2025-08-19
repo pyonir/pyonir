@@ -178,12 +178,12 @@ def init_app_endpoints(endpoints: 'Endpoints'):
 
 
 def init_pyonir_endpoints(app: PyonirApp):
-    app_frontend = (app.frontend_assets_route, app.frontend_assets_dirpath)
-    app_public = (app.public_assets_route, app.public_assets_dirpath)
-    app_uploads = (app.uploads_route, app.uploads_dirpath)
-    for r, static_abspath in (app_frontend, app_uploads, app_public):
-        if not os.path.exists(static_abspath): continue
-        _add_route(None, r, static_path=static_abspath)
+    # app_frontend = (app.frontend_assets_route, app.frontend_assets_dirpath)
+    # app_public = (app.public_assets_route, app.public_assets_dirpath)
+    # app_uploads = (app.uploads_route, app.uploads_dirpath)
+    # for route, static_abspath in (app_frontend, app_uploads, app_public):
+    #     if not os.path.exists(static_abspath): continue
+    #     _add_route(None, route, static_path=static_abspath)
 
     _add_route(pyonir_ws_handler, "/sysws", ws=True)
     _add_route(pyonir_index, "/", methods='*')
@@ -202,10 +202,12 @@ def process_sse(data: dict) -> str:
 
 def serve_static(app: PyonirApp, request: PyonirRequest):
     from starlette.responses import FileResponse, PlainTextResponse
-    from_frontend = request.path.startswith(app.public_assets_route)
-    base_path = app.frontend_assets_dirpath if from_frontend else app.public_assets_dirpath
+    from_frontend = request.path.startswith(app.frontend_assets_route)
+    from_public = request.path.startswith(app.public_assets_route)
+    base_path = app.frontend_assets_dirpath if from_frontend else app.public_assets_dirpath if from_public else ''
     req_path = request.parts[1:] if len(request.parts) > 1 else request.parts
     path = os.path.join(base_path, *req_path)
+    print('Pyonir: serving static: '+ path)
     return FileResponse(path, 200) if os.path.exists(path) else PlainTextResponse(f"{request.path} not found",
                                                                                   status_code=404)
 
@@ -367,8 +369,7 @@ async def create_response(pyonir_request: PyonirRequest, dec_func: callable):
     pyonir_request.app_ctx_name = app_ctx.name
 
     # Preprocess routes or resolver endpoint from file
-    await Site.virtual_router(pyonir_request)
-    # await req_file.process_route(pyonir_request, app_ctx)
+    req_file = await Site.virtual_router(pyonir_request)
     await req_file.process_resolver(pyonir_request)
 
     route_func = dec_func if not callable(req_file.resolver) else req_file.resolver

@@ -43,22 +43,23 @@ class UserCredentials:
         return cls(email='***', has_session=bool(uid), token=uid) if uid else None
 
     @classmethod
-    def from_header(cls, auth_header: str) -> 'UserCredentials':
+    def from_header(cls, auth: 'Auth') -> 'UserCredentials':
         """Decodes the authorization header to extract user credentials."""
-        from pyonir.models.auth import decode_jwt
-
+        from pyonir import Site
+        auth_header = auth.request.headers.get('authorization')
         if auth_header is None:
             return None
         username = ''
         password = ''
+        site_salt = auth.app.SECRET_SAUCE
         auth_type, auth_token = auth_header.split(' ', 1)
-        if auth_type.startswith('Basic '):
+        if auth_type.startswith('Basic'):
             import base64
             decoded = base64.b64decode(auth_token).decode('utf-8')
             email, password = decoded.split(':', 1)
-        if auth_type.startswith('Bearer '):
+        if auth_type.startswith('Bearer'):
             # Handle Bearer token if needed
-            user_creds = self.decode_jwt(auth_token)
+            user_creds = jwt_decoder(auth_token, site_salt)
             email, password = user_creds.get('username'), user_creds.get('password')
             pass
         return cls(email=username, password=password, has_session=True) if username and password else None
@@ -175,6 +176,11 @@ def client_location(request: PyonirRequest) -> dict | None:
         return j
     except Exception:
         return None
+
+def jwt_decoder(jwt_token: str, salt: str)-> dict | None:
+    """Returns decoded jwt object"""
+    import jwt
+    return jwt.decode(jwt_token, salt, algorithms=['HS256'])
 
 
 class AuthResponse(PyonirRestResponse):
@@ -526,8 +532,9 @@ class Auth:
 
     def get_user_creds(self) -> UserCredentials:
         """Returns authenticated user from request header token or session"""
+        # TODO: move from_header and session logic into auth for better encapsulation
         authorization_header = self.request.headers.get('authorization')
-        auth_creds = UserCredentials.from_header(authorization_header) if authorization_header else UserCredentials.from_session(self.session)
+        auth_creds = UserCredentials.from_header(self) if authorization_header else UserCredentials.from_session(self.session)
         return UserCredentials.from_request(self.request) if not auth_creds else auth_creds
 
     def query_account(self, user_email: str = None) -> User | None:
@@ -553,10 +560,9 @@ class Auth:
     def decode_jwt(self, jwt_token) -> dict | None:
         """Returns decoded jwt object"""
         from pyonir import Site
-        import jwt
         from jwt import DecodeError, ExpiredSignatureError
         try:
-            return jwt.decode(jwt_token, Site.SECRET_SAUCE, algorithms=['HS256'])
+            return jwt_decoder(jwt_token, Site.SECRET_SAUCE)
         except ExpiredSignatureError as ee:
             print(f"JWT token expired: {ee}")
             # TODO: set user creds from the request perhaps?

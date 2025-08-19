@@ -6,6 +6,7 @@ from starlette.requests import Request as StarletteRequest
 
 from pyonir.pyonir_types import PyonirServer, Theme, PyonirHooks, Parsely, ParselyPagination, AppRequestPaths, AppCtx, \
     PyonirRouters, RoutePath, PyonirRestResponse
+from pyonir.utilities import expand_dotted_keys
 
 # Environments
 DEV_ENV:str = 'LOCAL'
@@ -63,7 +64,7 @@ class PyonirSchema:
     def save_to_file(self, file_path: str) -> bool:
         """Saves the user data to a file in JSON format"""
         from pyonir.utilities import create_file
-        return create_file(file_path, self.to_json(obfuscate=False))
+        return create_file(file_path, self.to_dict(obfuscate=False))
 
     def save_to_session(self: T, request: PyonirRequest,key: str = None, value: any = None) -> None:
         """Convert instance to a serializable dict."""
@@ -82,6 +83,27 @@ class PyonirSchema:
         parsely = Parsely(file_path, app_ctx=app_ctx)
         return parsely.map_to_model(cls)
 
+    @classmethod
+    def from_dict(cls, data: typing.Dict) -> typing.Self:
+        """Instantiate entity from dict."""
+        from pyonir.parser import Parsely
+        values = data if isinstance(data, dict) else data.data if isinstance(data, Parsely) else data
+        return cls(**values)
+
+    @classmethod
+    def create_table(cls) -> str:
+        """Return SQL query to create the table for this entity."""
+        columns = []
+        for attr, typ in cls.__annotations__.items():
+            if typ == str:
+                columns.append(f"{attr} TEXT")
+            elif typ == int:
+                columns.append(f"{attr} INTEGER")
+            else:
+                columns.append(f"{attr} TEXT")  # fallback
+        columns_sql = ", ".join(columns)
+        return f"CREATE TABLE IF NOT EXISTS {cls.__name__.lower()} (id INTEGER PRIMARY KEY AUTOINCREMENT, {columns_sql})"
+
     def patch(self: T, **changes) -> T:
         """Return a new instance with updated fields (no DB)."""
         return replace(self, **changes)
@@ -90,13 +112,23 @@ class PyonirSchema:
         """Mark the model as deleted (soft-delete)."""
         return replace(self, _deleted=True)
 
-    def _to_orm(self):
-        raise NotImplementedError
+    def to_dict(self, obfuscate = True):
+        """Returns the instance as a dict"""
+        def process_value(key, value):
+            if obfuscate and hasattr(self,'_private_keys') and key in self._private_keys:
+                return '***'
+            if hasattr(value, 'to_dict'):
+                return value.to_dict(obfuscate=obfuscate)
+            return value
+        return {key: process_value(key,value) for key, value in self.__dict__.items() if key[0] != '_'}
+        # return {key: ('***' if obfuscate and hasattr(self,'_private_keys') and key in self._private_keys else value) for key, value in self.__dict__.items() if key[0] != '_'}
 
-    def to_json(self, obfuscate = True) -> dict:
+    def to_json(self, obfuscate = True) -> str:
         """Returns the user data as a JSON serializable dictionary"""
+        import json
+        return json.dumps(self.to_dict(obfuscate))
         # obfuscate = self._private_keys
-        return {key: ('***' if obfuscate and hasattr(self,'_private_keys') and key in self._private_keys else value) for key, value in self.__dict__.items() if key[0] != '_'}
+        # return {key: ('***' if obfuscate and hasattr(self,'_private_keys') and key in self._private_keys else value) for key, value in self.__dict__.items() if key[0] != '_'}
 
 
 
@@ -299,7 +331,7 @@ class PyonirRequest:
         self.parts = self.slug.split('/') if self.slug else []
         self.limit = get_attr(self.query_params, 'limit', PAGINATE_LIMIT)
         self.model = get_attr(self.query_params, 'model')
-        self.is_home = (self.path == '')
+        self.is_home = (self.slug == '')
         self.is_api = self.parts and self.parts[0] == app.API_DIRNAME
         self.is_static = bool(list(os.path.splitext(self.path)).pop())
         self.form = {}
@@ -312,9 +344,10 @@ class PyonirRequest:
         if self.slug.startswith('api'): self.headers['accept'] = JSON_RES
         self.type: TEXT_RES | JSON_RES | EVENT_RES = self.headers.get('accept')
         self.status_code: int = 200
-        self.app_ctx_name: str = ''
+        self.app_ctx_name: str = app.name
         self.auth: Auth | None = None #Auth(self, app)
         self.flashes: dict = self.get_flash_messages()
+        self.server_request.session['previous_url'] = self.headers.get('referer', '')
 
     @property
     def session_token(self):
@@ -323,8 +356,9 @@ class PyonirRequest:
             return self.server_request.session.get('csrf_token')
 
     @property
-    def previous_url(self):
-        return self.headers.get('referer', '')
+    def previous_url(self) -> str:
+        return self.server_request.session.pop('previous_url')
+        # return self.headers.get('referer', '')
 
     @property
     def redirect_to(self):
@@ -405,6 +439,7 @@ class PyonirRequest:
                             self.form[name] = content
         except Exception as e:
             raise
+        self.form = expand_dotted_keys(self.form, return_as_dict=True)
 
     def derive_status_code(self, is_router_method: bool):
         """Create status code for web request based on a file's availability, status_code property"""
@@ -613,8 +648,8 @@ class PyonirBase:
         if not os.path.exists(virtual_route_path):
             return None
         virtual_route = self.parse_file(virtual_route_path)
-        res = await virtual_route.process_route(pyonir_request, self)
-        return res
+        await virtual_route.process_route(pyonir_request, self)
+        return pyonir_request.file
 
     def register_resolver(self, name: str, cls_or_path, args=(), kwargs=None, hot_reload=False):
         import inspect
@@ -1165,7 +1200,7 @@ class TemplateEnvironment(Environment):
 
         def url_for(path):
             rmaps = app.server.url_map if app.server else {}
-            return rmaps.get(path, {}).get('path', app.public_assets_route)
+            return rmaps.get(path, {}).get('path', '/'+path)
 
         # Include globals
         self.globals['url_for'] = url_for

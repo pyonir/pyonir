@@ -56,23 +56,28 @@ Each sub directory within the `contents` folder represents the `content type` fo
 
 ### Content Types
 
-Organizes a collection of files by specified types in a directory.
+Organizes a collection of files by specified type in a directory. Type directory can be named anything you want.
+`pages`, `api`, and `configs` are reserved directory name used by the system but can override.
 
-**Configs: `contents/configs`**
+**Config Type: `contents/configs`**
 
 Represents mutable site configurations that can change while app is running.
+Override this directory name by setting `your_app.CONFIGS_DIRNAME`
 
-**Pages: `contents/pages`** 
+**Page Type: `contents/pages`** 
 
 Represents routes accessible from a URL. A file from `contents/pages/about.md` can be accessed from a URL of `https:0.0.0.0/about`
 All pages files are served as `text/html` resources. You can configure your pages to be serverd from a different directory by overriding the `Site.PAGES_DIRNAME` default value.
 
-**API: `contents/api`**
+Override this directory name by setting `your_app.PAGES_DIRNAME`
+
+**API Type: `contents/api`**
 
 Files within this folder represents API endpoints. Files here can define the response of the request and call python functions.
 A file from `contents/api/new_post.md` can be accessed from a URL of `https:0.0.0.0/api/new_post`.
 You can configure your api pages to be serverd from a different directory by overriding the `Site.API_DIRNAME` default value.
 
+Override this directory name by setting `your_app.API_DIRNAME`
 
 ### Generate static site
 
@@ -131,17 +136,10 @@ app.run(routes=router)
 
 ### Configure Virtual Page Routes
 
-**Virtual routes**
+**Virtual routes `.routes.md`**
 
-A virtual route can generate a page from aggregated data sources and giving more control on request response.
-Virtual routes can be defined within the `contents/pages` directory within a hidden `.routes.md` file.
-virtual routes can return the following response types:
-
-- HTML response
-- JSON response
-- WebSocket
-- Sever-Sent Events
-- Static file
+A virtual route generates a page from aggregated data sources, giving you greater control over the request and response.
+Just add `.routes.md` file in the `contents/pages` directory.
 
 **JSON response** 
 
@@ -167,12 +165,11 @@ The `page` attribute value will be passed into the page request. The page url an
 Any scalar values will be passed as the page contents value. Only GET requests permitted by default.
 
 ```md
-/products/tags: 
-    page:
-        title: Products grouped by tags.
-        contents: Listing of all products grouped by tags.
-        template: product-tags.html
-        entries: $dir/../products?groupby=tags
+/products/{tag:str}:
+    title: Products grouped by tag.
+    contents: Listing of all products grouped by tags.
+    template: product-tags.html
+    entries: $dir/../products?groupby={request.path_params[tag])}
 ```
 
 **Server-sent events**

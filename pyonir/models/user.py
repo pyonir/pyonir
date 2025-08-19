@@ -158,7 +158,9 @@ class User(PyonirSchema):
         if not self.role:
             self.role = Roles.NONE.name
         if not self.avatar:
-            self.avatar = '/static/images/default-avatar.png'
+            self.avatar = '/public/images/default-avatar.png'
+        if isinstance(self.meta, dict): # TODO: this is now required to deserialize user object due to schema from_dict is present. Look into alternative way to not call from dict in mapper
+            self.meta = UserMeta(**self.meta)
 
     def has_perm(self, action: PermissionLevel) -> bool:
         """Checks if the user has a specific permission based on their role"""

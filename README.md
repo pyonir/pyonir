@@ -52,13 +52,13 @@ your_project/
 **Install plugins from the pyonir plugins registry on github**
 
 ```bash
-> pyonir install plugin:<relative_github_project_url>#<git_branch_name>
+> pyonir install plugin:<repo_owner>/<repo_name>#<repo_branch>
 ```
 
 **Install themes from the pyonir theme registry on github**
 
 ```bash
-> pyonir install theme:<relative_github_project_url>#<git_branch_name>
+> pyonir install theme:<repo_owner>/<repo_name>#<repo_branch>
 ```
 
 ### Configure Contents

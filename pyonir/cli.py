@@ -41,18 +41,21 @@ def pyonir_install(args: list):
     gh_zip_address = "https://github.com/{repo_path}/archive/refs/heads/{repo_branch}.zip"
     project_base_dir = os.getcwd()
     action, *contexts = args
-    dir_name, repo_context = action.split(':')
+    action, *action_context = action.split(':')
+    action_context = action_context.pop(0)
+    # dir_name, repo_context = action.split(':')
 
     if action == 'theme':
         print(f"Installing {action} theme...")
         pass
     if action == 'plugin':
         # dir_name, repo_context = action.split(':')
-        repo_path, repo_branch = repo_context.split('#')
-        _, repo_name = repo_path.split('/')
+        repo_path, *repo_branch = action_context.split('#')
+        repo_branch = repo_branch.pop(0) if repo_branch else 'main'
+        repo_owner, repo_name = repo_path.split('/')
         repo_zip = gh_zip_address.format(repo_path=repo_path, repo_branch=repo_branch)
-        temp_dst_path = os.path.join(project_base_dir, dir_name, "."+repo_name)
-        dst_path = os.path.join(project_base_dir, dir_name, repo_name)
+        temp_dst_path = os.path.join(project_base_dir,'plugins', "."+repo_name)
+        dst_path = os.path.join(project_base_dir,'plugins', repo_name)
         print(f"pyonir is downloading {repo_zip} ...")
         response = requests.get(repo_zip)
         response.raise_for_status()
@@ -90,8 +93,8 @@ Usage:
 
 Examples:
   pyonir init
-  pyonir install plugin:<repo_path>#<branch>
-  pyonir install theme:<repo_path>#<branch>
+  pyonir install plugin:<repo_owner>/<repo_name>#<repo_branch>
+  pyonir install theme:<repo_owner>/<repo_name>#<repo_branch>
   pyonir help
 """)
     else:

@@ -132,23 +132,23 @@ def check_pass(protected_hash: str, password_str: str) -> bool:
 
 
 
-def auth_decode(authorization_header: str) -> UserCredentials | None:
-    """Decodes the authorization header to extract user credentials."""
-    if not authorization_header:
-        return None
-    email = ''
-    password = ''
-    auth_type, auth_token = authorization_header.split(' ', 1)
-    if auth_type.startswith('Basic '):
-        import base64
-        decoded = base64.b64decode(auth_token).decode('utf-8')
-        email, password = decoded.split(':', 1)
-    if auth_type.startswith('Bearer '):
-        # Handle Bearer token if needed
-        user_creds = self.decode_jwt(auth_token)
-        email, password = user_creds.get('email'), user_creds.get('password')
-        pass
-    return UserCredentials(email, password)
+# def auth_decode(authorization_header: str) -> UserCredentials | None:
+#     """Decodes the authorization header to extract user credentials."""
+#     if not authorization_header:
+#         return None
+#     email = ''
+#     password = ''
+#     auth_type, auth_token = authorization_header.split(' ', 1)
+#     if auth_type.startswith('Basic '):
+#         import base64
+#         decoded = base64.b64decode(auth_token).decode('utf-8')
+#         email, password = decoded.split(':', 1)
+#     if auth_type.startswith('Bearer '):
+#         # Handle Bearer token if needed
+#         user_creds = self.decode_jwt(auth_token)
+#         email, password = user_creds.get('email'), user_creds.get('password')
+#         pass
+#     return UserCredentials(email, password)
 
 def format_time_remaining(time_remaining):
     # Format time in human-readable way
@@ -516,33 +516,57 @@ class Auth:
         return self.session.get('login_attempts', 0) >= self.SIGNIN_ATTEMPTS
 
     def get_auth_user(self) -> User | None:
-        if not self.user_creds:
-            self.response = self.responses.UNAUTHORIZED
-            return None
-        session_user = self.decode_jwt(self.user_creds.token)
-        if not session_user:
-            self.response = self.responses.UNAUTHORIZED
-            return None
-        # self.user_creds.email = session_user.get('sub')
-        user = self.query_account(user_email=session_user.get('sub'))
+        # if not self.user_creds:
+        #     self.response = self.responses.UNAUTHORIZED
+        #     return None
+        # session_user = self.decode_jwt(self.user_creds.token)
+        # if not session_user:
+        #     self.response = self.responses.UNAUTHORIZED
+        #     return None
+        user = self.query_account()
         # update jwt expiration time
         user.save_to_session(self.request, value=self.create_jwt(user.id, user.role))
         self.response = self.responses.ACTIVE_SESSION
         return user
 
-    def get_user_creds(self) -> UserCredentials:
-        """Returns authenticated user from request header token or session"""
-        # TODO: move from_header and session logic into auth for better encapsulation
-        authorization_header = self.request.headers.get('authorization')
-        auth_creds = UserCredentials.from_header(self) if authorization_header else UserCredentials.from_session(self.session)
-        return UserCredentials.from_request(self.request) if not auth_creds else auth_creds
+    # def get_user_creds(self) -> UserCredentials:
+    #     """Returns authenticated user from request header token or session"""
+    #     authorization_header = self.request.headers.get('authorization')
+    #     auth_creds = UserCredentials.from_header(self) if authorization_header else UserCredentials.from_session(self.session)
+    #     return UserCredentials.from_request(self.request) if not auth_creds else auth_creds
 
     def query_account(self, user_email: str = None) -> User | None:
         """Queries the user account based on the provided credentials."""
-        uid =  generate_id(user_email or self.user_creds.email) if not self.user_creds.token or not user_email else user_email
+        uid =  generate_id(self.user_creds.email) if not self.user_creds.has_session else user_email or self.user_creds.email
         user_account_path = os.path.join(self.app.contents_dirpath, 'users', uid, 'profile.json')
         user_account = User.from_file(user_account_path, app_ctx=self.app.app_ctx) if os.path.exists(user_account_path) else None
         return user_account
+
+    def get_user_creds(self) -> 'UserCredentials':
+        """Decodes the authorization header to extract user credentials."""
+        auth_header = self.request.headers.get('authorization')
+        # if auth_header is None:
+        #     return None
+        username = ''
+        password = ''
+        auth_type, auth_token = auth_header.split(' ', 1) if auth_header else (None, None)
+        session_id = self.session.get('user')
+        if session_id:
+            session_user = self.decode_jwt(session_id)
+            username = session_user.get('sub')
+        elif auth_type and auth_type.startswith('Bearer'):
+            # Handle Bearer token if needed
+            user_creds = self.decode_jwt(auth_token)
+            email, _ = user_creds.get('username')
+        elif auth_type and auth_type.startswith('Basic'):
+            import base64
+            decoded = base64.b64decode(auth_token).decode('utf-8')
+            email, password = decoded.split(':', 1)
+            return UserCredentials(email=email, password=password)
+        else:
+            return UserCredentials.from_request(self.request)
+
+        return UserCredentials(email=username, has_session=True)
 
     def send_email(self):
         """Sends an email to the user."""

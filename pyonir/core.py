@@ -1107,7 +1107,7 @@ class PyonirApp(PyonirBase):
         from pyonir.utilities import dict_to_class
 
         if not context: context = {}
-        if not self.TemplateEnvironment: return string
+        if not self.TemplateEnvironment or not string: return string
         try:
             # request = self.TemplateEnvironment.globals.get('request')
             # user = request.auth.user if request and request.auth else None

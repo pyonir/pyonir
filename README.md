@@ -26,7 +26,7 @@ import pyonir
 app = pyonir.init(__file__)
 ```
 
-or scaffold a demo web application from the cli:
+**Scaffold a demo web application from the cli:**
 
 ```bash
 > pyonir init
@@ -47,6 +47,18 @@ your_project/
     |  └─ pages.html
     └─ main.py
     └─ __init__.py
+```
+
+**Install plugins from the pyonir plugins registry on github**
+
+```bash
+> pyonir install plugin:<relative_github_project_url>#<git_branch_name>
+```
+
+**Install themes from the pyonir theme registry on github**
+
+```bash
+> pyonir install theme:<relative_github_project_url>#<git_branch_name>
 ```
 
 ### Configure Contents

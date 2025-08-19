@@ -435,7 +435,7 @@ def copy_assets(src: str, dst: str, purge: bool = True):
     """Copies files from a source directory into a destination directory with option to purge destination"""
     import shutil
     from shutil import ignore_patterns
-    print(f"{PrntColrs.OKBLUE}Coping `{src}` resource into {dst}{PrntColrs.RESET}")
+    # print(f"{PrntColrs.OKBLUE}Coping `{src}` resource into {dst}{PrntColrs.RESET}")
     try:
         if os.path.exists(dst) and purge:
             shutil.rmtree(dst)

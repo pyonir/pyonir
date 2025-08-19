@@ -33,18 +33,7 @@ Project {project_name} created!
 def pyonir_create(args):
     """Create a demo project based on pre configured templates"""
     use_demo = input(f"{PrntColrs.OKBLUE}Do you want to install the demo project?(y for yes, n for no){PrntColrs.RESET}").strip()
-    # if not os.path.exists(project_path):
-    #     os.makedirs(project_path)
-    # use_frontend = input(f"{PrntColrs.OKBLUE}Do you need a frontend? (y for yes, n for no){PrntColrs.RESET}").strip()
-    #
-    # if use_demo.lower() == 'y':
-    #     copy_assets(pkg_filepath, os.path.join(project_path, '__init__.py'), False)
-    #     copy_assets(entry_filepath, os.path.join(project_path, 'main.py'), False)
-    #     copy_assets(contents_dirpath, os.path.join(project_path, 'contents'), False)
-    #     copy_assets(backend_dirpath, os.path.join(project_path, 'backend'), False)
-    #
-    #     if use_frontend == 'y':
-    #         copy_assets(frontend_dirpath, os.path.join(project_path, 'frontend'), False)
+
 
 def pyonir_install(args: list):
     """Installs plugin_names or themes into pyonir application from the pyonir registry"""
@@ -87,8 +76,26 @@ def pyonir_setup():
         print('installing...', contexts)
         pyonir_install(contexts)
         pass
+    elif action == 'help':
+        print(f"""
+Pyonir CLI - Commands
+---------------------
+
+init       Create a new empty project
+install    Install a plugin or theme from GitHub registry
+help       Show CLI documentation
+
+Usage:
+  pyonir <command> [options]
+
+Examples:
+  pyonir init
+  pyonir install plugin:<repo_path>#<branch>
+  pyonir install theme:<repo_path>#<branch>
+  pyonir help
+""")
     else:
-        print(f"Pyonir expects arguments of: new (creating a new site), install (installing plugins or themes)")
+        print(f"Pyonir expects arguments of: init (creating a new site), install (installing plugins or themes)")
 
 if __name__ == '__main__':
     pyonir_setup()

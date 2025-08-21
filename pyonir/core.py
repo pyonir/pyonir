@@ -1033,7 +1033,7 @@ class PyonirApp(PyonirBase):
         return self.name, self.endpoint, self.contents_dirpath, self.ssg_dirpath
 
     @property
-    def env(self) -> str: return os.getenv('APPENV')
+    def env(self) -> str: return getattr(self.configs.env, 'APP_ENV') if self.configs else 'LOCAL'
 
     @property
     def is_dev(self) -> bool: return self.env == DEV_ENV
@@ -1161,8 +1161,8 @@ class PyonirApp(PyonirBase):
         from pyonir.server import generate_nginx_conf
 
         # Initialize Application settings and templates
-        self.setup_configs()
-        self.setup_themes()
+        # self.setup_configs()
+        # self.setup_themes()
         self.install_sys_plugins()
         self._activate_plugins()
         generate_nginx_conf(self)

@@ -645,10 +645,9 @@ class PyonirBase:
 
     async def virtual_router(self, pyonir_request: PyonirRequest) -> Parsely | None:
         virtual_route_path = os.path.join(self.pages_dirpath, '.routes.md')
-        if not os.path.exists(virtual_route_path):
-            return None
-        virtual_route = self.parse_file(virtual_route_path)
-        await virtual_route.process_route(pyonir_request, self)
+        if os.path.exists(virtual_route_path):
+            virtual_route = self.parse_file(virtual_route_path)
+            await virtual_route.process_route(pyonir_request, self)
         return pyonir_request.file
 
     def register_resolver(self, name: str, cls_or_path, args=(), kwargs=None, hot_reload=False):
@@ -792,7 +791,7 @@ class PyonirBase:
         count = 0
         print(f"{utilities.PrntColrs.OKBLUE}1. Coping Assets")
         try:
-            self.run([])
+            self.run()
             site_map_path = os.path.join(self.ssg_dirpath, 'sitemap.xml')
             # generate_nginx_conf(self)
             print(f"{utilities.PrntColrs.OKCYAN}3. Generating Static Pages")
@@ -813,11 +812,9 @@ class PyonirBase:
             smap = f'<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>{self.domain}</loc><priority>1.0</priority></url> {"".join(xmls)} </urlset>'
             utilities.create_file(site_map_path, smap, 0)
 
-            # Copy pyonir static assets for js and css vendor libraries into ssg directory
-            # utilities.copy_assets(PYONIR_STATIC_DIRPATH, os.path.join(self.ssg_dirpath, PYONIR_STATIC_ROUTE.lstrip('/')))
-
             # Copy theme static css, js files into ssg directory
-            utilities.copy_assets(self.TemplateEnvironment.themes.active_theme.static_dirpath, os.path.join(self.ssg_dirpath, self.FRONTEND_ASSETS_DIRNAME))
+            utilities.copy_assets(self.frontend_assets_dirpath, os.path.join(self.ssg_dirpath, self.FRONTEND_ASSETS_DIRNAME))
+            utilities.copy_assets(self.public_assets_dirpath, os.path.join(self.ssg_dirpath, self.PUBLIC_ASSETS_DIRNAME))
 
             end_time = time.perf_counter() - start_time
             ms = end_time * 1000
@@ -962,13 +959,13 @@ class PyonirApp(PyonirBase):
 
     @property
     def frontend_assets_dirpath(self) -> str:
-        """Directory path for site's static generated files"""
+        """Directory location for template related assets"""
         theme_assets_dirpath = self.themes.active_theme.static_dirpath if self.themes else None
         return theme_assets_dirpath or os.path.join(self.frontend_dirpath, self.FRONTEND_ASSETS_DIRNAME)
 
     @property
     def public_assets_dirpath(self) -> str:
-        """Directory path for site's static generated files"""
+        """Directory location for general assets"""
         return os.path.join(self.frontend_dirpath, self.PUBLIC_ASSETS_DIRNAME)
 
     @property
@@ -1163,8 +1160,6 @@ class PyonirApp(PyonirBase):
         from .server import (setup_starlette_server, start_uvicorn_server,)
         from pyonir.server import generate_nginx_conf
 
-        # Initialize Server instance
-        self.server = setup_starlette_server(self)
         # Initialize Application settings and templates
         self.setup_configs()
         self.setup_themes()
@@ -1173,6 +1168,8 @@ class PyonirApp(PyonirBase):
         generate_nginx_conf(self)
         # Run uvicorn server
         if self.SSG_IN_PROGRESS: return
+        # Initialize Server instance
+        self.server = setup_starlette_server(self)
         start_uvicorn_server(self, routes)
 
 
@@ -1222,7 +1219,7 @@ class TemplateEnvironment(Environment):
 
 @dataclass
 class Theme:
-    _mapper = {'theme_dirname': 'file_dirname', 'theme_dirpath': 'file_dirpath'}
+    _orm_options = {'mapper': {'theme_dirname': 'file_dirname', 'theme_dirpath': 'file_dirpath'}}
     name: str
     theme_dirname: str = ''
     """Directory name for theme folder within frontend/themes directory"""

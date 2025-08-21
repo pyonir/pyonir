@@ -43,8 +43,8 @@ def is_callable_type(pt) -> bool:
 def cls_mapper(file_obj: object, cls: typing.Callable, from_request: PyonirRequest = None):
     from pyonir.core import PyonirRequest, PyonirApp
     param_name, param_type, param_value = ['','','']
-    orm_opts = getattr(cls, "__orm_options__", {})
-    mapper_keys = getattr(cls, "_mapper", None) or orm_opts.get("mapper", {})
+    orm_opts = getattr(cls, "__orm_options", {})
+    mapper_keys = orm_opts.get("mapper", {})
     try:
         if hasattr(cls, '__skip_parsely_deserialization__'):
             return file_obj
@@ -57,10 +57,11 @@ def cls_mapper(file_obj: object, cls: typing.Callable, from_request: PyonirReque
 
         # mapper_keys = getattr(cls, "_mapper", {})
         data = get_attr(file_obj, 'data') or {}
-        # _parsely_data_key = '.'.join(['data', get_attr(cls, '_mapper_key') or cls.__name__.lower()])
-        # kdata = get_attr(file_obj, _parsely_data_key)
-        # if kdata:
-        #     data.update(**kdata)
+        # access nested object using mapper_key
+        _model_access_key = '.'.join(['data', orm_opts.get('mapper_key') or cls.__name__.lower()])
+        kdata = get_attr(file_obj, _model_access_key)
+        if kdata:
+            data.update(**kdata)
 
         cls_args = {}
         res = cls() if is_generic else None
@@ -150,7 +151,7 @@ def process_contents(path, app_ctx=None, file_model: any = None):
     pgs = query_files(path, app_ctx=app_ctx, model=file_model)
     for pg in pgs:
         name = getattr(pg, 'file_name')
-        setattr(res, name, pg.map_to_model(None))
+        setattr(res, name, pg.map_to_model(None) if hasattr(pg, 'map_to_model') else pg)
     return res
 
 
@@ -294,7 +295,7 @@ def parse_query_model_to_object(model_fields: str) -> object:
     from pyonir.parser import Parsely
     import importlib
     mapper = {}
-    params = {"_mapper": mapper}
+    params = {"_orm_options": {'mapper': mapper}}
     for k in Parsely.default_file_attributes+model_fields.split(','):
         if ':' in k:
             k,_, src = k.partition(':')

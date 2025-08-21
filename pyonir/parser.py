@@ -65,8 +65,10 @@ class ParselyFileStatus(str):
 
 
 def parse_markdown(content, kwargs):
+    """Parse markdown string using mistletoe with htmlattributesrenderer"""
     import html, mistletoe
     from mistletoe.html_attributes_renderer import HTMLAttributesRenderer
+    if not content: return content
     res = mistletoe.markdown(content, renderer=HTMLAttributesRenderer)
     return html.unescape(res)
 
@@ -75,7 +77,7 @@ def parse_markdown(content, kwargs):
 class Page:
     """Represents a single page returned from a web request"""
     # _mapper = {'created_on': 'file_created_on', 'modified_on': 'file_modified_on'}
-    __orm_options__ = {"mapper": {'created_on': 'file_created_on', 'modified_on': 'file_modified_on'}} # avoids merging additional data properties to model
+    _orm_options = {"mapper": {'created_on': 'file_created_on', 'modified_on': 'file_modified_on'}} # avoids merging additional data properties to model
     url: str
     is_router: bool = False
     created_on: datetime = None
@@ -243,10 +245,12 @@ class Parsely:
 
         ctx_url, ctx_name, ctx_dirpath, ctx_staticpath, contents_relpath, file_name, file_ext = self.process_ctx(app_ctx)
         content_type, *content_subs = os.path.dirname(contents_relpath).split(os.path.sep) # directory at root of contents scope
-        is_page = content_type in (Site.PAGES_DIRNAME, Site.API_DIRNAME) and not self.is_router
+        pages_dirname = Site.PAGES_DIRNAME if Site is not None else ''
+        api_dirname = Site.API_DIRNAME if Site is not None else ''
+        is_page = Site is not None and content_type in (pages_dirname, api_dirname) and not self.is_router
         self.file_contents_dirpath =  ctx_dirpath # contents directory path used when querying refs
         self.is_page = is_page
-        self.is_home = ctx_url=='' and is_page and contents_relpath == f'{Site.PAGES_DIRNAME}/index'
+        self.is_home = ctx_url=='' and is_page and contents_relpath == f'{pages_dirname}/index'
         self.file_ctx = ctx_name # the application context name
         self.file_dirname = os.path.basename(self.file_dirpath) # nearest parent directory for file
         self.file_data_type = content_type
@@ -254,7 +258,7 @@ class Parsely:
         self.file_ext = file_ext.lstrip('.')
         self.status = self.file_status
 
-        surl = re.sub(fr'\b{Site.PAGES_DIRNAME}/\b|\bindex\b', '', contents_relpath)
+        surl = re.sub(fr'\b{pages_dirname}/\b|\bindex\b', '', contents_relpath) if is_page else contents_relpath
         slug = f'{ctx_url}/{surl}'.lstrip('/').rstrip('/').lower()
         url = '/' if self.is_home else '/' + slug
         # page attributes
@@ -262,7 +266,7 @@ class Parsely:
             self.data['url']  = url
             self.data['slug'] = slug
             self.data['tags'] = content_subs
-        self.file_ssg_api_dirpath = os.path.join(ctx_staticpath, 'api', slug)
+        self.file_ssg_api_dirpath = os.path.join(ctx_staticpath, api_dirname, slug)
         self.file_ssg_html_dirpath = os.path.join(ctx_staticpath, slug)
         if __skip_parsely_deserialization__: return
         self.deserializer()
@@ -302,12 +306,18 @@ class Parsely:
         return file_date
 
     def process_ctx(self, app_ctx):
-        ctx_dir, ctx_url, ctx_dirpath, ctx_staticpath = app_ctx
+        ctx_url = ''
+        if not app_ctx:
+            ctx_dirpath = os.path.dirname(self.file_path)
+            ctx_dir = os.path.basename(ctx_dirpath)
+            ctx_staticpath = os.path.join(ctx_dirpath, 'ssg')
+        else:
+            ctx_dir, ctx_url, ctx_dirpath, ctx_staticpath = app_ctx
         if not os.path.exists(ctx_dirpath): ctx_dirpath = os.path.dirname(ctx_dirpath)
         _, _, content_dirpath = self.file_path.partition(ctx_dirpath)
         file_name, file_ext = os.path.splitext(os.path.basename(self.file_path))
         content_dirpath = content_dirpath.lstrip(os.path.sep).replace(file_ext,'')
-        return ctx_url or '', ctx_dir, ctx_dirpath, ctx_staticpath, content_dirpath, file_name, file_ext
+        return ctx_url, ctx_dir, ctx_dirpath, ctx_staticpath, content_dirpath, file_name, file_ext
 
     def set_taxonomy(self) -> list[str] | None:
         if not self.file_exists: return None
@@ -349,6 +359,7 @@ class Parsely:
         pass
 
     def map_to_model(self, model, refresh = False):
+        """Maps the parsely object into a model class provided or the self.schema reference """
         if model is None:
             model = self.schema
         if model and refresh:
@@ -539,10 +550,10 @@ class Parsely:
     def process_line(self, cursor, output_data: any = None, is_blob=None, stop_str: str = '') -> tuple:
         """Deserializes string value"""
 
-        def count_tabs(str_value: str):
+        def count_tabs(str_value: str, tab_width: int = 4):
             """Returns number of tabs for provided string"""
             try:
-                return round(len(re.match(r'^\s+', str_value.replace('\n', '')).group()) / 4)
+                return round(len(re.match(r'^\s+', str_value.replace('\n', '')).group()) / tab_width)
             except Exception as e:
                 return 0
 
@@ -576,7 +587,8 @@ class Parsely:
             val_type = get_container_type(delim) if val_type is None else val_type
             parsed_val = valuestr.strip()
             force_scalr = delim and delim.endswith('`') or parsed_val.startswith(LOOKUP_DIR_PREFIX)
-            if parsed_key and parsed_val and not force_scalr:
+            is_inline_expression = bool(parsed_key and parsed_val) and not force_scalr
+            if is_inline_expression:
                 has_dotpath = "." in parsed_key
                 if has_dotpath or (isinstance(val_type, (list, dict)) or (", " in parsed_val)):  # inline list
                     _c = [] if delim is None else get_container_type(delim)
@@ -638,6 +650,7 @@ class Parsely:
                     elif not comment and not stop_str:
                         inlimts = cursor + 1 < self.file_line_count
                         is_block = ln_frag.startswith(BLOCK_PREFIX_STR) or ln_frag.endswith("|") or is_block_code
+                        # TODO: is_parent should be less restrictive on tabs vs spaces.
                         is_parent = True if is_block else count_tabs(
                             self.file_lines[cursor + 1]) > tabs if inlimts else False
                         parsed_key, val_type, parsed_val, methArgs = process_iln_frag(ln_frag)

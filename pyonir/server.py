@@ -213,16 +213,15 @@ def serve_static(app: PyonirApp, request: PyonirRequest):
 
 
 def route(dec_func: typing.Callable | None,
-          path: str = '',
+          url: str = '',
           methods=None,
-          models: dict = None,
           auth: bool = None,
           ws: bool = None,
           sse: bool = None,
           static_path: str = None) -> typing.Callable | None:
     if dec_func is None and static_path is None:
         dec_func = pyonir_index
-    return _add_route(dec_func, path, methods, models, auth, ws, sse, static_path)
+    return _add_route(dec_func, path=url, methods=methods, auth=auth, ws=ws, sse=sse, static_path=static_path)
 
 
 def _add_route(dec_func: typing.Callable | None,
@@ -411,7 +410,7 @@ async def create_response(pyonir_request: PyonirRequest, dec_func: callable):
     pyonir_response = pyonir_request.server_response if is_auth_res else PyonirRestResponse(status_code=pyonir_request.status_code)
     if not is_auth_res:
         if pyonir_request.type == JSON_RES:
-            pyonir_response.set_json(pyonir_request.server_response)
+            pyonir_response.set_json(pyonir_request.server_response or pyonir_request.file.data)
         else:
             pyonir_response.set_html(req_file.output_html(pyonir_request))
 

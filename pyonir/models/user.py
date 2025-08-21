@@ -1,13 +1,13 @@
 from abc import ABC, abstractmethod, ABCMeta
 from dataclasses import dataclass, field
-from enum import StrEnum
+# from enum import StrEnum
 from typing import Optional, Dict, Any
 
 from pyonir.core import PyonirSchema
 from pyonir.pyonir_types import PyonirRequest
 
 
-class PermissionLevel(StrEnum):
+class PermissionLevel(str):
     NONE = 'none'
     """Defines the permission levels for users"""
 

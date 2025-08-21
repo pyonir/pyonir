@@ -200,7 +200,7 @@ class ParselyMedia:
         if not self.thumbnails.get(f'{width}x{height}'): self.resize([(width, height)])
         return self.thumbnails.get(f'{width}x{height}')
 
-    def get_all_thumbnails(self) -> dict | None:
+    def get_all_thumbnails(self) -> dict:
         """Collects thumbnails for the image"""
         if self.is_thumb: return None
         from pyonir import Site
@@ -319,7 +319,7 @@ class Parsely:
         content_dirpath = content_dirpath.lstrip(os.path.sep).replace(file_ext,'')
         return ctx_url, ctx_dir, ctx_dirpath, ctx_staticpath, content_dirpath, file_name, file_ext
 
-    def set_taxonomy(self) -> list[str] | None:
+    def set_taxonomy(self) -> list[str]:
         if not self.file_exists: return None
         # cat_list = os.path.dirname(self.file_relpath).lstrip('/').split('/')
         self.data['tags'] = self.data.get('tags')
@@ -451,7 +451,7 @@ class Parsely:
         from starlette.routing import compile_path
         import re
         pattern = re.compile(r"^(?P<path>settings(?:/.*)?)$")
-        router_obj: dict | None = self.data.get('@routes') or self.data
+        router_obj: dict = self.data.get('@routes') or self.data
         is_not_router = not self.is_router
         # is_not_router = pyonir_request.file.file_exists and not pyonir_request.file.is_router
         if not router_obj or is_not_router or pyonir_request.is_home: return None
@@ -985,7 +985,7 @@ class Parsely:
             return None
         return PyonirCollection.prev_next(self)
 
-    def output_json(self, data_value: any = None, as_str=True) -> dict | str:
+    def output_json(self, data_value: any = None, as_str=True) -> dict:
         """Outputs a json string"""
         from .utilities import json_serial
         data = data_value or self
@@ -1057,7 +1057,7 @@ def update_nested(attr_path, data_src: dict, data_merge=None, data_update=None, 
     Finds or updates target value based on an attribute path.
 
     Args:
-        attr_path (list | str): Attribute path as list or dot-separated string.
+        attr_path (list): Attribute path as list or dot-separated string.
         data_src (dict): Source data to search or update.
         data_merge (Any, optional): Value to merge.
         data_update (Any, optional): Value to replace at path.

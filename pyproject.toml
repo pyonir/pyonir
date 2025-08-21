@@ -22,7 +22,9 @@ dependencies = [
   "jinja2",
   "webassets",
   "argon2-cffi",
-  "PyJWT"
+  "PyJWT",
+  "requests",
+  "mistletoe @ git+https://github.com/derryspann/mistletoe.git@master"
 ]
 
 [project.urls]

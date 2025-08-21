@@ -132,7 +132,7 @@ def check_pass(protected_hash: str, password_str: str) -> bool:
 
 
 
-# def auth_decode(authorization_header: str) -> UserCredentials | None:
+# def auth_decode(authorization_header: str) -> UserCredentials:
 #     """Decodes the authorization header to extract user credentials."""
 #     if not authorization_header:
 #         return None
@@ -164,7 +164,7 @@ def format_time_remaining(time_remaining):
     return time_str
 
 
-def client_location(request: PyonirRequest) -> dict | None:
+def client_location(request: PyonirRequest) -> dict:
     """Returns the requester's location information."""
     if not request or not request.headers:
         return None
@@ -177,7 +177,7 @@ def client_location(request: PyonirRequest) -> dict | None:
     except Exception:
         return None
 
-def jwt_decoder(jwt_token: str, salt: str)-> dict | None:
+def jwt_decoder(jwt_token: str, salt: str)-> dict:
     """Returns decoded jwt object"""
     import jwt
     return jwt.decode(jwt_token, salt, algorithms=['HS256'])
@@ -268,10 +268,10 @@ class AuthSecurity:
     def __init__(self, authorizer: "Auth") -> None:
         self._is_authorized = None
         self._is_authenticated = None
-        self._accepted: bool | None = None
+        self._accepted: bool = None
         self.type: str = ""  # Allowed values: basic | oauth2 | saml
         self.redirect_to: str = ""
-        self.role: str | None = None
+        self.role: str = None
         self.perms: list[PermissionLevel] = []
 
         definitions = getattr(authorizer.request.file, "data", {}).get("@auth") \
@@ -330,13 +330,13 @@ class Auth:
         self.request_token = self.request.headers.get('X-CSRF-Token', self.request.form.get('csrf_token'))
         """CSRF token for the request, used to prevent cross-site request forgery."""
 
-        self.response: AuthResponse | None = None
+        self.response: AuthResponse = None
         """AuthResponse: The current authentication response."""
 
-        self.user_creds: UserCredentials | None = self.get_user_creds()
+        self.user_creds: UserCredentials = self.get_user_creds()
         """User credentials extracted from the request."""
 
-        self.user: User | None = None
+        self.user: User = None
         """"User: The authenticated user object."""
 
         if self.user_creds and self.user_creds.has_session:
@@ -350,7 +350,7 @@ class Auth:
         return AuthSecurity(self)
 
     @property
-    def session(self) -> dict | None:
+    def session(self) -> dict:
         """Returns the session object from the request."""
         return self.request.server_request.session if self.request.server_request else None
 
@@ -515,7 +515,7 @@ class Auth:
         if not self.request.server_request: return False
         return self.session.get('login_attempts', 0) >= self.SIGNIN_ATTEMPTS
 
-    def get_auth_user(self) -> User | None:
+    def get_auth_user(self) -> User:
         # if not self.user_creds:
         #     self.response = self.responses.UNAUTHORIZED
         #     return None
@@ -535,7 +535,7 @@ class Auth:
     #     auth_creds = UserCredentials.from_header(self) if authorization_header else UserCredentials.from_session(self.session)
     #     return UserCredentials.from_request(self.request) if not auth_creds else auth_creds
 
-    def query_account(self, user_email: str = None) -> User | None:
+    def query_account(self, user_email: str = None) -> User:
         """Queries the user account based on the provided credentials."""
         uid =  generate_id(self.user_creds.email) if not self.user_creds.has_session else user_email or self.user_creds.email
         user_account_path = os.path.join(self.app.contents_dirpath, 'users', uid, 'profile.json')
@@ -581,7 +581,7 @@ class Auth:
         salt = self.app.configs.env.salt
         return hash_password(self.harden_password(salt, password, with_token or self.request.session_token))
 
-    def decode_jwt(self, jwt_token) -> dict | None:
+    def decode_jwt(self, jwt_token) -> dict:
         """Returns decoded jwt object"""
         from pyonir import Site
         from jwt import DecodeError, ExpiredSignatureError
@@ -674,7 +674,7 @@ class AuthService(ABC):
         return authorizer.response
 
     @abstractmethod
-    async def sign_out(self, request: PyonirRequest) -> AuthResponse | None:
+    async def sign_out(self, request: PyonirRequest) -> AuthResponse:
         """
         Invalidate a user's active session or token.
         ---

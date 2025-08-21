@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 import os
-from typing import Optional, Union, Callable, List, Tuple, Iterator
+from typing import Optional, Union, Callable, List, Tuple, Iterator, Dict
 
 from jinja2 import Environment
 from starlette.applications import Starlette
@@ -145,9 +145,9 @@ class PyonirThemes:
     """Represents sites available and active theme(s) within the frontend directory."""
     themes_dirpath: str
     """Path to the themes directory, typically 'frontend/themes'."""
-    available_themes: dict[str, Theme] | None
+    available_themes: Optional[Dict[str, Theme]] = None
     """Dictionary of available themes, keyed by theme name."""
-    active_theme: Theme | None
+    active_theme: Optional[Theme] = None
     """Currently active theme, if any."""
 
 class TemplateEnvironment(Environment):
@@ -343,8 +343,8 @@ class PyonirApp(PyonirBase):
     frontend_route: str
     assets_route: str
 
-    ssl_key_file: str | None
-    ssl_cert_file: str | None
+    ssl_key_file: Optional[str]
+    ssl_cert_file: Optional[str]
 
     SECRET_SAUCE: str
     configs: object

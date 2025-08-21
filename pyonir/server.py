@@ -212,25 +212,25 @@ def serve_static(app: PyonirApp, request: PyonirRequest):
                                                                                   status_code=404)
 
 
-def route(dec_func: typing.Callable | None,
+def route(dec_func: typing.Callable,
           url: str = '',
           methods=None,
           auth: bool = None,
           ws: bool = None,
           sse: bool = None,
-          static_path: str = None) -> typing.Callable | None:
+          static_path: str = None) -> typing.Callable:
     if dec_func is None and static_path is None:
         dec_func = pyonir_index
     return _add_route(dec_func, path=url, methods=methods, auth=auth, ws=ws, sse=sse, static_path=static_path)
 
 
-def _add_route(dec_func: typing.Callable | None,
+def _add_route(dec_func: typing.Callable,
                path: str = '',
                methods=None,
                auth: bool = None,
                ws: bool = None,
                sse: bool = None,
-               static_path: str = None) -> typing.Callable | None:
+               static_path: str = None) -> typing.Callable:
     """Route decorator"""
     from pyonir import Site
 
@@ -507,7 +507,7 @@ def generate_nginx_conf(app: PyonirApp) -> bool:
 
 def start_uvicorn_server(app: PyonirApp, endpoints: PyonirRouters = None):
     """Starts the webserver"""
-    import uvicorn
+    import uvicorn, sys
 
     # """Uvicorn web server configurations"""
     uvicorn_options = {
@@ -535,6 +535,6 @@ def start_uvicorn_server(app: PyonirApp, endpoints: PyonirRouters = None):
     \n\t- App ssl_cert: {app.ssl_cert_file}\
     \n\t- App Server: Uvicorn \
     \n\t- NGINX config: {app.nginx_config_filepath} \
-    \n\t- System Version: {app.SOFTWARE_VERSION}")
+    \n\t- System Version: {sys.version_info}")
     app.run_plugins(PyonirHooks.AFTER_INIT)
     uvicorn.run(app.server, **uvicorn_options)

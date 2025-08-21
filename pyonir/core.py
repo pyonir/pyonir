@@ -1033,7 +1033,7 @@ class PyonirApp(PyonirBase):
         return self.name, self.endpoint, self.contents_dirpath, self.ssg_dirpath
 
     @property
-    def env(self) -> str: return getattr(self.configs.env, 'APP_ENV') if self.configs else 'LOCAL'
+    def env(self) -> str: return getattr(self.configs.env, 'APP_ENV') if hasattr(self.configs, 'env') else 'LOCAL'
 
     @property
     def is_dev(self) -> bool: return self.env == DEV_ENV

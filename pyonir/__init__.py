@@ -18,7 +18,7 @@ PYONIR_JINJA_FILTERS_DIRPATH = os.path.join(PYONIR_JINJA_DIRPATH, "filters")
 PYONIR_STATIC_ROUTE = "/pyonir_assets"
 
 __version__: str = '1.0.0'
-Site: PyonirApp | None = None
+Site: PyonirApp = None
 
 def init(entry_file_path: str, serve_frontend: bool = None):
     """Initializes existing Pyonir application"""

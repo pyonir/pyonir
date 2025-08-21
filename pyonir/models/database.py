@@ -23,27 +23,27 @@ class DatabaseService(ABC):
         self._password: str = ''
 
     @property
-    def driver(self) -> str | None:
+    def driver(self) -> Optional[str]:
         return self._driver
 
     @property
-    def host(self) -> str | None:
+    def host(self) -> Optional[str]:
         return self._host
 
     @property
-    def port(self) -> int | None:
+    def port(self) -> Optional[int]:
         return self._port
 
     @property
-    def username(self) -> str | None:
+    def username(self) -> Optional[str]:
         return self._username
 
     @property
-    def password(self) -> str | None:
+    def password(self) -> Optional[str]:
         return self._password
 
     @property
-    def database(self) -> str | None:
+    def database(self) -> Optional[str]:
         return self._database
 
     # --- Builder pattern overrides ---

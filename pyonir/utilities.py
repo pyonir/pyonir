@@ -524,14 +524,19 @@ def generate_base64_id(value):
 
 def load_env(path=".env") -> object:
     from collections import defaultdict
-    if not os.path.exists(path): return {}
+    import warnings
+    env_data = defaultdict(dict)
+    env = os.getenv('APP_ENV')
+    if not env:
+        warnings.warn("APP_ENV not set. Defaulting to LOCAL mode. Expected one of DEV, TEST, PROD, LOCAL.", UserWarning)
+        env_data['APP_ENV'] = 'LOCAL'
+    if not os.path.exists(path): return env_data
+
     def set_nested(d, keys, value):
         """Helper to set value in nested dictionary using dot-separated keys."""
         for key in keys[:-1]:
             d = d.setdefault(key, {})
         d[keys[-1]] = value
-
-    env_data = defaultdict(dict)
 
     with open(path) as f:
         for line in f:

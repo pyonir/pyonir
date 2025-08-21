@@ -333,6 +333,23 @@ class PyonirBase:
         """Parses a file and returns a Parsely instance for the file."""
         pass
 
+class EnvConfig:
+    """Application Configurations"""
+    APP_ENV: str
+    APP_KEY: str
+    APP_DEBUG: bool
+    APP_URL: str
+    DB_CONNECTION: str
+    DB_HOST: str
+    DB_PORT: int
+    DB_DATABASE: str
+    DB_USERNAME: str
+    DB_PASSWORD: str
+
+class PyonirAppSettings:
+    name: str
+    domain: str
+    theme: Optional[str]
 
 class PyonirApp(PyonirBase):
 
@@ -347,7 +364,8 @@ class PyonirApp(PyonirBase):
     ssl_cert_file: Optional[str]
 
     SECRET_SAUCE: str
-    configs: object
+    settings: PyonirAppSettings
+    env: EnvConfig
     request_paths: str
     nginx_config_filepath: str
     unix_socket_filepath: str
@@ -364,7 +382,6 @@ class PyonirApp(PyonirBase):
     resolvers_dirpath: str
     jinja_filters_dirpath: str
     app_ctx: str
-    env: str
     is_dev: bool
     host: str
     port: str

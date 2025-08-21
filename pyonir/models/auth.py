@@ -406,7 +406,7 @@ class Auth:
                 pass
 
             elif user.auth_from == 'basic':
-                salt = self.app.configs.env.salt
+                salt = self.app.salt
                 requested_passw = Auth.harden_password(salt, self.user_creds.password, user.auth_token)
                 has_valid_creds = Auth.verify_password(user.password, requested_passw)
                 if has_valid_creds:
@@ -578,7 +578,7 @@ class Auth:
 
     def hash_password(self, password: str = None, with_token: str = None) -> str:
         """Rehashes the user's password with the current site salt and request token."""
-        salt = self.app.configs.env.salt
+        salt = self.app.salt
         return hash_password(self.harden_password(salt, password, with_token or self.request.session_token))
 
     def decode_jwt(self, jwt_token) -> dict:

@@ -5,8 +5,8 @@ from jinja2 import Environment
 from starlette.requests import Request as StarletteRequest
 
 from pyonir.pyonir_types import PyonirServer, Theme, PyonirHooks, Parsely, ParselyPagination, AppRequestPaths, AppCtx, \
-    PyonirRouters, RoutePath, PyonirRestResponse
-from pyonir.utilities import expand_dotted_keys
+    PyonirRouters, RoutePath, PyonirRestResponse, PyonirAppSettings, EnvConfig
+from pyonir.utilities import expand_dotted_keys, get_attr
 
 # Environments
 DEV_ENV:str = 'LOCAL'
@@ -928,7 +928,7 @@ class PyonirApp(PyonirBase):
     """All enabled plugins instances"""
 
     def __init__(self, app_entrypoint: str, serve_frontend: bool = None):
-        from pyonir.utilities import generate_id, get_attr
+        from pyonir.utilities import generate_id, get_attr, load_env
         from pyonir import __version__
         from pyonir.parser import parse_markdown
         self.SOFTWARE_VERSION = __version__
@@ -938,8 +938,9 @@ class PyonirApp(PyonirBase):
         self.name: str = os.path.basename(self.app_dirpath) # web url to serve application pages
         self.SECRET_SAUCE = generate_id()
         self.SESSION_KEY = f"pyonir_{self.name}"
-        self.configs: object = None
-        self.themes: PyonirThemes | None = None
+        self._env: EnvConfig = load_env(os.path.join(self.app_dirpath, '.env'))
+        self.settings: PyonirAppSettings = None
+        self.themes: PyonirThemes = None
         self.routing_paths = [self.pages_dirpath, self.api_dirpath]
         self.Parsely_Filters = {'jinja': self.parse_jinja, 'pyformat': self.parse_pyformat,
                                  'md': parse_markdown}
@@ -1033,17 +1034,23 @@ class PyonirApp(PyonirBase):
         return self.name, self.endpoint, self.contents_dirpath, self.ssg_dirpath
 
     @property
-    def env(self) -> str: return getattr(self.configs.env, 'APP_ENV') if hasattr(self.configs, 'env') else 'LOCAL'
+    def use_ssl(self) -> str: return get_attr(self.env, 'app.use_ssl')
 
     @property
-    def is_dev(self) -> bool: return self.env == DEV_ENV
+    def salt(self) -> str: return get_attr(self.env, 'app.salt')
 
     @property
-    def host(self) -> str: return self.get_attr(self.configs, 'app.host', '0.0.0.0') #if self.configs else '0.0.0.0'
+    def env(self) -> str: return self._env
+
+    @property
+    def is_dev(self) -> bool: return getattr(self.env, 'APP_ENV')== DEV_ENV
+
+    @property
+    def host(self) -> str: return self.get_attr(self._env, 'app.host', '0.0.0.0') #if self.configs else '0.0.0.0'
 
     @property
     def port(self) -> int:
-        return self.get_attr(self.configs, 'app.port', 5000) #if self.configs else 5000
+        return self.get_attr(self._env, 'app.port', 5000) #if self.configs else 5000
 
     @property
     def protocol(self) -> str: return 'https' if self.is_secure else 'http'
@@ -1052,13 +1059,25 @@ class PyonirApp(PyonirBase):
     def is_secure(self) -> bool:
         """Check if the application is configured to use SSL"""
         has_ssl_files = os.path.exists(self.ssl_cert_file) and os.path.exists(self.ssl_key_file)
-        return has_ssl_files and self.get_attr(self.configs, 'app.use_ssl', False)
+        return has_ssl_files and self.use_ssl
 
     @property
-    def domain_name(self) -> str: return self.get_attr(self.configs, 'app.domain', self.host) # if self.configs else self.host
+    def domain_name(self) -> str: return self.get_attr(self._env, 'app.domain', self.host) # if self.configs else self.host
 
     @property
     def domain(self) -> str: return f"{self.protocol}://{self.domain_name}{':'+str(self.port) if self.is_dev else ''}".replace('0.0.0.0','localhost') # if self.configs else self.host
+
+    def insert(self, file_path: str, contents: dict, app_ctx: AppCtx = None) -> Parsely:
+        """Creates a new file"""
+        from pyonir import Parsely
+        contents = Parsely.serializer(contents) if isinstance(contents, dict) else contents
+        return Parsely.create_file(file_path, contents, app_ctx=app_ctx or self.app_ctx)
+
+    @staticmethod
+    def query_files(dir_path: str, app_ctx: tuple, model_type: any = None) -> list[Parsely]:
+        from pyonir.utilities import process_contents
+        # return PyonirCollection.query(dir_path, app_ctx, model_type)
+        return process_contents(dir_path, app_ctx, model_type)
 
     def load_plugin(self, plugin: callable | list[callable]):
         """Make the plugin known to the pyonir application"""
@@ -1073,9 +1092,9 @@ class PyonirApp(PyonirBase):
     def _activate_plugins(self):
         """Active plugins enabled based on configurations"""
         from pyonir.utilities import get_attr
-        is_configured = get_attr(self.configs.app, 'enabled_plugins', None)
+        is_configured = get_attr(self.settings.app, 'enabled_plugins', None)
         for plg_id, plugin in self.plugins_installed.items():
-            if is_configured and plg_id not in self.configs.app.enabled_plugins: continue
+            if is_configured and plg_id not in self.settings.app.enabled_plugins: continue
             self.plugins_activated.add(plugin(self))
 
     def install_sys_plugins(self):
@@ -1101,15 +1120,10 @@ class PyonirApp(PyonirBase):
 
     def parse_jinja(self, string, context=None) -> str:
         """Render jinja template fragments"""
-        from pyonir.utilities import dict_to_class
-
         if not context: context = {}
         if not self.TemplateEnvironment or not string: return string
         try:
-            # request = self.TemplateEnvironment.globals.get('request')
-            # user = request.auth.user if request and request.auth else None
-            # page = dict_to_class(context.pop('page'), 'page') if context.get('page') else None
-            return self.TemplateEnvironment.from_string(string).render(configs=self.configs, **context)
+            return self.TemplateEnvironment.from_string(string).render(configs=self.settings, **context)
         except Exception as e:
             raise
 
@@ -1139,7 +1153,7 @@ class PyonirApp(PyonirBase):
         self.themes = PyonirThemes(themes_dir_path)
         app_active_theme = self.themes.active_theme
         if app_active_theme is None:
-            raise ValueError(f"No active theme name {get_attr(self.configs, 'app.theme_name')} found in {self.frontend_dirpath} themes directory. Please ensure a theme is available.")
+            raise ValueError(f"No active theme name {get_attr(self.settings, 'app.theme_name')} found in {self.frontend_dirpath} themes directory. Please ensure a theme is available.")
 
         # Configure theme templates
         self.TemplateEnvironment.load_template_path(app_active_theme.jinja_template_path)
@@ -1147,11 +1161,9 @@ class PyonirApp(PyonirBase):
 
     def setup_configs(self):
         """Setup site configurations and template environment"""
-        from pyonir.utilities import process_contents, load_env
-        self.configs = process_contents(os.path.join(self.contents_dirpath, self.CONFIGS_DIRNAME), self.app_ctx)
-        envopts = load_env(os.path.join(self.app_dirpath, '.env'))
-        setattr(self.configs, 'env', envopts)
-        self.TemplateEnvironment.globals['configs'] = self.configs.app
+        from pyonir.utilities import process_contents
+        self.settings = process_contents(os.path.join(self.contents_dirpath, self.CONFIGS_DIRNAME), self.app_ctx)
+        self.TemplateEnvironment.globals['configs'] = self.settings.app
 
 
 
@@ -1161,14 +1173,14 @@ class PyonirApp(PyonirBase):
         from pyonir.server import generate_nginx_conf
 
         # Initialize Application settings and templates
-        # self.setup_configs()
-        # self.setup_themes()
         self.install_sys_plugins()
         self._activate_plugins()
         generate_nginx_conf(self)
         # Run uvicorn server
         if self.SSG_IN_PROGRESS: return
         # Initialize Server instance
+        if not self.salt:
+            raise ValueError(f"You are attempting to run the application without proper configurations. .env file must include app.salt to protect the application.")
         self.server = setup_starlette_server(self)
         start_uvicorn_server(self, routes)
 
@@ -1281,7 +1293,7 @@ class PyonirThemes:
         from pyonir.parser import get_attr
         if not Site or not self.available_themes: return None
         # self.available_themes = self.query_themes()
-        site_theme = get_attr(Site.configs, 'app.theme_name')
+        site_theme = get_attr(Site._env, 'app.theme_name')
         site_theme = self.available_themes.get(site_theme)
         return site_theme
 

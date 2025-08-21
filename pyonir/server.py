@@ -104,7 +104,7 @@ async def pyonir_sse_handler(request: PyonirRequest) -> typing.AsyncGenerator:
 
 async def pyonir_docs_handler(request: PyonirRequest):
     """Documentation for every endpoint by pyonir"""
-    return {"routes": request.server_request.app.url_map, "configs": request.auth.app.configs}
+    return {"routes": request.server_request.app.url_map, "configs": request.auth.app._env}
 
 
 def pyonir_index(request: PyonirRequest):
@@ -499,7 +499,7 @@ def generate_nginx_conf(app: PyonirApp) -> bool:
         site_uploads_route=app.uploads_route,
         site_uploads_dirpath=app.uploads_dirpath,
         site_ssg_dirpath=app.ssg_dirpath,
-        custom_nginx_locations=get_attr(app.configs, 'nginx_locations')
+        custom_nginx_locations=get_attr(app._env, 'nginx_locations')
     )
 
     return create_file(app.nginx_config_filepath, nginx_conf, False)

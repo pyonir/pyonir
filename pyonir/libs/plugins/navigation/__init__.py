@@ -6,9 +6,10 @@ from pyonir.core import PyonirPlugin, PyonirCollection
 
 @dataclasses.dataclass
 class Menu:
-    _mapper_key = 'menu'
+    _orm_options = {'mapper_key': 'menu'}
     url: str
     slug: str = ''
+    name: str = ''
     title: str = ''
     group: str = ''
     parent: str = ''
@@ -20,7 +21,8 @@ class Menu:
     status: str = ''
 
     def __post_init__(self):
-        self.name = self.title
+        if not self.name:
+            self.name = self.title
         pass
 
 class Navigation(PyonirPlugin):
@@ -28,12 +30,13 @@ class Navigation(PyonirPlugin):
     name = 'Navigation Plugin'
 
     def __init__(self, app: PyonirApp):
+        self.app = app
         self.menus = {}
         self.active_page = None
         self.build_navigation(app=app)
         # include navigation template example
-        self.app = app
         self.register_templates([os.path.join(os.path.dirname(__file__), 'templates')])
+        self.add_menus_to_environment(app)
         pass
 
     def after_init(self, data: any, app: PyonirApp):
@@ -62,11 +65,31 @@ class Navigation(PyonirPlugin):
 
     def build_navigation(self, app: PyonirApp):
         from pyonir.utilities import query_files
+        from collections import defaultdict
         if app is None: return None
         assert hasattr(app, 'pages_dirpath'), "Get menus 'app' parameter does not have a pages dirpath property"
         menus = {}
         submenus = {}
         file_list = query_files(app.pages_dirpath, app_ctx=app.app_ctx, model=Menu)
+
+        def group_by_menu(items):
+            grouped = defaultdict(list)
+            for item in items:
+                has_menu = item.group or item.parent
+                if item.status == 'hidden' or not item.url or (not has_menu): continue
+                grouped[item.group].append(item)
+            return dict(grouped)  # convert to plain dict if you like
+        result = group_by_menu(file_list)
+        self.menus[app.name] = result
+
+    def _build_navigation(self, app: PyonirApp):
+        from pyonir.utilities import query_files
+        if app is None: return None
+        assert hasattr(app, 'pages_dirpath'), "Get menus 'app' parameter does not have a pages dirpath property"
+        menus = {}
+        submenus = {}
+        file_list = query_files(app.pages_dirpath, app_ctx=app.app_ctx, model=Menu)
+
 
         for menu in file_list:
             # menu = self.schemas.menu.map_input_to_model(pg)

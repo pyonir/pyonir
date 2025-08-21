@@ -43,8 +43,8 @@ def is_callable_type(pt) -> bool:
 def cls_mapper(file_obj: object, cls: typing.Callable, from_request: PyonirRequest = None):
     from pyonir.core import PyonirRequest, PyonirApp
     param_name, param_type, param_value = ['','','']
-    orm_opts = getattr(cls, "__orm_options__", {})
-    mapper_keys = getattr(cls, "_mapper", None) or orm_opts.get("mapper", {})
+    orm_opts = getattr(cls, "__orm_options", {})
+    mapper_keys = orm_opts.get("mapper", {})
     try:
         if hasattr(cls, '__skip_parsely_deserialization__'):
             return file_obj
@@ -57,16 +57,17 @@ def cls_mapper(file_obj: object, cls: typing.Callable, from_request: PyonirReque
 
         # mapper_keys = getattr(cls, "_mapper", {})
         data = get_attr(file_obj, 'data') or {}
-        # _parsely_data_key = '.'.join(['data', get_attr(cls, '_mapper_key') or cls.__name__.lower()])
-        # kdata = get_attr(file_obj, _parsely_data_key)
-        # if kdata:
-        #     data.update(**kdata)
+        # access nested object using mapper_key
+        _model_access_key = '.'.join(['data', orm_opts.get('mapper_key') or cls.__name__.lower()])
+        kdata = get_attr(file_obj, _model_access_key)
+        if kdata:
+            data.update(**kdata)
 
         cls_args = {}
         res = cls() if is_generic else None
 
         if hasattr(cls, 'from_dict'):  # allows manual mapping of class instance
-            return cls.from_dict(file_obj)
+            return cls.from_dict(data)
 
         # Build constructor args
         for param_name, param_type in param_type_map.items():
@@ -150,7 +151,7 @@ def process_contents(path, app_ctx=None, file_model: any = None):
     pgs = query_files(path, app_ctx=app_ctx, model=file_model)
     for pg in pgs:
         name = getattr(pg, 'file_name')
-        setattr(res, name, pg.map_to_model(None))
+        setattr(res, name, pg.map_to_model(None) if hasattr(pg, 'map_to_model') else pg)
     return res
 
 
@@ -294,7 +295,7 @@ def parse_query_model_to_object(model_fields: str) -> object:
     from pyonir.parser import Parsely
     import importlib
     mapper = {}
-    params = {"_mapper": mapper}
+    params = {"_orm_options": {'mapper': mapper}}
     for k in Parsely.default_file_attributes+model_fields.split(','):
         if ':' in k:
             k,_, src = k.partition(':')
@@ -435,7 +436,7 @@ def copy_assets(src: str, dst: str, purge: bool = True):
     """Copies files from a source directory into a destination directory with option to purge destination"""
     import shutil
     from shutil import ignore_patterns
-    print(f"{PrntColrs.OKBLUE}Coping `{src}` resource into {dst}{PrntColrs.RESET}")
+    # print(f"{PrntColrs.OKBLUE}Coping `{src}` resource into {dst}{PrntColrs.RESET}")
     try:
         if os.path.exists(dst) and purge:
             shutil.rmtree(dst)
@@ -553,6 +554,43 @@ def load_env(path=".env") -> object:
 
     return dict_to_class(env_data, 'env')
 
+def expand_dotted_keys(flat_data: dict, return_as_dict: bool = False):
+    """
+    Convert a dict with dotted keys into a nested structure.
+
+    Args:
+        flat_data (dict): Input dictionary with dotted keys.
+        return_as_dict (bool): If True, return a nested dict.
+                               If False, return nested dynamic objects.
+    """
+
+    def make_object(name="Generic"):
+        return type(name, (object,), {"__name__": "generic"})()
+
+    root = {} if return_as_dict else make_object("Root")
+
+    for dotted_key, value in flat_data.items():
+        parts = dotted_key.split(".")
+        current = root
+
+        for i, part in enumerate(parts):
+            # Last part -> assign value
+            if i == len(parts) - 1:
+                if return_as_dict:
+                    current[part] = value
+                else:
+                    setattr(current, part, value)
+            else:
+                if return_as_dict:
+                    if part not in current:
+                        current[part] = {}
+                    current = current[part]
+                else:
+                    if not hasattr(current, part):
+                        setattr(current, part, make_object(part.capitalize()))
+                    current = getattr(current, part)
+
+    return root
 
 class PrntColrs:
     RESET = '\033[0m'

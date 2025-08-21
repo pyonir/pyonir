@@ -33,18 +33,7 @@ Project {project_name} created!
 def pyonir_create(args):
     """Create a demo project based on pre configured templates"""
     use_demo = input(f"{PrntColrs.OKBLUE}Do you want to install the demo project?(y for yes, n for no){PrntColrs.RESET}").strip()
-    # if not os.path.exists(project_path):
-    #     os.makedirs(project_path)
-    # use_frontend = input(f"{PrntColrs.OKBLUE}Do you need a frontend? (y for yes, n for no){PrntColrs.RESET}").strip()
-    #
-    # if use_demo.lower() == 'y':
-    #     copy_assets(pkg_filepath, os.path.join(project_path, '__init__.py'), False)
-    #     copy_assets(entry_filepath, os.path.join(project_path, 'main.py'), False)
-    #     copy_assets(contents_dirpath, os.path.join(project_path, 'contents'), False)
-    #     copy_assets(backend_dirpath, os.path.join(project_path, 'backend'), False)
-    #
-    #     if use_frontend == 'y':
-    #         copy_assets(frontend_dirpath, os.path.join(project_path, 'frontend'), False)
+
 
 def pyonir_install(args: list):
     """Installs plugin_names or themes into pyonir application from the pyonir registry"""
@@ -52,18 +41,21 @@ def pyonir_install(args: list):
     gh_zip_address = "https://github.com/{repo_path}/archive/refs/heads/{repo_branch}.zip"
     project_base_dir = os.getcwd()
     action, *contexts = args
-    dir_name, repo_context = action.split(':')
+    action, *action_context = action.split(':')
+    action_context = action_context.pop(0)
+    # dir_name, repo_context = action.split(':')
 
     if action == 'theme':
         print(f"Installing {action} theme...")
         pass
     if action == 'plugin':
         # dir_name, repo_context = action.split(':')
-        repo_path, repo_branch = repo_context.split('#')
-        _, repo_name = repo_path.split('/')
+        repo_path, *repo_branch = action_context.split('#')
+        repo_branch = repo_branch.pop(0) if repo_branch else 'main'
+        repo_owner, repo_name = repo_path.split('/')
         repo_zip = gh_zip_address.format(repo_path=repo_path, repo_branch=repo_branch)
-        temp_dst_path = os.path.join(project_base_dir, dir_name, "."+repo_name)
-        dst_path = os.path.join(project_base_dir, dir_name, repo_name)
+        temp_dst_path = os.path.join(project_base_dir,'plugins', "."+repo_name)
+        dst_path = os.path.join(project_base_dir,'plugins', repo_name)
         print(f"pyonir is downloading {repo_zip} ...")
         response = requests.get(repo_zip)
         response.raise_for_status()
@@ -87,8 +79,26 @@ def pyonir_setup():
         print('installing...', contexts)
         pyonir_install(contexts)
         pass
+    elif action == 'help':
+        print(f"""
+Pyonir CLI - Commands
+---------------------
+
+init       Create a new empty project
+install    Install a plugin or theme from GitHub registry
+help       Show CLI documentation
+
+Usage:
+  pyonir <command> [options]
+
+Examples:
+  pyonir init
+  pyonir install plugin:<repo_owner>/<repo_name>#<repo_branch>
+  pyonir install theme:<repo_owner>/<repo_name>#<repo_branch>
+  pyonir help
+""")
     else:
-        print(f"Pyonir expects arguments of: new (creating a new site), install (installing plugins or themes)")
+        print(f"Pyonir expects arguments of: init (creating a new site), install (installing plugins or themes)")
 
 if __name__ == '__main__':
     pyonir_setup()

@@ -65,8 +65,10 @@ class ParselyFileStatus(str):
 
 
 def parse_markdown(content, kwargs):
+    """Parse markdown string using mistletoe with htmlattributesrenderer"""
     import html, mistletoe
     from mistletoe.html_attributes_renderer import HTMLAttributesRenderer
+    if not content: return content
     res = mistletoe.markdown(content, renderer=HTMLAttributesRenderer)
     return html.unescape(res)
 
@@ -75,7 +77,7 @@ def parse_markdown(content, kwargs):
 class Page:
     """Represents a single page returned from a web request"""
     # _mapper = {'created_on': 'file_created_on', 'modified_on': 'file_modified_on'}
-    __orm_options__ = {"mapper": {'created_on': 'file_created_on', 'modified_on': 'file_modified_on'}} # avoids merging additional data properties to model
+    _orm_options = {"mapper": {'created_on': 'file_created_on', 'modified_on': 'file_modified_on'}} # avoids merging additional data properties to model
     url: str
     is_router: bool = False
     created_on: datetime = None
@@ -97,6 +99,11 @@ class Page:
     contents_relpath: str = ''
     generate_static_file: callable = None
     status: str = ParselyFileStatus.PUBLIC
+
+    @property
+    def canonical(self):
+        from pyonir import Site
+        return f"{Site.origin}{self.data.get('url')}" if Site else None
 
     def to_json(self) -> dict:
         """Json serializable repr"""
@@ -229,6 +236,7 @@ class Parsely:
         self.app_ctx = app_ctx # application context for file
         self.file_path = str(abspth)
         self.file_dirpath = os.path.dirname(abspth) # path to files contents directory
+        self.file_virtual_path = ''
         # file data processing
         self.file_contents = ''
         self.file_lines = None
@@ -237,10 +245,12 @@ class Parsely:
 
         ctx_url, ctx_name, ctx_dirpath, ctx_staticpath, contents_relpath, file_name, file_ext = self.process_ctx(app_ctx)
         content_type, *content_subs = os.path.dirname(contents_relpath).split(os.path.sep) # directory at root of contents scope
-        is_page = content_type in (Site.PAGES_DIRNAME, Site.API_DIRNAME) and not self.is_router
+        pages_dirname = Site.PAGES_DIRNAME if Site is not None else ''
+        api_dirname = Site.API_DIRNAME if Site is not None else ''
+        is_page = Site is not None and content_type in (pages_dirname, api_dirname) and not self.is_router
         self.file_contents_dirpath =  ctx_dirpath # contents directory path used when querying refs
         self.is_page = is_page
-        self.is_home = ctx_url=='' and is_page and contents_relpath == f'{Site.PAGES_DIRNAME}/index'
+        self.is_home = ctx_url=='' and is_page and contents_relpath == f'{pages_dirname}/index'
         self.file_ctx = ctx_name # the application context name
         self.file_dirname = os.path.basename(self.file_dirpath) # nearest parent directory for file
         self.file_data_type = content_type
@@ -248,7 +258,7 @@ class Parsely:
         self.file_ext = file_ext.lstrip('.')
         self.status = self.file_status
 
-        surl = re.sub(fr'\b{Site.PAGES_DIRNAME}/\b|\bindex\b', '', contents_relpath)
+        surl = re.sub(fr'\b{pages_dirname}/\b|\bindex\b', '', contents_relpath) if is_page else contents_relpath
         slug = f'{ctx_url}/{surl}'.lstrip('/').rstrip('/').lower()
         url = '/' if self.is_home else '/' + slug
         # page attributes
@@ -256,7 +266,7 @@ class Parsely:
             self.data['url']  = url
             self.data['slug'] = slug
             self.data['tags'] = content_subs
-        self.file_ssg_api_dirpath = os.path.join(ctx_staticpath, 'api', slug)
+        self.file_ssg_api_dirpath = os.path.join(ctx_staticpath, api_dirname, slug)
         self.file_ssg_html_dirpath = os.path.join(ctx_staticpath, slug)
         if __skip_parsely_deserialization__: return
         self.deserializer()
@@ -279,11 +289,12 @@ class Parsely:
 
     @property
     def file_exists(self):
+        if self.is_router: return True
         return os.path.exists(self.file_path) if self.file_path else None
 
     @property
     def template(self) -> str:
-        if not self.file_exists or not isinstance(self.data, dict): return "40x.html"
+        if not self.file_exists or not isinstance(self.data, dict) and not self.is_router: return "40x.html"
         return self.data.get('template', "pages.html")
 
     @property
@@ -294,18 +305,19 @@ class Parsely:
             file_date = deserialize_datestr(file_date)
         return file_date
 
-    @property
-    def canonical(self):
-        from pyonir import Site
-        return f"{Site.origin}{self.data.get('url')}" if Site else None
-
     def process_ctx(self, app_ctx):
-        ctx_dir, ctx_url, ctx_dirpath, ctx_staticpath = app_ctx
+        ctx_url = ''
+        if not app_ctx:
+            ctx_dirpath = os.path.dirname(self.file_path)
+            ctx_dir = os.path.basename(ctx_dirpath)
+            ctx_staticpath = os.path.join(ctx_dirpath, 'ssg')
+        else:
+            ctx_dir, ctx_url, ctx_dirpath, ctx_staticpath = app_ctx
         if not os.path.exists(ctx_dirpath): ctx_dirpath = os.path.dirname(ctx_dirpath)
         _, _, content_dirpath = self.file_path.partition(ctx_dirpath)
         file_name, file_ext = os.path.splitext(os.path.basename(self.file_path))
         content_dirpath = content_dirpath.lstrip(os.path.sep).replace(file_ext,'')
-        return ctx_url or '', ctx_dir, ctx_dirpath, ctx_staticpath, content_dirpath, file_name, file_ext
+        return ctx_url, ctx_dir, ctx_dirpath, ctx_staticpath, content_dirpath, file_name, file_ext
 
     def set_taxonomy(self) -> list[str] | None:
         if not self.file_exists: return None
@@ -347,6 +359,7 @@ class Parsely:
         pass
 
     def map_to_model(self, model, refresh = False):
+        """Maps the parsely object into a model class provided or the self.schema reference """
         if model is None:
             model = self.schema
         if model and refresh:
@@ -371,6 +384,18 @@ class Parsely:
     def to_json(self) -> dict:
         """Json serializable repr"""
         return self.data
+
+    def apply_template(self, prop_names: list = None, context: dict = None):
+        """Render python format strings for data property values"""
+        from pyonir import Site
+        context = context or self.data
+        prop_names = context.get('@pyformatter', [])
+        # prop_names = prop_names or self.data.get(FILTER_KEY,{}).get("pyformat", self.data.get("@pyformatter")) or context.get('@pyformatter', [])
+        for prop in prop_names:
+            data_value = context.get(prop)
+            data_value = Site.parse_pyformat(data_value, self.data)
+            update_nested(prop, data_src=self.data, data_update=data_value)
+
 
     def apply_filters(self):
         """Applies filter methods to data attributes"""
@@ -424,6 +449,8 @@ class Parsely:
     async def process_route(self, pyonir_request: PyonirRequest, app: 'PyonirApp'):
         """Processes dynamic routes from @routes property"""
         from starlette.routing import compile_path
+        import re
+        pattern = re.compile(r"^(?P<path>settings(?:/.*)?)$")
         router_obj: dict | None = self.data.get('@routes') or self.data
         is_not_router = not self.is_router
         # is_not_router = pyonir_request.file.file_exists and not pyonir_request.file.is_router
@@ -438,30 +465,40 @@ class Parsely:
             if match: break
             relpath = f"{base_url}{r}"
             path_regex, path_format, *args = compile_path(relpath)
-            match = path_regex.match(path)
-            if match:
-                pyonir_request.path_params.update(match.groupdict())
-                self.refresh_data()
+            match = path_regex.match(path) # check if request path matches the router regex
+            if match or not pyonir_request.is_home and relpath.startswith(path):
+                if match: pyonir_request.path_params.update(match.groupdict())
+                # self.refresh_data() # refresh data to include parameter arguments for templating expressions
                 value = self.data[r]
-                virtual_req = value.get(pyonir_request.method) or value.get('page')
+                virtual_req = value.get('page')
                 method_mod_path = value.get('call')
-                is_page = value.get('page') is not None
-                if self.is_router and pyonir_request.file and not pyonir_request.file.is_router:
+                if pyonir_request.file.file_exists:
                     # we merge our virtual page spec into the request file spec
                     pyonir_request.file.data.update(value)
-                if is_page:
-                    self.data = virtual_req
+                else:
+                    # we override the virtual routes file with the virtual request value
+                    # value = virtual_req if virtual_req else value
+                    value.update({"url": pyonir_request.url, "slug": pyonir_request.slug})
+                    self.data = value
+                    self.status = ParselyFileStatus.PUBLIC
+                    self.file_virtual_path = self.file_path.replace(self.file_name, pyonir_request.slug)
+                    self.file_ssg_html_dirpath = self.file_ssg_html_dirpath.replace(self.file_name, pyonir_request.slug)
+                    self.file_ssg_api_dirpath = self.file_ssg_api_dirpath.replace(self.file_name, pyonir_request.slug)
+                    pyonir_request.file = self
                 if method_mod_path:
                     _, router_method = await self._access_module_from_request(method_mod_path)
+                    pyonir_request.file.resolver = router_method
 
-        if match or router_method:
-            self.data.update({"url": pyonir_request.url, "slug": pyonir_request.slug})
-            self.resolver = router_method
-        else:
-            # When no matching route spec is found we return an error page
-            self.is_router = False
-            self.file_path = ''
-            pass
+                pyonir_request.file.apply_filters()
+
+        # if match or router_method:
+        #     # pyonir_request.file.data.update({"url": pyonir_request.url, "slug": pyonir_request.slug})
+        #     self.resolver = router_method
+        # else:
+        #     # When no matching route spec is found we return an error page
+        #     self.is_router = False
+        #     self.file_path = ''
+        #     pass
 
     async def process_resolver(self, request: PyonirRequest):
         """Resolves dynamic data from external methods"""
@@ -513,10 +550,10 @@ class Parsely:
     def process_line(self, cursor, output_data: any = None, is_blob=None, stop_str: str = '') -> tuple:
         """Deserializes string value"""
 
-        def count_tabs(str_value: str):
+        def count_tabs(str_value: str, tab_width: int = 4):
             """Returns number of tabs for provided string"""
             try:
-                return round(len(re.match(r'^\s+', str_value.replace('\n', '')).group()) / 4)
+                return round(len(re.match(r'^\s+', str_value.replace('\n', '')).group()) / tab_width)
             except Exception as e:
                 return 0
 
@@ -550,7 +587,8 @@ class Parsely:
             val_type = get_container_type(delim) if val_type is None else val_type
             parsed_val = valuestr.strip()
             force_scalr = delim and delim.endswith('`') or parsed_val.startswith(LOOKUP_DIR_PREFIX)
-            if parsed_key and parsed_val and not force_scalr:
+            is_inline_expression = bool(parsed_key and parsed_val) and not force_scalr
+            if is_inline_expression:
                 has_dotpath = "." in parsed_key
                 if has_dotpath or (isinstance(val_type, (list, dict)) or (", " in parsed_val)):  # inline list
                     _c = [] if delim is None else get_container_type(delim)
@@ -612,6 +650,7 @@ class Parsely:
                     elif not comment and not stop_str:
                         inlimts = cursor + 1 < self.file_line_count
                         is_block = ln_frag.startswith(BLOCK_PREFIX_STR) or ln_frag.endswith("|") or is_block_code
+                        # TODO: is_parent should be less restrictive on tabs vs spaces.
                         is_parent = True if is_block else count_tabs(
                             self.file_lines[cursor + 1]) > tabs if inlimts else False
                         parsed_key, val_type, parsed_val, methArgs = process_iln_frag(ln_frag)
@@ -939,6 +978,7 @@ class Parsely:
         self.data = {}
         self._blob_keys.clear()
         self.deserializer()
+        self.apply_filters()
 
     def prev_next(self):
         if self.file_dirname != 'pages' or self.is_home:

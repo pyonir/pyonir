@@ -404,6 +404,7 @@ async def create_response(pyonir_request: PyonirRequest, dec_func: callable):
 
     # Execute plugins hooks initial request
     await Site.run_async_plugins(PyonirHooks.ON_REQUEST, pyonir_request)
+    # await Site.run_async_hooks(PyonirHooks.ON_REQUEST, pyonir_request)
 
     # Finalize response output
     is_auth_res = isinstance(pyonir_request.server_response, PyonirRestResponse)
@@ -537,4 +538,5 @@ def start_uvicorn_server(app: PyonirApp, endpoints: PyonirRouters = None):
     \n\t- NGINX config: {app.nginx_config_filepath} \
     \n\t- System Version: {sys.version_info}")
     app.run_plugins(PyonirHooks.AFTER_INIT)
+    # app.run_hooks(PyonirHooks.AFTER_INIT)
     uvicorn.run(app.server, **uvicorn_options)

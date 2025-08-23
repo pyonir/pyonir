@@ -12,7 +12,8 @@ PAGINATE_LIMIT: int = 6
 
 
 # === Route Definitions ===
-
+PagesPath = str
+APIPath = str
 RoutePath = str
 """Represents the URL path of a route (e.g., '/about', '/api/data')."""
 
@@ -154,6 +155,9 @@ class TemplateEnvironment(Environment):
 
     themes: PyonirThemes
     get_template: callable
+    def add_filter(self, filter_method: callable): pass
+    def load_template_path(self, path: str): pass
+
 
 @dataclass
 class PyonirRestResponse:
@@ -355,6 +359,7 @@ class PyonirApp(PyonirBase):
 
     PUBLIC_ASSETS_DIRNAME: str
     FRONTEND_ASSETS_DIRNAME: str
+    PLUGINS_DIRNAME: str
     uploads_route: str
 
     frontend_route: str
@@ -409,6 +414,11 @@ class PyonirApp(PyonirBase):
     server: PyonirServer
     plugins_installed: dict[str, callable]
     plugins_activated: dict[str, callable]
+
+    def subscribe_hook(self, caller:callable, hook:str): pass
+
+    def add_routing_path(self,api_endpoint:str, endpoint: str, paths: list[str]): pass
+
 
 class PyonirPlugin(PyonirBase):
 

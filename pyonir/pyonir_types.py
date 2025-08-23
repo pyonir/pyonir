@@ -12,7 +12,8 @@ PAGINATE_LIMIT: int = 6
 
 
 # === Route Definitions ===
-
+PagesPath = str
+APIPath = str
 RoutePath = str
 """Represents the URL path of a route (e.g., '/about', '/api/data')."""
 
@@ -154,6 +155,9 @@ class TemplateEnvironment(Environment):
 
     themes: PyonirThemes
     get_template: callable
+    def add_filter(self, filter_method: callable): pass
+    def load_template_path(self, path: str): pass
+
 
 @dataclass
 class PyonirRestResponse:
@@ -333,11 +337,29 @@ class PyonirBase:
         """Parses a file and returns a Parsely instance for the file."""
         pass
 
+class EnvConfig:
+    """Application Configurations"""
+    APP_ENV: str
+    APP_KEY: str
+    APP_DEBUG: bool
+    APP_URL: str
+    DB_CONNECTION: str
+    DB_HOST: str
+    DB_PORT: int
+    DB_DATABASE: str
+    DB_USERNAME: str
+    DB_PASSWORD: str
+
+class PyonirAppSettings:
+    name: str
+    domain: str
+    theme: Optional[str]
 
 class PyonirApp(PyonirBase):
 
     PUBLIC_ASSETS_DIRNAME: str
     FRONTEND_ASSETS_DIRNAME: str
+    PLUGINS_DIRNAME: str
     uploads_route: str
 
     frontend_route: str
@@ -347,7 +369,8 @@ class PyonirApp(PyonirBase):
     ssl_cert_file: Optional[str]
 
     SECRET_SAUCE: str
-    configs: object
+    settings: PyonirAppSettings
+    env: EnvConfig
     request_paths: str
     nginx_config_filepath: str
     unix_socket_filepath: str
@@ -364,7 +387,6 @@ class PyonirApp(PyonirBase):
     resolvers_dirpath: str
     jinja_filters_dirpath: str
     app_ctx: str
-    env: str
     is_dev: bool
     host: str
     port: str
@@ -392,6 +414,11 @@ class PyonirApp(PyonirBase):
     server: PyonirServer
     plugins_installed: dict[str, callable]
     plugins_activated: dict[str, callable]
+
+    def subscribe_hook(self, caller:callable, hook:str): pass
+
+    def add_routing_path(self,api_endpoint:str, endpoint: str, paths: list[str]): pass
+
 
 class PyonirPlugin(PyonirBase):
 

@@ -104,7 +104,7 @@ async def pyonir_sse_handler(request: PyonirRequest) -> typing.AsyncGenerator:
 
 async def pyonir_docs_handler(request: PyonirRequest):
     """Documentation for every endpoint by pyonir"""
-    return {"routes": request.server_request.app.url_map, "configs": request.auth.app.configs}
+    return {"routes": request.server_request.app.url_map, "configs": request.auth.app._env}
 
 
 def pyonir_index(request: PyonirRequest):
@@ -404,6 +404,7 @@ async def create_response(pyonir_request: PyonirRequest, dec_func: callable):
 
     # Execute plugins hooks initial request
     await Site.run_async_plugins(PyonirHooks.ON_REQUEST, pyonir_request)
+    # await Site.run_async_hooks(PyonirHooks.ON_REQUEST, pyonir_request)
 
     # Finalize response output
     is_auth_res = isinstance(pyonir_request.server_response, PyonirRestResponse)
@@ -499,7 +500,7 @@ def generate_nginx_conf(app: PyonirApp) -> bool:
         site_uploads_route=app.uploads_route,
         site_uploads_dirpath=app.uploads_dirpath,
         site_ssg_dirpath=app.ssg_dirpath,
-        custom_nginx_locations=get_attr(app.configs, 'nginx_locations')
+        custom_nginx_locations=get_attr(app._env, 'nginx_locations')
     )
 
     return create_file(app.nginx_config_filepath, nginx_conf, False)
@@ -537,4 +538,5 @@ def start_uvicorn_server(app: PyonirApp, endpoints: PyonirRouters = None):
     \n\t- NGINX config: {app.nginx_config_filepath} \
     \n\t- System Version: {sys.version_info}")
     app.run_plugins(PyonirHooks.AFTER_INIT)
+    # app.run_hooks(PyonirHooks.AFTER_INIT)
     uvicorn.run(app.server, **uvicorn_options)

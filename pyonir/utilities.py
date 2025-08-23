@@ -4,7 +4,8 @@ import typing
 from typing import Union, Generator, Iterable, Callable, Mapping, get_origin, get_args, get_type_hints, Any
 from collections.abc import Iterable as ABCIterable
 
-from pyonir.pyonir_types import PyonirRequest, PyonirApp, AppCtx
+from pyonir.pyonir_types import PyonirRequest, PyonirApp, AppCtx, EnvConfig
+
 
 def is_iterable(tp):
     if not isinstance(tp, Iterable): return False
@@ -155,7 +156,7 @@ def process_contents(path, app_ctx=None, file_model: any = None):
     return res
 
 
-def dict_to_class(data: dict, name: str = 'T', deep: bool = True) -> object:
+def dict_to_class(data: dict, name: str = None, deep: bool = True) -> object:
     """
     Converts a dictionary into a class object with the given name.
 
@@ -167,7 +168,7 @@ def dict_to_class(data: dict, name: str = 'T', deep: bool = True) -> object:
         object: An instance of the dynamically created class with attributes from the dictionary.
     """
     # Dynamically create a new class
-    cls = type(name, (object,), {})
+    cls = type(name, (object,), {}) if isinstance(name, str) else name if callable(name) else 'T'
 
     # Create an instance of the class
     instance = cls()
@@ -522,7 +523,7 @@ def generate_base64_id(value):
     import base64
     return base64.b64encode(value.encode('utf-8'))
 
-def load_env(path=".env") -> object:
+def load_env(path=".env") -> EnvConfig:
     from collections import defaultdict
     import warnings
     env = os.getenv('APP_ENV') or 'LOCAL'
@@ -530,7 +531,7 @@ def load_env(path=".env") -> object:
     env_data['APP_ENV'] = env or 'LOCAL'
     if not env:
         warnings.warn("APP_ENV not set. Defaulting to LOCAL mode. Expected one of DEV, TEST, PROD, LOCAL.", UserWarning)
-    if not os.path.exists(path): return dict_to_class(env_data, 'env')
+    if not os.path.exists(path): return dict_to_class(env_data, EnvConfig)
 
     def set_nested(d, keys, value):
         """Helper to set value in nested dictionary using dot-separated keys."""
@@ -557,7 +558,7 @@ def load_env(path=".env") -> object:
             keys = key.split(".")
             set_nested(env_data, keys, value)
 
-    return dict_to_class(env_data, 'env')
+    return dict_to_class(env_data, EnvConfig)
 
 def expand_dotted_keys(flat_data: dict, return_as_dict: bool = False):
     """

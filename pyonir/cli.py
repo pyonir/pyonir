@@ -9,6 +9,7 @@ frontend_dirpath = os.path.join(PYONIR_SETUPS_DIRPATH, 'frontend')
 entry_filepath = os.path.join(PYONIR_SETUPS_DIRPATH, 'main.py')
 theme_readme_filepath = os.path.join(PYONIR_SETUPS_DIRPATH, 'frontend', 'README.md')
 pkg_filepath = os.path.join(PYONIR_SETUPS_DIRPATH, '__init__.py')
+env_filepath = os.path.join(PYONIR_SETUPS_DIRPATH, '.env.example')
 
 def pyonir_new_project(args):
 
@@ -19,6 +20,7 @@ def pyonir_new_project(args):
         os.makedirs(project_path)
         os.makedirs(os.path.join(project_path, 'frontend'))
     copy_assets(pkg_filepath, os.path.join(project_path, '__init__.py'), False)
+    copy_assets(env_filepath, os.path.join(project_path, '.env.example'), False)
     copy_assets(entry_filepath, os.path.join(project_path, 'main.py'), False)
     copy_assets(theme_readme_filepath, os.path.join(project_path, 'frontend', 'README.md'), False)
     copy_assets(backend_dirpath, os.path.join(project_path, 'backend'), False)

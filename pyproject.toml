@@ -24,7 +24,7 @@ dependencies = [
   "argon2-cffi",
   "PyJWT",
   "requests",
-  "mistletoe @ git+https://github.com/derryspann/mistletoe.git@master"
+  "mistletoe"
 ]
 
 [project.urls]

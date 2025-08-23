@@ -67,9 +67,10 @@ class ParselyFileStatus(str):
 def parse_markdown(content, kwargs):
     """Parse markdown string using mistletoe with htmlattributesrenderer"""
     import html, mistletoe
-    from mistletoe.html_attributes_renderer import HTMLAttributesRenderer
+    # from mistletoe.html_attributes_renderer import HTMLAttributesRenderer
     if not content: return content
-    res = mistletoe.markdown(content, renderer=HTMLAttributesRenderer)
+    res = mistletoe.markdown(content)
+    # res = mistletoe.markdown(content, renderer=HTMLAttributesRenderer)
     return html.unescape(res)
 
 
@@ -289,7 +290,6 @@ class Parsely:
 
     @property
     def file_exists(self):
-        if self.is_router: return True
         return os.path.exists(self.file_path) if self.file_path else None
 
     @property
@@ -449,8 +449,6 @@ class Parsely:
     async def process_route(self, pyonir_request: PyonirRequest, app: 'PyonirApp'):
         """Processes dynamic routes from @routes property"""
         from starlette.routing import compile_path
-        import re
-        pattern = re.compile(r"^(?P<path>settings(?:/.*)?)$")
         router_obj: dict = self.data.get('@routes') or self.data
         is_not_router = not self.is_router
         # is_not_router = pyonir_request.file.file_exists and not pyonir_request.file.is_router

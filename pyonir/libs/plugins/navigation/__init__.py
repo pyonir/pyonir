@@ -25,9 +25,9 @@ class Menu:
             self.name = self.title
         pass
 
-class Navigation(PyonirPlugin):
+class Navigation:
     """Assembles a map of navigation menus based on file configurations"""
-    name = 'Navigation Plugin'
+    name = 'pyonir_navigation'
 
     def __init__(self, app: PyonirApp):
         self.app = app
@@ -35,7 +35,8 @@ class Navigation(PyonirPlugin):
         self.active_page = None
         self.build_navigation(app=app)
         # include navigation template example
-        self.register_templates([os.path.join(os.path.dirname(__file__), 'templates')])
+        # self.register_templates([os.path.join(os.path.dirname(__file__), 'templates')])
+        app.TemplateEnvironment.load_template_path(os.path.join(os.path.dirname(__file__), 'templates'))
         self.add_menus_to_environment(app)
         pass
 
@@ -81,35 +82,3 @@ class Navigation(PyonirPlugin):
             return dict(grouped)  # convert to plain dict if you like
         result = group_by_menu(file_list)
         self.menus[app.name] = result
-
-    def _build_navigation(self, app: PyonirApp):
-        from pyonir.utilities import query_files
-        if app is None: return None
-        assert hasattr(app, 'pages_dirpath'), "Get menus 'app' parameter does not have a pages dirpath property"
-        menus = {}
-        submenus = {}
-        file_list = query_files(app.pages_dirpath, app_ctx=app.app_ctx, model=Menu)
-
-
-        for menu in file_list:
-            # menu = self.schemas.menu.map_input_to_model(pg)
-            has_menu = menu.group or menu.parent
-            if menu.status == 'hidden' or not menu.url or (not has_menu): continue
-            menu.active = self.active_page == menu.url
-            if menu.group:
-                menus[menu.url] = menu
-            elif menu.parent:
-                _ref = submenus.get(menu.parent)
-                if not _ref:
-                    submenus[menu.parent] = [menu]
-                else:
-                    _ref.append(menu)
-
-        if submenus:
-            for k, m in submenus.items():
-                pmenu = menus.get(k)
-                if not pmenu: continue
-                pmenu.sub_menus = m
-
-        res = PyonirCollection(menus.values(), sort_key='rank').group_by('group')
-        self.menus[app.name] = res

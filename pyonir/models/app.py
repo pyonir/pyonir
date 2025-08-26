@@ -393,10 +393,11 @@ class BaseApp(Base):
         if global_vars:
             self.TemplateEnvironment.globals.update(global_vars)
 
-    def install_plugin(self, plugin_class: callable, plugin_name: str = None):
+    def install_plugin(self, plugin_class: callable, plugin_directory_name: str = None):
         """Installs and activates a plugin"""
-        self.plugins_installed[plugin_name or plugin_class.__name__] = plugin_class
-        self.activate_plugin(plugin_name)
+        plugin_directory_name = plugin_class.__module__.split('.')[1:2].pop() if not plugin_directory_name else plugin_directory_name
+        self.plugins_installed[plugin_directory_name] = plugin_class
+        self.activate_plugin(plugin_directory_name)
 
     def activate_plugins(self):
         """Active plugins enabled based on settings"""

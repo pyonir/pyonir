@@ -7,9 +7,9 @@ from pyonir import init
 from pyonir.tests.backend.demo_controller import DemoService
 
 def generate_pyonir_types():
-    from pyonir.core import PyonirApp, PyonirRequest, PyonirPlugin
+    from pyonir.core import PyonirApp, PyonirRequest
 
-    for cls in [PyonirApp, PyonirRequest, PyonirPlugin]:
+    for cls in [PyonirApp, PyonirRequest]:
         generate_dataclass_from_class(cls)
 
 def generate_dataclass_from_class(cls, output_dir="types"):

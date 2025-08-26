@@ -4,7 +4,7 @@ import typing
 from typing import Union, Generator, Iterable, Callable, Mapping, get_origin, get_args, get_type_hints, Any
 from collections.abc import Iterable as ABCIterable
 
-from pyonir.pyonir_types import PyonirRequest, PyonirApp, AppCtx, EnvConfig
+from pyonir.pyonir_types import AppCtx, EnvConfig
 
 
 def is_iterable(tp):
@@ -41,7 +41,7 @@ def is_optional_type(t):
 def is_callable_type(pt) -> bool:
     return get_origin(pt) is Callable or pt.__name__=='callable'
 
-def cls_mapper(file_obj: object, cls: typing.Callable, from_request: PyonirRequest = None):
+def cls_mapper(file_obj: object, cls: typing.Callable, from_request: 'PyonirRequest' = None):
     from pyonir.core import PyonirRequest, PyonirApp
     param_name, param_type, param_value = ['','','']
     orm_opts = getattr(cls, "__orm_options", {})
@@ -67,8 +67,8 @@ def cls_mapper(file_obj: object, cls: typing.Callable, from_request: PyonirReque
         cls_args = {}
         res = cls() if is_generic else None
 
-        if hasattr(cls, 'from_dict'):  # allows manual mapping of class instance
-            return cls.from_dict(data)
+        # if hasattr(cls, 'from_dict'):  # allows manual mapping of class instance
+        #     return cls.from_dict(data)
 
         # Build constructor args
         for param_name, param_type in param_type_map.items():
@@ -84,7 +84,7 @@ def cls_mapper(file_obj: object, cls: typing.Callable, from_request: PyonirReque
 
             if (param_value == param_type) or param_value is None or param_name[0] == '_' or param_name == 'return':
                 continue
-
+            # param_value = is_optional_type(param_value) # unwrap optional types
             if is_callable_type(param_type):
                 cls_args[mapper_key] = param_value
             elif is_iterable(param_type):
@@ -102,16 +102,18 @@ def cls_mapper(file_obj: object, cls: typing.Callable, from_request: PyonirReque
                 else:
                     cls_args[param_name] = [cls_mapper(itm, iter_ptype[0]) for itm in param_value]
             else:
-                is_instance = param_value == param_type
-                is_typed = isinstance(param_value, param_type)
-                if is_instance and from_request:
-                    param_value = cls_mapper(from_request.form, param_type)
+                is_typed = param_value == param_type
+                is_instance = isinstance(param_value, param_type)
+                is_option_null = is_optional_type(param_value) == param_type and from_request
+                # if not use_value and is_instance and from_request:
+                #     param_val = cls_mapper(from_request.form, param_type)
+                #     print('debug???', param_type, param_name, param_val)
                 should_spread = isinstance(param_value, dict)
                 use_value = use_value or is_typed or is_instance
                 v = (
                     param_value if use_value
                     else param_type(**param_value) if should_spread
-                    else param_type(param_value)
+                    else None if is_option_null else param_type(param_value)
                 )
                 cls_args[param_name] = v
 
@@ -145,7 +147,7 @@ def cls_mapper(file_obj: object, cls: typing.Callable, from_request: PyonirReque
         raise
 
 
-def process_contents(path, app_ctx=None, file_model: any = None):
+def process_contents(path, app_ctx=None, file_model: any = None) -> object:
     """Deserializes all files within the contents directory"""
     key = os.path.basename(path)
     res = type(key, (object,), {"__name__": key})() # generic map
@@ -306,7 +308,7 @@ def parse_query_model_to_object(model_fields: str) -> object:
 
 def query_files(abs_dirpath: str,
                 app_ctx: AppCtx = None,
-                model: object | str = None,
+                model: Union[object, str] = None,
                 name_pattern: str = None,
                 exclude_dirs: tuple = None,
                 exclude_names: tuple = None,
@@ -317,9 +319,10 @@ def query_files(abs_dirpath: str,
     # results = []
     hidden_file_prefixes = ('.', '_', '<', '>', '(', ')', '$', '!', '._')
     allowed_content_extensions = ('prs', 'md', 'json', 'yaml')
-    def get_datatype(filepath) -> object | Parsely | ParselyMedia:
+    def get_datatype(filepath) -> Union[object, Parsely, ParselyMedia]:
         if model == 'path': return filepath
         pf = Parsely(str(filepath), app_ctx=app_ctx, model=model)
+        if model == 'parsely': return pf
         if pf.is_page and not model: pf.schema = Page
         res = pf.map_to_model(pf.schema)
         return res if pf.schema else pf
@@ -336,61 +339,6 @@ def query_files(abs_dirpath: str,
         yield get_datatype(path)
         # results.append(get_datatype(path))
     # return results
-
-# def get_all_files_from_dir(abs_dirpath: str,
-#                            app_ctx: list = None,
-#                            entry_type: any = None,
-#                            include_only: str = None,
-#                            exclude_dirs: list[str] = None,
-#                            exclude_file: str = None,
-#                            force_all: bool = True) -> Generator:
-#     """Returns a generator of files from a directory path"""
-#     from pyonir.parser import ALLOWED_CONTENT_EXTENSIONS, IGNORE_FILES,Page, Parsely, ParselyMedia
-#     from pyonir.core import PyonirBase
-#     if abs_dirpath in (exclude_dirs or []): return []
-#     if exclude_file is None: exclude_file = []
-#     _, _, pages_dirpath, _ = app_ctx
-#
-#     def get_datatype(parentdir, rel_filepath):
-#         filepath = os.path.normpath(os.path.join(parentdir, rel_filepath))
-#         if entry_type == 'path':
-#             return filepath
-#         ismedia = not filepath.endswith(ALLOWED_CONTENT_EXTENSIONS)
-#         generic_model = entry_type if entry_type and entry_type.__name__=='GenericQueryModel' else None
-#         pf = Parsely(filepath, app_ctx, generic_model)
-#         pf.schema = ParselyMedia if ismedia else Page if pf.is_page else generic_model or entry_type
-#         return pf.map_to_model(pf.schema)
-#         # if ismedia:
-#         #     return cls_mapper(pf, ParselyMedia)
-#         # return cls_mapper(pf, entry_type or Page ) if entry_type or pf.is_page else pf.map_to_model(None)
-#
-#
-#     def should_skip(parentdir, filename):
-#         parentdir = parentdir.replace(pages_dirpath, "").lstrip(os.path.sep)
-#         is_include_only_file = (include_only and filename == include_only)
-#         if is_include_only_file: return False
-#         is_hidden_dir = parentdir.startswith(IGNORE_FILES)
-#         is_media_file = filename.endswith(PyonirBase.MEDIA_EXTENSIONS)
-#         is_invalid_file = not is_media_file and not filename.endswith(ALLOWED_CONTENT_EXTENSIONS)
-#         is_ignored_file = filename in (IGNORE_FILES + tuple(exclude_file))
-#         is_private_file = filename.startswith(IGNORE_FILES)
-#         if filename!='.routes.md' and force_all and not is_invalid_file: return False
-#         if is_hidden_dir or is_invalid_file or is_ignored_file or is_private_file: return True
-#
-#     for parentdir, subs, files in os.walk(os.path.normpath(abs_dirpath)):
-#         folderRoot = parentdir.replace(pages_dirpath, "").lstrip(os.path.sep)
-#         subFolderRoot = os.path.basename(folderRoot)
-#         skipRoot = (folderRoot in IGNORE_FILES
-#                     or folderRoot.startswith(IGNORE_FILES)
-#                     or subFolderRoot.startswith(IGNORE_FILES))
-#         contains_skipdir = set(folderRoot.split('/')).intersection(exclude_dirs) if exclude_dirs else None
-#         skipSubs = subFolderRoot in exclude_dirs if exclude_dirs else 0
-#         if skipRoot or skipSubs or contains_skipdir: continue
-#
-#         for filename in files:
-#             # include_only_file = (include_only and filename != include_only)
-#             if should_skip(folderRoot, filename): continue
-#             yield get_datatype(parentdir, filename)
 
 
 def delete_file(full_filepath):
@@ -524,11 +472,13 @@ def generate_base64_id(value):
     return base64.b64encode(value.encode('utf-8'))
 
 def load_env(path=".env") -> EnvConfig:
-    from collections import defaultdict
     import warnings
-    env = os.getenv('APP_ENV') or 'LOCAL'
+    from collections import defaultdict
+    from pyonir.models.server import DEV_ENV
+
+    env = os.getenv('APP_ENV') or DEV_ENV
     env_data = defaultdict(dict)
-    env_data['APP_ENV'] = env or 'LOCAL'
+    env_data['APP_ENV'] = env
     if not env:
         warnings.warn("APP_ENV not set. Defaulting to LOCAL mode. Expected one of DEV, TEST, PROD, LOCAL.", UserWarning)
     if not os.path.exists(path): return dict_to_class(env_data, EnvConfig)
@@ -597,6 +547,13 @@ def expand_dotted_keys(flat_data: dict, return_as_dict: bool = False):
                     current = getattr(current, part)
 
     return root
+
+
+def get_version(toml_file: str) -> str:
+    import re
+    from pathlib import Path
+    content = Path(toml_file).read_text()
+    return re.search(r'^version\s*=\s*["\']([^"\']+)["\']', content, re.MULTILINE).group(1)
 
 class PrntColrs:
     RESET = '\033[0m'

@@ -25,7 +25,7 @@ from plugins.some_plugin_package import SomePluginClass
 demo_app = pyonir.init(__file__)
 
 # Install plugins
-demo_app.load_plugin(SomePluginClass)
+demo_app.install_plugin(SomePluginClass)
 ```
 
 ## Configurations

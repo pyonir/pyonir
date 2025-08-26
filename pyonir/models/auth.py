@@ -545,14 +545,11 @@ class Auth:
     def get_user_creds(self) -> 'UserCredentials':
         """Decodes the authorization header to extract user credentials."""
         auth_header = self.request.headers.get('authorization')
-        # if auth_header is None:
-        #     return None
         username = ''
-        password = ''
         auth_type, auth_token = auth_header.split(' ', 1) if auth_header else (None, None)
         session_id = self.session.get('user')
         if session_id:
-            session_user = self.decode_jwt(session_id)
+            session_user = self.decode_jwt(session_id) or {}
             username = session_user.get('sub')
         elif auth_type and auth_type.startswith('Bearer'):
             # Handle Bearer token if needed

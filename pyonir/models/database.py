@@ -1,24 +1,36 @@
 import os
 import sqlite3
 from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Optional, Type
+from typing import Any, Dict, Optional, Type, Iterable, Callable, Union, Iterator
 
-from pyonir.core import PyonirSchema
-from pyonir.pyonir_types import PyonirApp
+from pyonir.models.schemas import BaseSchema
+from pyonir.pyonir_types import PyonirApp, AppCtx
 
+@dataclass
+class BasePagination:
+    limit: int = 0
+    max_count: int = 0
+    curr_page: int = 0
+    page_nums: list[int, int] = field(default_factory=list)
+    items: list['Parsely'] = field(default_factory=list)
+
+    def __iter__(self) -> Iterator['Parsely']:
+        return iter(self.items)
 
 class DatabaseService(ABC):
     """Stub implementation of DatabaseService with env-based config + builder overrides."""
 
     def __init__(self, app: PyonirApp) -> None:
         # Base config from environment
-        self._config: Dict[str, Any] = getattr(getattr(app.configs, 'env', object()), 'database', None)
+        from pyonir.utilities import get_attr
+        self._config: object = get_attr(app.env, 'database')
         self.connection: Optional[sqlite3.Connection] = None
         self._database: str = '' # the db address or name. path/to/directory, path/to/sqlite.db
         self._driver: str = '' #the db context fs, sqlite, mysql, pgresql, oracle
         self._host: str = ''
-        self._port: int = ''
+        self._port: int = 0
         self._username: str = ''
         self._password: str = ''
 
@@ -86,15 +98,14 @@ class DatabaseService(ABC):
             Path(self.database).mkdir(parents=True, exist_ok=True)
         else:
             raise ValueError(f"Unknown driver: {self.driver}")
-        print(f"[DEBUG] Connecting to {self.driver} database at {self.host}:{self.port}")
 
     @abstractmethod
     def disconnect(self) -> None:
+        print(f"[DEBUG] Disconnecting from {self.driver}:{self.database}")
         if self.driver == "sqlite" and self.connection:
-            print("[DEBUG] Disconnecting from SQLite")
             self.connection.close()
             self.connection = None
-        # FS does not need explicit disconnect
+        # FS needs to reset its database location
 
     # @abstractmethod
     # def execute_query(self, query: str, params: Optional[Dict[str, Any]] = None) -> Any:
@@ -102,7 +113,7 @@ class DatabaseService(ABC):
     #     return NotImplemented
 
     @abstractmethod
-    def insert(self, table: str, entity: Type[PyonirSchema]) -> Any:
+    def insert(self, table: str, entity: Type[BaseSchema]) -> Any:
         """Insert entity into backend."""
         table = entity.__class__.__name__.lower()
         data = entity.to_dict()
@@ -119,15 +130,11 @@ class DatabaseService(ABC):
         elif self.driver == "fs":
             # Save JSON file per record
             entity.save_to_file(entity.file_path)
-            # table_path = Path(self.database) / table
-            # table_path.mkdir(parents=True, exist_ok=True)
-            # record_id = len(list(table_path.glob("*.json"))) + 1
-            # with open(table_path / f"{record_id}.json", "w") as f:
-            #     json.dump(data, f, indent=2)
             return os.path.exists(entity.file_path)
 
     @abstractmethod
-    def find(self, entity_cls: Type[PyonirSchema], filter: Dict = None) -> Any:
+    def find(self, entity_cls: Type[BaseSchema], filter: Dict = None) -> Any:
+        import json
         table = entity_cls.__name__.lower()
         results = []
 
@@ -159,3 +166,183 @@ class DatabaseService(ABC):
 
 
 
+
+class BaseCollection:
+    SortedList = None
+    get_attr =  None
+    dict_to_class = None
+
+    def __init__(self, items: Iterable, sort_key: str = None):
+        from sortedcontainers import SortedList
+        from pyonir.utilities import get_attr, dict_to_class
+        self.SortedList = SortedList
+        self.get_attr = get_attr
+        self.dict_to_class = dict_to_class
+
+        self._query_path = ''
+        key = lambda x: self.get_attr(x, sort_key or 'file_created_on')
+        try:
+            items = list(items)
+            self.collection = SortedList(items, key=key)
+        except Exception as e:
+            raise
+
+    @staticmethod
+    def coerce_bool(value: str):
+        d = ['false', 'true']
+        try:
+            i = d.index(value.lower().strip())
+            return True if i else False
+        except ValueError as e:
+            return value.strip()
+
+    @staticmethod
+    def parse_params(param: str):
+        k, _, v = param.partition(':')
+        op = '='
+        is_eq = lambda x: x[1]==':'
+        if v.startswith('>'):
+            eqs = is_eq(v)
+            op = '>=' if eqs else '>'
+            v = v[1:] if not eqs else v[2:]
+        elif v.startswith('<'):
+            eqs = is_eq(v)
+            op = '<=' if eqs else '<'
+            v = v[1:] if not eqs else v[2:]
+            pass
+        else:
+            pass
+        return {"attr": k.strip(), "op":op, "value":BaseCollection.coerce_bool(v)}
+
+    @classmethod
+    def query(cls,
+                query_path: str,
+                app_ctx: AppCtx = None,
+                model: Optional[object] = None,
+                name_pattern: str = None,
+                exclude_dirs: tuple = None,
+                exclude_names: tuple = None,
+                force_all: bool = True,
+                sort_key: str = None):
+        """queries the file system for list of files"""
+        from pyonir.utilities import query_files
+        gen_data = query_files(query_path, app_ctx=app_ctx, model=model, name_pattern=name_pattern,
+                               exclude_dirs=exclude_dirs, exclude_names=exclude_names, force_all=force_all)
+        # gen_data = get_all_files_from_dir(query_path, app_ctx=app_ctx, entry_type=data_model, include_only=include_only,
+        #                                   exclude_dirs=exclude_dirs, exclude_file=exclude_file, force_all=force_all)
+        return cls(gen_data, sort_key=sort_key)
+
+    def prev_next(self, input_file: 'Parsely'):
+        """Returns the previous and next files relative to the input file"""
+
+        prv = None
+        nxt = None
+        pc = self.query(input_file.file_dirpath)
+        pc.collection = iter(pc.collection)
+        for cfile in pc.collection:
+            if cfile.file_status == 'hidden': continue
+            if cfile.file_path == input_file.file_path:
+                nxt = next(pc.collection, None)
+                break
+            else:
+                prv = cfile
+        return self.dict_to_class({"next": nxt, "prev": prv})
+
+    def find(self, value: any, from_attr: str = 'file_name'):
+        """Returns the first item where attr == value"""
+        return next((item for item in self.collection if getattr(item, from_attr, None) == value), None)
+
+    def where(self, attr, op="=", value=None):
+        """Returns a list of items where attr == value"""
+        # if value is None:
+        #     # assume 'op' is actually the value if only two args were passed
+        #     value = op
+        #     op = "="
+
+        def match(item):
+            actual = self.get_attr(item, attr)
+            if not hasattr(item, attr):
+                return False
+            if actual and not value:
+                return True # checking only if item has an attribute
+            elif op == "=":
+                return actual == value
+            elif op == "in" or op == "contains":
+                return actual in value if actual is not None else False
+            elif op == ">":
+                return actual > value
+            elif op == "<":
+                return actual < value
+            elif op == ">=":
+                return actual >= value
+            elif op == "<=":
+                return actual <= value
+            elif op == "!=":
+                return actual != value
+            return False
+        if isinstance(attr, Callable): match = attr
+        return BaseCollection(filter(match, list(self.collection)))
+
+    def paginate(self, start: int, end: int, reversed: bool = False):
+        """Returns a slice of the items list"""
+        sl = self.collection.islice(start, end, reverse=reversed) if end else self.collection
+        return sl #self.collection[start:end]
+
+    def group_by(self, key: Union[str, Callable]):
+        """
+        Groups items by a given attribute or function.
+        If `key` is a string, it will group by that attribute.
+        If `key` is a function, it will call the function for each item.
+        """
+        from collections import defaultdict
+        grouped = defaultdict(list)
+
+        for item in self.collection:
+            k = key(item) if callable(key) else getattr(item, key, None)
+            grouped[k].append(item)
+
+        return dict(grouped)
+
+    def paginated_collection(self, query_params=None)-> BasePagination:
+        """Paginates a list into smaller segments based on curr_pg and display limit"""
+        if query_params is None: query_params = {}
+        from pyonir import Site
+        from pyonir.core import PyonirRequest
+        if not Site: return None
+        # from pyonir.core import ParselyPagination
+        request: PyonirRequest = Site.TemplateEnvironment.globals['request'] if Site.TemplateEnvironment else None
+        if not request or not hasattr(request, 'limit'): return None
+        req_pg = self.get_attr(request.query_params, 'pg') or 1
+        limit = query_params.get('limit', request.limit)
+        curr_pg = int(query_params.get('pg', req_pg)) or 1
+        sort_key = query_params.get('sort_key')
+        where_key = query_params.get('where')
+        if sort_key:
+            self.collection = self.SortedList(self.collection, lambda x: self.get_attr(x, sort_key))
+        if where_key:
+            where_key = [self.parse_params(ex) for ex in where_key.split(',')]
+            self.collection = self.where(**where_key[0])
+        force_all = limit=='*'
+
+        max_count = len(self.collection)
+        limit = 0 if force_all else int(limit)
+        page_num = 0 if force_all else int(curr_pg)
+        start = (page_num * limit) - limit
+        end = (limit * page_num)
+        pg = (max_count // limit) + (max_count % limit > 0) if limit > 0 else 0
+
+        pag_data = self.paginate(start=start, end=end, reversed=True) if not force_all else self.collection
+
+        return BasePagination(**{
+            'curr_page': page_num,
+            'page_nums': [n for n in range(1, pg + 1)] if pg else None,
+            'limit': limit,
+            'max_count': max_count,
+            'items': list(pag_data)
+        })
+
+    def __len__(self):
+        return self.collection._len
+
+    def __iter__(self):
+        return iter(self.collection)

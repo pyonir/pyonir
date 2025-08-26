@@ -308,7 +308,7 @@ def parse_query_model_to_object(model_fields: str) -> object:
 
 def query_files(abs_dirpath: str,
                 app_ctx: AppCtx = None,
-                model: object | str = None,
+                model: Union[object, str] = None,
                 name_pattern: str = None,
                 exclude_dirs: tuple = None,
                 exclude_names: tuple = None,
@@ -319,9 +319,10 @@ def query_files(abs_dirpath: str,
     # results = []
     hidden_file_prefixes = ('.', '_', '<', '>', '(', ')', '$', '!', '._')
     allowed_content_extensions = ('prs', 'md', 'json', 'yaml')
-    def get_datatype(filepath) -> object | Parsely | ParselyMedia:
+    def get_datatype(filepath) -> Union[object, Parsely, ParselyMedia]:
         if model == 'path': return filepath
         pf = Parsely(str(filepath), app_ctx=app_ctx, model=model)
+        if model == 'parsely': return pf
         if pf.is_page and not model: pf.schema = Page
         res = pf.map_to_model(pf.schema)
         return res if pf.schema else pf
@@ -338,61 +339,6 @@ def query_files(abs_dirpath: str,
         yield get_datatype(path)
         # results.append(get_datatype(path))
     # return results
-
-# def get_all_files_from_dir(abs_dirpath: str,
-#                            app_ctx: list = None,
-#                            entry_type: any = None,
-#                            include_only: str = None,
-#                            exclude_dirs: list[str] = None,
-#                            exclude_file: str = None,
-#                            force_all: bool = True) -> Generator:
-#     """Returns a generator of files from a directory path"""
-#     from pyonir.parser import ALLOWED_CONTENT_EXTENSIONS, IGNORE_FILES,Page, Parsely, ParselyMedia
-#     from pyonir.core import PyonirBase
-#     if abs_dirpath in (exclude_dirs or []): return []
-#     if exclude_file is None: exclude_file = []
-#     _, _, pages_dirpath, _ = app_ctx
-#
-#     def get_datatype(parentdir, rel_filepath):
-#         filepath = os.path.normpath(os.path.join(parentdir, rel_filepath))
-#         if entry_type == 'path':
-#             return filepath
-#         ismedia = not filepath.endswith(ALLOWED_CONTENT_EXTENSIONS)
-#         generic_model = entry_type if entry_type and entry_type.__name__=='GenericQueryModel' else None
-#         pf = Parsely(filepath, app_ctx, generic_model)
-#         pf.schema = ParselyMedia if ismedia else Page if pf.is_page else generic_model or entry_type
-#         return pf.map_to_model(pf.schema)
-#         # if ismedia:
-#         #     return cls_mapper(pf, ParselyMedia)
-#         # return cls_mapper(pf, entry_type or Page ) if entry_type or pf.is_page else pf.map_to_model(None)
-#
-#
-#     def should_skip(parentdir, filename):
-#         parentdir = parentdir.replace(pages_dirpath, "").lstrip(os.path.sep)
-#         is_include_only_file = (include_only and filename == include_only)
-#         if is_include_only_file: return False
-#         is_hidden_dir = parentdir.startswith(IGNORE_FILES)
-#         is_media_file = filename.endswith(PyonirBase.MEDIA_EXTENSIONS)
-#         is_invalid_file = not is_media_file and not filename.endswith(ALLOWED_CONTENT_EXTENSIONS)
-#         is_ignored_file = filename in (IGNORE_FILES + tuple(exclude_file))
-#         is_private_file = filename.startswith(IGNORE_FILES)
-#         if filename!='.routes.md' and force_all and not is_invalid_file: return False
-#         if is_hidden_dir or is_invalid_file or is_ignored_file or is_private_file: return True
-#
-#     for parentdir, subs, files in os.walk(os.path.normpath(abs_dirpath)):
-#         folderRoot = parentdir.replace(pages_dirpath, "").lstrip(os.path.sep)
-#         subFolderRoot = os.path.basename(folderRoot)
-#         skipRoot = (folderRoot in IGNORE_FILES
-#                     or folderRoot.startswith(IGNORE_FILES)
-#                     or subFolderRoot.startswith(IGNORE_FILES))
-#         contains_skipdir = set(folderRoot.split('/')).intersection(exclude_dirs) if exclude_dirs else None
-#         skipSubs = subFolderRoot in exclude_dirs if exclude_dirs else 0
-#         if skipRoot or skipSubs or contains_skipdir: continue
-#
-#         for filename in files:
-#             # include_only_file = (include_only and filename != include_only)
-#             if should_skip(folderRoot, filename): continue
-#             yield get_datatype(parentdir, filename)
 
 
 def delete_file(full_filepath):

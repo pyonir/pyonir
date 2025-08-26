@@ -1,3 +1,5 @@
+inline_list_of_scalrs_types:- 1, true, hello, 3.14
+string_types: 1, true, hello, 3.14
 # single line comment
 basic: scalar value
 dict_value:

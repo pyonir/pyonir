@@ -5,7 +5,7 @@ class ParselyTests(unittest.TestCase):
     def setUpClass(cls):
         from pyonir.parser import Parsely
         from pyonir import init
-        App = init(__file__, serve_frontend=False)
+        App = init(__file__, use_themes=False)
         cls.parselyFile = Parsely(os.path.join(os.path.dirname(__file__),'contents', 'test.md'), App.app_ctx)
 
     def test_basic(self):

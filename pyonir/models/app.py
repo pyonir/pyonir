@@ -1,7 +1,8 @@
 import os
-from typing import Optional
+from typing import Optional, Any, Generator
 
-from pyonir.utilities import get_attr, load_env, generate_id
+from pyonir.models.mapper import add_props_to_object
+from pyonir.utilities import get_attr, load_env, generate_id, query_files
 
 from pyonir.pyonir_types import PyonirThemes, EnvConfig, PyonirHooks
 
@@ -33,6 +34,7 @@ class Base:
     app_dirpath: str = '' # absolute path to context directory
     name: str = ''# context name
     _settings: Optional[object] # context settings
+    virtual_routes: dict = None # virtual router definitions
 
     # FIELDS
     @property
@@ -159,17 +161,17 @@ class Base:
         from pyonir.parser import Parsely
         return Parsely(file_path, app_ctx=self.app_ctx)
 
-    @staticmethod
-    def query_files(dir_path: str, app_ctx: tuple, model_type: any = None) -> object:
-        from pyonir.utilities import process_contents
-        return process_contents(dir_path, app_ctx, model_type)
-
     async def apply_virtual_routes(self, pyonir_request: 'PyonirRequest') -> 'Parsely':
         """Reads and applies virtual .routes.md file specs onto or updates the request file"""
         if self.virtual_routes_filepath:
             virtual_route_file = self.parse_file(self.virtual_routes_filepath)
             await virtual_route_file.process_route(pyonir_request, self)
         return pyonir_request.file
+
+    @staticmethod
+    def query_files(dir_path: str, app_ctx: tuple, model_type: any = None) -> object:
+        from pyonir.utilities import process_contents
+        return process_contents(dir_path, app_ctx, model_type)
 
 
 
@@ -295,7 +297,7 @@ class BaseApp(Base):
     @property
     def is_dev(self) -> bool:
         from pyonir.models.server import DEV_ENV
-        return getattr(self.env, 'APP_ENV') == DEV_ENV
+        return getattr(self.env, 'APP_ENV') == DEV_ENV and not self.SSG_IN_PROGRESS
 
     @property
     def host(self) -> str: return get_attr(self.env, 'app.host', '0.0.0.0') #if self.configs else '0.0.0.0'
@@ -320,7 +322,7 @@ class BaseApp(Base):
     def domain(self) -> str: return f"{self.protocol}://{self.domain_name}{':'+str(self.port) if self.is_dev else ''}".replace('0.0.0.0','localhost') # if self.configs else self.host
 
     @property
-    def activated_plugins(self):
+    def activated_plugins(self) -> frozenset[BasePlugin]:
         return frozenset(self._plugins_activated)
 
     # FILES
@@ -370,14 +372,42 @@ class BaseApp(Base):
         # Load theme templates
         self.TemplateEnvironment.load_template_path(app_active_theme.jinja_template_path)
 
+    def collect_virtual_routes(self) -> dict:
+        """Returns a map for all virtual routes from application and plugin contexts"""
+        virtual_routes = dict()
+        site_routes = self.parse_file(self.virtual_routes_filepath)
+        virtual_routes.update(site_routes.data)
+        for plg in self.activated_plugins:
+            if not hasattr(plg, 'parse_file'): continue
+            vroute = plg.parse_file(plg.virtual_routes_filepath).data
+            virtual_routes.update(vroute)
+        return virtual_routes
+
     # RUNTIME
+
+    def apply_globals(self, global_vars: dict = None):
+        """Updates the jinja global variables dictionary"""
+        self.TemplateEnvironment.globals['site'] = self
+        self.TemplateEnvironment.globals['configs'] = self.settings
+        self.TemplateEnvironment.globals['env'] = self.env
+        if global_vars:
+            self.TemplateEnvironment.globals.update(global_vars)
+
+    def install_plugin(self, plugin_class: callable, plugin_name: str = None):
+        """Installs and activates a plugin"""
+        self.plugins_installed[plugin_name or plugin_class.__name__] = plugin_class
+        self.activate_plugin(plugin_name)
+
     def activate_plugins(self):
         """Active plugins enabled based on settings"""
         from pyonir.utilities import get_attr
         has_plugin_configured = get_attr(self.settings, 'app.enabled_plugins', None)
         if not has_plugin_configured: return
         for plg_id, plugin in self.plugins_installed.items():
-            self.activate_plugin(plg_id)
+            if plg_id in has_plugin_configured:
+                self.activate_plugin(plg_id)
+            else:
+                self.deactivate_plugin(plg_id)
 
     def activate_plugin(self, plugin_name: str):
         """Activates an installed plugin and adds to set of activated plugins"""
@@ -440,12 +470,11 @@ class BaseApp(Base):
 
     def run(self, endpoints: list = None):
         """Runs the Uvicorn webserver"""
-        # from .server import (setup_starlette_server, start_uvicorn_server,)
 
+        self.apply_globals()
         # Initialize Application settings and templates
         self.install_sys_plugins()
-        # self.activate_plugins()
-        self.TemplateEnvironment.globals['configs'] = self._settings.app
+        self.activate_plugins()
 
         self.server.generate_nginx_conf(self)
         # Run uvicorn server
@@ -549,7 +578,6 @@ class BaseApp(Base):
         """).strip()
 
         name = ''
-        # endpoint_meths = []
 
         if inspect.ismodule(cls):
             name = cls.__name__
@@ -563,8 +591,6 @@ class BaseApp(Base):
             klass = type(cls)
             name = klass.__name__
             output_dirpath = os.path.join(output_dirpath, namespace)
-
-            # call_path = name[0].lower() + name[1:]
             call_path_fn = lambda meth_name: f"{namespace}.{meth_name}"
             endpoint_meths = [
                 m for m in dir(cls)
@@ -574,7 +600,6 @@ class BaseApp(Base):
         print(f"Generating {name} API endpoint definitions for:")
         for meth_name in endpoint_meths:
             file_path = os.path.join(output_dirpath, meth_name+'.md')
-            # if os.path.exists(file_path): continue
             method_import_path = call_path_fn(meth_name)
             meth: callable = getattr(cls, meth_name)
             meta, docs = process_docs(meth)
@@ -583,3 +608,59 @@ class BaseApp(Base):
             m_temp = resolver_template.format(docs=docs, meta=meta)
             create_file(file_path, m_temp)
             print(f"\t{meth_name} at {file_path}")
+
+    def generate_static_website(self):
+        """Generates Static website"""
+        import time
+        from pyonir import utilities
+        from pyonir.models.server import BaseRequest
+        from pyonir.parser import Parsely
+        self.SSG_IN_PROGRESS = True
+        count = 0
+        print(f"{utilities.PrntColrs.OKBLUE}1. Coping Assets")
+        try:
+            self.apply_globals()
+            self.install_sys_plugins()
+            site_map_path = os.path.join(self.ssg_dirpath, 'sitemap.xml')
+            # generate_nginx_conf(self)
+            print(f"{utilities.PrntColrs.OKCYAN}3. Generating Static Pages")
+
+            self.TemplateEnvironment.globals['is_ssg'] = True
+            ssg_req = BaseRequest(None, self)
+            start_time = time.perf_counter()
+
+            all_pages: Generator[Parsely] = utilities.query_files(self.pages_dirpath, app_ctx=self.app_ctx, model='parsely')
+            xmls = []
+            for pgfile in all_pages:
+                virtual_data, path_params = self.server.get_virtual(pgfile.data.get('url'))
+                if path_params: ssg_req.ssg_request(pgfile, path_params)
+                pgfile.data.update(virtual_data)
+                pgfile.apply_filters()
+                self.TemplateEnvironment.globals['request'] = ssg_req  # pg_req
+                count += pgfile.generate_static_file()
+                t = f"<url><loc>{self.protocol}://{self.domain}{pgfile.data.get('url')}</loc><priority>1.0</priority></url>\n"
+                xmls.append(t)
+                self.TemplateEnvironment.block_pull_cache.clear()
+
+            # Compile sitemap
+            smap = f'<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>{self.domain}</loc><priority>1.0</priority></url> {"".join(xmls)} </urlset>'
+            utilities.create_file(site_map_path, smap, 0)
+
+            # Copy theme static css, js files into ssg directory
+            utilities.copy_assets(self.frontend_assets_dirpath, os.path.join(self.ssg_dirpath, self.FRONTEND_ASSETS_DIRNAME))
+            utilities.copy_assets(self.public_assets_dirpath, os.path.join(self.ssg_dirpath, self.PUBLIC_ASSETS_DIRNAME))
+
+            end_time = time.perf_counter() - start_time
+            ms = end_time * 1000
+            count += 3
+            msg = f"SSG generated {count} html/json files in {round(end_time, 2)} secs :  {round(ms, 2)} ms"
+            print(f'\033[95m {msg}')
+        except Exception as e:
+            msg = f"SSG encountered an error: {str(e)}"
+            raise
+
+        self.SSG_IN_PROGRESS = False
+        response = {"status": "COMPLETE", "msg": msg, "files": count}
+        print(response)
+        print(utilities.PrntColrs.RESET)
+        return response

@@ -1,9 +1,8 @@
 import json
 import os
 from dataclasses import dataclass, field
-from typing import Optional, Union, Tuple, Callable, AsyncGenerator, get_type_hints
+from typing import Optional, Union, Tuple, Callable, get_type_hints, Any
 
-from pyonir.pyonir_types import PyonirRequest
 from starlette.applications import Starlette
 from starlette.requests import Request as StarletteRequest
 
@@ -25,7 +24,7 @@ PROD_ENV:str = 'PROD'
 class BaseRequest:
     PAGINATE_LIMIT: int = 6
 
-    def __init__(self, server_request: StarletteRequest, app: BaseApp):
+    def __init__(self, server_request: Optional[StarletteRequest], app: 'BaseApp'):
         from pyonir.utilities import get_attr
         from pyonir.models.auth import Auth
         from pyonir.parser import Parsely
@@ -33,34 +32,35 @@ class BaseRequest:
         self.server_response = None
         self.file: Optional[Parsely] = None
         self.server_request: StarletteRequest = server_request
-        self.raw_path = "/".join(str(self.server_request.url).split(str(self.server_request.base_url)))
-        self.method = self.server_request.method
-        self.path = self.server_request.url.path
-        self.path_params = dict(self.server_request.path_params)
-        self.url = f"{self.path}"
+        self.raw_path = "/".join(str(self.server_request.url).split(str(self.server_request.base_url))) if server_request else ''
+        self.method = self.server_request.method if server_request else 'GET'
+        self.path = self.server_request.url.path if server_request else '/'
+        self.path_params = dict(self.server_request.path_params) if server_request else {}
+        self.url = f"{self.path}" if server_request else {}
         self.slug = self.path.lstrip('/').rstrip('/')
-        self.query_params = self.get_params(self.server_request.url.query)
+        self.query_params = self.get_params(self.server_request.url.query) if server_request else {}
         self.parts = self.slug.split('/') if self.slug else []
         self.limit = get_attr(self.query_params, 'limit', self.PAGINATE_LIMIT)
         self.model = get_attr(self.query_params, 'model')
         self.is_home = (self.slug == '')
         self.is_api = self.parts and self.parts[0] == app.API_DIRNAME
-        self.is_static = bool(list(os.path.splitext(self.path)).pop())
+        self.is_static = bool(list(os.path.splitext(self.path)).pop()) if server_request else False
         self.form = {}
         self.files = []
-        self.ip = self.server_request.client.host
-        self.host = str(self.server_request.base_url).rstrip('/')
-        self.protocol = self.server_request.scope.get('type') + "://"
-        self.headers = self.process_header(self.server_request.headers)
+        self.ip = self.server_request.client.host if server_request else ''
+        self.host = str(self.server_request.base_url).rstrip('/') if server_request else app.host
+        self.protocol = self.server_request.scope.get('type') + "://" if server_request else app.protocol
+        self.headers = self.process_header(self.server_request.headers) if server_request else {}
         self.browser = self.headers.get('user-agent', '').split('/').pop(0) if self.headers else "UnknownAgent"
         if self.slug.startswith('api'): self.headers['accept'] = JSON_RES
         self.type: Union[TEXT_RES, JSON_RES, EVENT_RES] = self.headers.get('accept')
         self.status_code: int = 200
         self.app_ctx_name: str = app.name
-        self.auth: Optional[Auth] = None #Auth(self, app)
-        self.flashes: dict = self.get_flash_messages()
-        self.server_request.session['previous_url'] = self.headers.get('referer', '')
         self.app_ctx_ref = app
+        self.auth: Optional[Auth] = None
+        self.flashes: dict = self.get_flash_messages() if server_request else {}
+        if server_request:
+            self.server_request.session['previous_url'] = self.headers.get('referer', '')
 
     @property
     def session_token(self):
@@ -77,6 +77,13 @@ class BaseRequest:
         """Returns the redirect URL from the request form data"""
         file_redirect = self.file.data.get('redirect_to', self.file.data.get('redirect'))
         return self.form.get('redirect_to', self.form.get('redirect', file_redirect))
+
+    def ssg_request(self, page, params):
+        self.file = page
+        self.url = page.data.get('url')
+        self.path = page.data.get('url')
+        self.slug = page.data.get('slug')
+        self.path_params.update(params)
 
     def redirect(self, url: str):
         """Sets the redirect URL in the request form data"""
@@ -276,6 +283,7 @@ class BaseServer(Starlette):
         self.resolvers = {}
         self.services = {}
         self.request: Optional[BaseRequest] = None
+        self.virtual_routes = app.collect_virtual_routes()
 
     @property
     def allowed_hosts(self):
@@ -421,6 +429,14 @@ class BaseServer(Starlette):
                                 )
         self.add_middleware(CSRFProtectMiddleware, csrf_secret=self.app.SECRET_SAUCE)
 
+    def get_virtual(self, url: str) -> tuple[dict, Optional[dict]]:
+        """Returns vitual page data values"""
+        for vpath, vdata in self.virtual_routes.items():
+            has_match = self.matching_route(url, vpath)
+            if has_match:
+                return vdata, has_match
+        return {}, None
+
     @staticmethod
     async def build_response(pyonir_request: BaseRequest, dec_func: callable):
         import inspect
@@ -428,7 +444,7 @@ class BaseServer(Starlette):
         from pyonir.models.auth import Auth
         from pyonir.models.mapper import cls_mapper
 
-        star_req = pyonir_request.server_request
+        # star_req = pyonir_request.server_request
         Site.server.request = pyonir_request
         default_system_router = dec_func.__name__ == 'pyonir_index'
         # Serve static urls
@@ -509,6 +525,15 @@ class BaseServer(Starlette):
         # Generate response
         pyonir_response.set_server_response()
         return pyonir_response.render()
+
+    @staticmethod
+    def matching_route(route_path: str, regex_path: str) -> Optional[dict]:
+        """Returns path parameters when match is found for virtual routes"""
+        from starlette.routing import compile_path
+        path_regex, path_format, *args = compile_path(regex_path)
+        match = path_regex.match(route_path) # check if request path matches the router regex
+        if match:
+            return match.groupdict()
 
     @staticmethod
     def serve_static(app: BaseApp, request: BaseRequest):

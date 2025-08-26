@@ -4,7 +4,7 @@ from pyonir import utilities
 from pyonir.models.app import BaseApp, Optional
 from pyonir.parser import Parsely
 from pyonir.core import PyonirApp
-from pyonir.utilities import dict_to_class, get_attr, process_contents, load_env, get_version
+from pyonir.utilities import get_version
 
 # Pyonir settings
 PYONIR_DIRPATH = os.path.abspath(os.path.dirname(__file__))

@@ -581,7 +581,7 @@ class Parsely:
             is_inline_expression = bool(parsed_key and parsed_val) and not force_scalr
             if is_inline_expression:
                 has_dotpath = "." in parsed_key
-                if has_dotpath or (isinstance(val_type, (list, dict)) or (", " in parsed_val)):  # inline list
+                if has_dotpath or (isinstance(val_type, list) and (", " in parsed_val)):  # inline list
                     _c = [] if delim is None else get_container_type(delim)
                     for x in parsed_val.split(', '):
                         pk, vtype, pv, pmethArgs = process_iln_frag(x)
@@ -988,8 +988,12 @@ class Parsely:
         from pyonir import Site
         refresh_model = get_attr(req, 'query_params.rmodel')
         page = self.map_to_model(Page, refresh=refresh_model)
-        Site.TemplateEnvironment.globals['prevNext'] = self.prev_next
-        Site.TemplateEnvironment.globals['page'] = page
+        Site.apply_globals(
+            {
+                'prevNext': self.prev_next,
+                'page': page
+            }
+        )
         html = Site.TemplateEnvironment.get_template(page.template).render()
         Site.TemplateEnvironment.block_pull_cache.clear()
         return html

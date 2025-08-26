@@ -57,14 +57,13 @@ def coerce_union(t, v):
         print(f"failed to coerce {v} into {t}")
         return None
 
-def is_generic(res, data, file_obj, frozen=False):
-    # res = cls()
-    itr = [*data.keys(), *file_obj.default_file_attributes]
+def add_props_to_object(res, data, file_src=None):
+    itr = [*data.keys(), *(file_src.default_file_attributes if file_src else [])]
     for key in itr:
         if key[0] == '_': continue
         # if frozen and not hasattr(res, key): continue
         # if isinstance(val, property): continue
-        value = get_attr(file_obj, key) or get_attr(data, key)
+        value = get_attr(data, key) or get_attr(file_src, key)
         setattr(res, key, value)
     return res
 
@@ -155,7 +154,7 @@ def cls_mapper(file_obj: object, cls: Union[type, list[type]], from_request=None
     res = cls() if is_generic_type else cls(**cls_args)
     # Pass additional fields that are not specified on model
     if is_generic_type:
-        res = is_generic(res, data, file_obj, frozen=is_frozen)
+        res = add_props_to_object(res, data, file_src=file_obj)
 
     if not is_frozen:
         for key, value in data.items():

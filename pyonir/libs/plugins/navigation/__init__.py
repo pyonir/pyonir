@@ -1,8 +1,7 @@
 import dataclasses
 import os
 
-from pyonir.pyonir_types import PyonirRequest, PyonirApp
-from pyonir.core import PyonirPlugin, PyonirCollection
+from pyonir.core import PyonirRequest, PyonirApp
 
 @dataclasses.dataclass
 class Menu:
@@ -57,8 +56,8 @@ class Navigation:
 
 
     def build_plugins_navigation(self, app: PyonirApp):
-        if app.plugins_activated:
-            for plgn in app.plugins_activated:
+        if app.activated_plugins:
+            for plgn in app.activated_plugins:
                 if isinstance(plgn, Navigation):continue
                 if not hasattr(plgn, 'pages_dirpath'): continue
                 self.build_navigation(plgn)

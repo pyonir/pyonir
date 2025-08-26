@@ -5,8 +5,7 @@ from dataclasses import dataclass, field
 
 from .core import PyonirRequest, PyonirCollection
 from .pyonir_types import ParselyPagination, JSON_RES, AppCtx
-from .utilities import dict_to_class, get_attr, query_files, deserialize_datestr, create_file, get_module, \
-    cls_mapper, parse_query_model_to_object
+from .utilities import dict_to_class, get_attr, query_files, deserialize_datestr, create_file, get_module, parse_query_model_to_object
 
 ALLOWED_CONTENT_EXTENSIONS = ('prs', 'md', 'json', 'yaml')
 IGNORE_FILES = ('.vscode', '.vs', '.DS_Store', '__pycache__', '.git', '.', '_', '<', '>', '(', ')', '$', '!', '._')
@@ -77,7 +76,6 @@ def parse_markdown(content, kwargs):
 @dataclass
 class Page:
     """Represents a single page returned from a web request"""
-    # _mapper = {'created_on': 'file_created_on', 'modified_on': 'file_modified_on'}
     _orm_options = {"mapper": {'created_on': 'file_created_on', 'modified_on': 'file_modified_on'}} # avoids merging additional data properties to model
     url: str
     is_router: bool = False
@@ -97,14 +95,14 @@ class Page:
     file_path: str = 'file_path'
     file_dirname: str = 'file_dirname'
     file_created_on: datetime = 'file_created_on'
-    contents_relpath: str = ''
+    # contents_relpath: str = ''
     generate_static_file: callable = None
     status: str = ParselyFileStatus.PUBLIC
 
     @property
     def canonical(self):
         from pyonir import Site
-        return f"{Site.origin}{self.data.get('url')}" if Site else None
+        return f"{Site.domain}{self.url}" if Site else None
 
     def to_json(self) -> dict:
         """Json serializable repr"""
@@ -222,7 +220,7 @@ class ParselyMedia:
 class Parsely:
     """Parsely is a static file parser"""
     # _Filters = {'md': parse_markdown}  # Global filters that modify scalar values
-    default_file_attributes = ['file_name','file_path','file_dirname','file_data_type','file_ctx','file_created_on']
+    default_file_attributes = ['file_name','file_path','file_dirpath','file_data_type','file_ctx','file_created_on']
 
     def __init__(self, abspth: str, app_ctx: AppCtx = None, model: object = None):
         from pyonir import Site
@@ -305,19 +303,19 @@ class Parsely:
             file_date = deserialize_datestr(file_date)
         return file_date
 
-    def process_ctx(self, app_ctx):
+    def process_ctx(self, app_ctx = None):
         ctx_url = ''
         if not app_ctx:
-            ctx_dirpath = os.path.dirname(self.file_path)
-            ctx_dir = os.path.basename(ctx_dirpath)
-            ctx_staticpath = os.path.join(ctx_dirpath, 'ssg')
+            ctx_pages_dirpath = os.path.dirname(self.file_path)
+            ctx_dir = os.path.basename(ctx_pages_dirpath)
+            ctx_staticpath = os.path.join(ctx_pages_dirpath, 'ssg')
         else:
-            ctx_dir, ctx_url, ctx_dirpath, ctx_staticpath = app_ctx
-        if not os.path.exists(ctx_dirpath): ctx_dirpath = os.path.dirname(ctx_dirpath)
-        _, _, content_dirpath = self.file_path.partition(ctx_dirpath)
+            ctx_dir, ctx_url, ctx_pages_dirpath, ctx_staticpath = app_ctx
+        if not os.path.exists(ctx_pages_dirpath): ctx_pages_dirpath = os.path.dirname(ctx_pages_dirpath)
+        _, _, content_dirpath = self.file_path.partition(ctx_pages_dirpath)
         file_name, file_ext = os.path.splitext(os.path.basename(self.file_path))
         content_dirpath = content_dirpath.lstrip(os.path.sep).replace(file_ext,'')
-        return ctx_url, ctx_dir, ctx_dirpath, ctx_staticpath, content_dirpath, file_name, file_ext
+        return ctx_url or '', ctx_dir, ctx_pages_dirpath, ctx_staticpath, content_dirpath, file_name, file_ext
 
     def set_taxonomy(self) -> list[str]:
         if not self.file_exists: return None
@@ -360,6 +358,7 @@ class Parsely:
 
     def map_to_model(self, model, refresh = False):
         """Maps the parsely object into a model class provided or the self.schema reference """
+        from pyonir.models.mapper import cls_mapper
         if model is None:
             model = self.schema
         if model and refresh:
@@ -377,8 +376,6 @@ class Parsely:
             file_props = {k: v for k,v in self.__dict__.items() if k in self.default_file_attributes}
             return dict_to_class({**self.data, **file_props, '@model': 'GenericQueryModel'}, self.file_data_type, True)
         res = cls_mapper(self, model)
-        # for key in self.default_file_attributes:
-        #     setattr(res, key, getattr(self, key))
         return res
 
     def to_json(self) -> dict:
@@ -440,7 +437,7 @@ class Parsely:
         from pyonir import Site
         if resolver_path.startswith(LOOKUP_DIR_PREFIX):
             return None, self.process_value_type(resolver_path)
-        app_plugin = list(filter(lambda p: p.module == resolver_path.split('.')[0], Site.plugins_activated))
+        app_plugin = list(filter(lambda p: p.name == resolver_path.split('.')[0], Site.activated_plugins))
         app_plugin = app_plugin[0] if len(app_plugin) else Site
         resolver = app_plugin.reload_resolver(resolver_path)
 
@@ -454,7 +451,7 @@ class Parsely:
         # is_not_router = pyonir_request.file.file_exists and not pyonir_request.file.is_router
         if not router_obj or is_not_router or pyonir_request.is_home: return None
         # is_home = app.endpoint == '/'
-        endpoint_slug = app.endpoint.lstrip(os.path.sep)
+        endpoint_slug = app.endpoint.lstrip(os.path.sep) if app.endpoint else ''
         base_url = '' if pyonir_request.is_home or not endpoint_slug else "/".join(pyonir_request.parts[0:pyonir_request.parts.index(endpoint_slug)+1])
         path = pyonir_request.path if not pyonir_request.is_api else "/"+"/".join(pyonir_request.parts[1:])
         router_method = None
@@ -563,10 +560,6 @@ class Parsely:
                 # faster than regex! 0.01ms vs 0.45ms
                 try:
                     methArgs = ''
-                    if "(" in ln_frag:
-                        ma = re.search(REG_METH_ARGS, ln_frag)
-                        methArgs = ma.group(1)
-                        ln_frag = ln_frag.replace(ma.group(), '')
                     if ln_frag.endswith(DICT_DELIM.strip()):
                         return (ln_frag[:-1], DICT_DELIM, "") + (methArgs,)
                     iln_delim = [x for x in (
@@ -652,8 +645,8 @@ class Parsely:
                         is_parent = True if is_block else count_tabs(
                             self.file_lines[cursor + 1]) > tabs if inlimts else False
                         parsed_key, val_type, parsed_val, methArgs = process_iln_frag(ln_frag)
-                        if methArgs:
-                            output_data['@args'] = [arg.replace(' ', '').split(':') for arg in methArgs.split(',')]
+                        # if methArgs:
+                        #     output_data['@args'] = [arg.replace(' ', '').split(':') for arg in methArgs.split(',')]
                         if is_parent or is_block:
                             parsed_key = parsed_val if not parsed_key else parsed_key
                             parsed_key = "content" if parsed_key == BLOCK_PREFIX_STR else \
@@ -765,7 +758,7 @@ class Parsely:
                         'ISSUE': f'FileNotFound while processing {cvaluestr}',
                         'SOLUTION': f'Make sure the `{lookup_fpath}` file exists. Note that only valid md and json files can be processed.'
                     })
-                    return None
+                    return cvaluestr if self.is_router else None
                 return EmbeddedTypes.get(lookup_fpath, parse_ref_to_files(lookup_fpath, os.path.isdir(lookup_fpath)))
 
         return valuestr.lstrip('$')
@@ -993,7 +986,8 @@ class Parsely:
     def output_html(self, req: PyonirRequest) -> str:
         """Renders and html output"""
         from pyonir import Site
-        page = self.map_to_model(Page, get_attr(req, 'query_params.refresh_model'))
+        refresh_model = get_attr(req, 'query_params.rmodel')
+        page = self.map_to_model(Page, refresh=refresh_model)
         Site.TemplateEnvironment.globals['prevNext'] = self.prev_next
         Site.TemplateEnvironment.globals['page'] = page
         html = Site.TemplateEnvironment.get_template(page.template).render()

@@ -4,7 +4,7 @@ import typing
 from typing import Union, Generator, Iterable, Callable, Mapping, get_origin, get_args, get_type_hints, Any
 from collections.abc import Iterable as ABCIterable
 
-from pyonir.pyonir_types import PyonirRequest, PyonirApp, AppCtx, EnvConfig
+from pyonir.pyonir_types import AppCtx, EnvConfig
 
 
 def is_iterable(tp):
@@ -41,7 +41,7 @@ def is_optional_type(t):
 def is_callable_type(pt) -> bool:
     return get_origin(pt) is Callable or pt.__name__=='callable'
 
-def cls_mapper(file_obj: object, cls: typing.Callable, from_request: PyonirRequest = None):
+def cls_mapper(file_obj: object, cls: typing.Callable, from_request: 'PyonirRequest' = None):
     from pyonir.core import PyonirRequest, PyonirApp
     param_name, param_type, param_value = ['','','']
     orm_opts = getattr(cls, "__orm_options", {})
@@ -67,8 +67,8 @@ def cls_mapper(file_obj: object, cls: typing.Callable, from_request: PyonirReque
         cls_args = {}
         res = cls() if is_generic else None
 
-        if hasattr(cls, 'from_dict'):  # allows manual mapping of class instance
-            return cls.from_dict(data)
+        # if hasattr(cls, 'from_dict'):  # allows manual mapping of class instance
+        #     return cls.from_dict(data)
 
         # Build constructor args
         for param_name, param_type in param_type_map.items():
@@ -84,7 +84,7 @@ def cls_mapper(file_obj: object, cls: typing.Callable, from_request: PyonirReque
 
             if (param_value == param_type) or param_value is None or param_name[0] == '_' or param_name == 'return':
                 continue
-
+            # param_value = is_optional_type(param_value) # unwrap optional types
             if is_callable_type(param_type):
                 cls_args[mapper_key] = param_value
             elif is_iterable(param_type):
@@ -102,16 +102,18 @@ def cls_mapper(file_obj: object, cls: typing.Callable, from_request: PyonirReque
                 else:
                     cls_args[param_name] = [cls_mapper(itm, iter_ptype[0]) for itm in param_value]
             else:
-                is_instance = param_value == param_type
-                is_typed = isinstance(param_value, param_type)
-                if is_instance and from_request:
-                    param_value = cls_mapper(from_request.form, param_type)
+                is_typed = param_value == param_type
+                is_instance = isinstance(param_value, param_type)
+                is_option_null = is_optional_type(param_value) == param_type and from_request
+                # if not use_value and is_instance and from_request:
+                #     param_val = cls_mapper(from_request.form, param_type)
+                #     print('debug???', param_type, param_name, param_val)
                 should_spread = isinstance(param_value, dict)
                 use_value = use_value or is_typed or is_instance
                 v = (
                     param_value if use_value
                     else param_type(**param_value) if should_spread
-                    else param_type(param_value)
+                    else None if is_option_null else param_type(param_value)
                 )
                 cls_args[param_name] = v
 
@@ -145,7 +147,7 @@ def cls_mapper(file_obj: object, cls: typing.Callable, from_request: PyonirReque
         raise
 
 
-def process_contents(path, app_ctx=None, file_model: any = None):
+def process_contents(path, app_ctx=None, file_model: any = None) -> object:
     """Deserializes all files within the contents directory"""
     key = os.path.basename(path)
     res = type(key, (object,), {"__name__": key})() # generic map
@@ -524,11 +526,13 @@ def generate_base64_id(value):
     return base64.b64encode(value.encode('utf-8'))
 
 def load_env(path=".env") -> EnvConfig:
-    from collections import defaultdict
     import warnings
-    env = os.getenv('APP_ENV') or 'LOCAL'
+    from collections import defaultdict
+    from pyonir.models.server import DEV_ENV
+
+    env = os.getenv('APP_ENV') or DEV_ENV
     env_data = defaultdict(dict)
-    env_data['APP_ENV'] = env or 'LOCAL'
+    env_data['APP_ENV'] = env
     if not env:
         warnings.warn("APP_ENV not set. Defaulting to LOCAL mode. Expected one of DEV, TEST, PROD, LOCAL.", UserWarning)
     if not os.path.exists(path): return dict_to_class(env_data, EnvConfig)
@@ -597,6 +601,13 @@ def expand_dotted_keys(flat_data: dict, return_as_dict: bool = False):
                     current = getattr(current, part)
 
     return root
+
+
+def get_version(toml_file: str) -> str:
+    import re
+    from pathlib import Path
+    content = Path(toml_file).read_text()
+    return re.search(r'^version\s*=\s*["\']([^"\']+)["\']', content, re.MULTILINE).group(1)
 
 class PrntColrs:
     RESET = '\033[0m'

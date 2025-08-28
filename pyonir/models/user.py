@@ -31,7 +31,23 @@ class PermissionLevel(str):
 class Role:
     """Defines the permissions for each role"""
     name: str
-    perms: list[PermissionLevel]
+    perms: list[str]
+
+    @classmethod
+    def from_string(cls, role_name: str) -> "Role":
+        """
+        Create a Role instance from a string definition.
+
+        Format: "RoleName:perm1,perm2,perm3"
+        - RoleName is required.
+        - Permissions are optional; defaults to [].
+
+        Example:
+            Role.from_string("Admin:read,write")
+            -> Role(name="Admin", perms=["read", "write"])
+        """
+        role_name, perms = role_name.split(':')
+        return cls(name=role_name.strip(), perms=perms.strip().split(',') if perms else [])
 
 
 class Roles:
@@ -159,8 +175,6 @@ class User(PyonirSchema):
             self.role = Roles.NONE.name
         if not self.avatar:
             self.avatar = '/public/images/default-avatar.png'
-        # if isinstance(self.meta, dict): # TODO: this is now required to deserialize user object due to schema from_dict is present. Look into alternative way to not call from dict in mapper
-        #     self.meta = UserMeta(**self.meta)
 
     def has_perm(self, action: PermissionLevel) -> bool:
         """Checks if the user has a specific permission based on their role"""

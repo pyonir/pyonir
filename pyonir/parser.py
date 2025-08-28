@@ -1,9 +1,11 @@
+from __future__ import annotations
 import os, pytz, re, json
 from datetime import datetime
 from dataclasses import dataclass, field
 
 
 from .core import PyonirRequest, PyonirCollection
+from .models.database import BasePagination
 from .pyonir_types import ParselyPagination, JSON_RES, AppCtx
 from .utilities import dict_to_class, get_attr, query_files, deserialize_datestr, create_file, get_module, parse_query_model_to_object
 
@@ -89,7 +91,7 @@ class Page:
     content: str = ''
     slug: str = ''
     author: str = 'pyonir'
-    entries: ParselyPagination = None
+    entries: BasePagination = None
     gallery: dict = None
     file_name: str = 'file_name'
     file_path: str = 'file_path'
@@ -582,16 +584,19 @@ class Parsely:
             if is_inline_expression:
                 has_dotpath = "." in parsed_key
                 if has_dotpath or (isinstance(val_type, list) and (", " in parsed_val)):  # inline list
-                    _c = [] if delim is None else get_container_type(delim)
+                    data_container = [] if delim is None else val_type #get_container_type(delim)
                     for x in parsed_val.split(', '):
                         pk, vtype, pv, pmethArgs = process_iln_frag(x)
                         if vtype != '' and pk:
                             _, pv = update_nested(pk, vtype, pv)
-                        update_nested(None, _c, pv)
-                    parsed_val = _c or pv
+                        update_nested(None, data_container, pv)
+                    parsed_val = data_container or pv
+                elif isinstance(val_type, list):
+                    parsed_val = [parsed_val]
+                    # val_type.append(parsed_val)
 
-            skip_line = hasattr(self.schema, parsed_key) if parsed_key and self.schema else None
-            parsed_val = self.process_value_type(parsed_val) if not skip_line else parsed_val
+            # skip_line = hasattr(self.schema, parsed_key) if parsed_key and self.schema else None
+            parsed_val = self.process_value_type(parsed_val) #if not skip_line else parsed_val
 
             return parsed_key, val_type, parsed_val, methargs
 
@@ -988,12 +993,7 @@ class Parsely:
         from pyonir import Site
         refresh_model = get_attr(req, 'query_params.rmodel')
         page = self.map_to_model(Page, refresh=refresh_model)
-        Site.apply_globals(
-            {
-                'prevNext': self.prev_next,
-                'page': page
-            }
-        )
+        Site.apply_globals({'prevNext': self.prev_next, 'page': page})
         html = Site.TemplateEnvironment.get_template(page.template).render()
         Site.TemplateEnvironment.block_pull_cache.clear()
         return html

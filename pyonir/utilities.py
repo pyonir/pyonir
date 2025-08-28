@@ -158,7 +158,7 @@ def process_contents(path, app_ctx=None, file_model: any = None) -> object:
     return res
 
 
-def dict_to_class(data: dict, name: str = None, deep: bool = True) -> object:
+def dict_to_class(data: dict, name: Union[str, callable] = None, deep: bool = True) -> object:
     """
     Converts a dictionary into a class object with the given name.
 
@@ -170,11 +170,11 @@ def dict_to_class(data: dict, name: str = None, deep: bool = True) -> object:
         object: An instance of the dynamically created class with attributes from the dictionary.
     """
     # Dynamically create a new class
-    cls = type(name, (object,), {}) if isinstance(name, str) else name if callable(name) else 'T'
+    cls = type(name or 'T', (object,), {}) if not callable(name) and deep!='update' else name
 
     # Create an instance of the class
-    instance = cls()
-
+    instance = cls() if deep!='update' else cls
+    setattr(instance, 'update', lambda d: dict_to_class(d, instance, 'update') )
     # Assign dictionary keys as attributes of the instance
     for key, value in data.items():
         if isinstance(getattr(cls, key, None), property): continue
@@ -552,8 +552,12 @@ def expand_dotted_keys(flat_data: dict, return_as_dict: bool = False):
 def get_version(toml_file: str) -> str:
     import re
     from pathlib import Path
-    content = Path(toml_file).read_text()
-    return re.search(r'^version\s*=\s*["\']([^"\']+)["\']', content, re.MULTILINE).group(1)
+    try:
+        content = Path(toml_file).read_text()
+        return re.search(r'^version\s*=\s*["\']([^"\']+)["\']', content, re.MULTILINE).group(1)
+    except Exception as e:
+        print('Error: unable to parse pyonir version from project toml',e)
+        return 'UNKNOWN'
 
 class PrntColrs:
     RESET = '\033[0m'

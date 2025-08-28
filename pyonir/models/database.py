@@ -115,7 +115,7 @@ class DatabaseService(ABC):
     @abstractmethod
     def insert(self, table: str, entity: Type[BaseSchema]) -> Any:
         """Insert entity into backend."""
-        table = entity.__class__.__name__.lower()
+        table = table or entity.__class__.__name__.lower()
         data = entity.to_dict()
 
         if self.driver == "sqlite":

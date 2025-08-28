@@ -1,10 +1,11 @@
 import os, time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import Tuple, Any, Dict, Optional
 
 from starlette_wtf import csrf_token
 
+from pyonir.models.page import BaseMedia
 from pyonir.models.user import User, Role, PermissionLevel, Roles, UserSignIn
 from pyonir.pyonir_types import PyonirRequest, PyonirApp, PyonirRestResponse
 
@@ -130,26 +131,6 @@ def check_pass(protected_hash: str, password_str: str) -> bool:
         print(f"Password verification failed: {e}")
         return False
 
-
-
-# def auth_decode(authorization_header: str) -> UserCredentials:
-#     """Decodes the authorization header to extract user credentials."""
-#     if not authorization_header:
-#         return None
-#     email = ''
-#     password = ''
-#     auth_type, auth_token = authorization_header.split(' ', 1)
-#     if auth_type.startswith('Basic '):
-#         import base64
-#         decoded = base64.b64decode(auth_token).decode('utf-8')
-#         email, password = decoded.split(':', 1)
-#     if auth_type.startswith('Bearer '):
-#         # Handle Bearer token if needed
-#         user_creds = self.decode_jwt(auth_token)
-#         email, password = user_creds.get('email'), user_creds.get('password')
-#         pass
-#     return UserCredentials(email, password)
-
 def format_time_remaining(time_remaining):
     # Format time in human-readable way
     mins, secs = divmod(int(time_remaining), 60)
@@ -262,6 +243,70 @@ class AuthResponses:
             setattr(self, key.upper(), AuthResponse(message=message, status_code=status_code))
 
 
+class TaskAuthority:
+    """
+    Represents a standardized task authority for specific application actions.
+
+    Attributes:
+        name (str): A human-readable name describing the task.
+        roles (Any): The roles authorized to perform a task.
+    """
+    def __init__(self, name: str, roles: Optional[Any] = None) -> None:
+        self.name: str = name
+        self.roles: list[Role] = roles if roles is not None else {}
+
+    def create(self, name: Optional[str] = None, roles: Optional[Any] = None) -> 'TaskAuthority':
+        """
+        Returns a new TaskAuthority with updated name and roles,
+        defaulting to the current instance values if not provided.
+        """
+        return TaskAuthority(
+            name=name or self.name,
+            roles=roles or self.roles
+        )
+
+
+class TaskAuthorities:
+    """
+    Collection of standardized TaskAuthority instances for the application.
+
+    You can also provide a dictionary of custom responses to dynamically add authorities.
+    """
+
+    UPLOAD_FILE = TaskAuthority(
+        name="UploadFile",
+        roles=[Roles.CONTRIBUTOR]
+    )
+
+    DELETE_FILE = TaskAuthority(
+        name="DeleteFile",
+        roles=[Roles.CONTRIBUTOR, Roles.AUTHOR]
+    )
+
+    def __init__(self, tasks_map: dict = None) -> None:
+        """
+        Initializes the TaskAuthorities collection with custom tasks_map if provided.
+
+        Args:
+            tasks_map (dict): A mapping of authority name → dict with 'name' and 'roles'.
+                              Example:
+                              {
+                                  "export_data": {
+                                      "name": "ExportData",
+                                      "roles": [Role("Exporter"), Role("Admin")]
+                                  }
+                              }
+        """
+        if not tasks_map:
+            return
+
+        for key, res_obj in tasks_map.items():
+            name = res_obj.get("name", "")
+            roles = [Role.from_string(r) for r in res_obj.get("roles", [])]
+            setattr(self, key.upper(), TaskAuthority(name=name, roles=roles))
+
+
+
 class AuthSecurity:
     """Handles authentication security settings for a web request."""
 
@@ -297,6 +342,11 @@ class AuthSecurity:
     @property
     def is_required(self) -> bool:
         return bool(self.type)
+
+    @property
+    def verify_authorization(self) -> Optional[TaskAuthorities]:
+        """Returns a map of Authorization Tasks. Each tasks provided authorization for roles"""
+        return None
 
     def check(self, authorizer: "Auth") -> 'AuthSecurity':
         """Checks if route requires authentication and if the user is authorized."""
@@ -516,24 +566,12 @@ class Auth:
         return self.session.get('login_attempts', 0) >= self.SIGNIN_ATTEMPTS
 
     def get_auth_user(self) -> User:
-        # if not self.user_creds:
-        #     self.response = self.responses.UNAUTHORIZED
-        #     return None
-        # session_user = self.decode_jwt(self.user_creds.token)
-        # if not session_user:
-        #     self.response = self.responses.UNAUTHORIZED
-        #     return None
         user = self.query_account()
         # update jwt expiration time
         user.save_to_session(self.request, value=self.create_jwt(user.id, user.role))
         self.response = self.responses.ACTIVE_SESSION
         return user
 
-    # def get_user_creds(self) -> UserCredentials:
-    #     """Returns authenticated user from request header token or session"""
-    #     authorization_header = self.request.headers.get('authorization')
-    #     auth_creds = UserCredentials.from_header(self) if authorization_header else UserCredentials.from_session(self.session)
-    #     return UserCredentials.from_request(self.request) if not auth_creds else auth_creds
 
     def query_account(self, user_email: str = None) -> User:
         """Queries the user account based on the provided credentials."""
@@ -564,6 +602,33 @@ class Auth:
             return UserCredentials.from_request(self.request)
 
         return UserCredentials(email=username, has_session=True)
+
+    async def create_file(self, directory_path: str, file_name: str = None, limit: int = 0) -> Optional[list[str]]:
+        """Saves file(s) into the file system directory"""
+        can_upload = self.user.has_perms([PermissionLevel.WRITE])
+        self.response = self.responses.UNAUTHORIZED
+        if not can_upload: return None
+        files = []
+        for file in self.request.files:
+            if limit and len(files) == limit: break
+            file.filename = file_name or file.filename
+            media_file = await BaseMedia.save_upload(file, directory_path)
+            files.append(media_file)
+        self.response = self.responses.SUCCESS.response(message=f"Successfully uploaded {len(files)}. into {os.path.basename(directory_path)}")
+        return files
+
+    async def upload_file(self, directory_path: str, file_name: str = None, limit: int = 0) -> Optional[list[str]]:
+        """Saves file(s) into the file system directory"""
+        can_upload = self.user.has_perms([PermissionLevel.WRITE])
+        self.response = self.responses.UNAUTHORIZED
+        if not can_upload: return None
+        files = []
+        for file in self.request.files:
+            if limit and len(files) == limit: break
+            file.filename = file_name or file.filename
+            media_file = await BaseMedia.save_upload(file, directory_path)
+            files.append(media_file)
+        return files
 
     def send_email(self):
         """Sends an email to the user."""

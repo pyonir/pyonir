@@ -8,7 +8,7 @@ from pyonir.models.app import BaseApp
 class TemplateEnvironment(Environment):
 
     def __init__(self, app: BaseApp):
-        if not os.path.exists(app.frontend_dirpath) and app.serve_frontend:
+        if not os.path.exists(app.frontend_dirpath) and app.use_themes:
             raise ValueError(f"Frontend directory {app.frontend_dirpath} does not exist. Please ensure the frontend directory is set up correctly.")
         from jinja2 import FileSystemLoader, ChoiceLoader
         from pyonir import PYONIR_JINJA_TEMPLATES_DIRPATH, PYONIR_JINJA_FILTERS_DIRPATH, PYONIR_JINJA_EXTS_DIRPATH

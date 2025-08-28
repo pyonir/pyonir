@@ -1,13 +1,14 @@
-import json
+from __future__ import annotations
 import os
 from dataclasses import dataclass, field
-from typing import Optional, Union, Tuple, Callable, get_type_hints, Any
+from typing import Optional, Union, Tuple, Callable, get_type_hints, OrderedDict, TYPE_CHECKING
 
 from starlette.applications import Starlette
 from starlette.requests import Request as StarletteRequest
 
 from pyonir.models.app import BaseApp
 from pyonir.pyonir_types import PyonirRouters, PyonirHooks
+from pyonir.utilities import dict_to_class
 
 TEXT_RES: str = 'text/html'
 JSON_RES: str = 'application/json'
@@ -24,7 +25,7 @@ PROD_ENV:str = 'PROD'
 class BaseRequest:
     PAGINATE_LIMIT: int = 6
 
-    def __init__(self, server_request: Optional[StarletteRequest], app: 'BaseApp'):
+    def __init__(self, server_request: Optional[StarletteRequest], app: BaseApp):
         from pyonir.utilities import get_attr
         from pyonir.models.auth import Auth
         from pyonir.parser import Parsely
@@ -35,7 +36,7 @@ class BaseRequest:
         self.raw_path = "/".join(str(self.server_request.url).split(str(self.server_request.base_url))) if server_request else ''
         self.method = self.server_request.method if server_request else 'GET'
         self.path = self.server_request.url.path if server_request else '/'
-        self.path_params = dict(self.server_request.path_params) if server_request else {}
+        self.path_params = dict_to_class(self.server_request.path_params,'path_params') if server_request else {}
         self.url = f"{self.path}" if server_request else {}
         self.slug = self.path.lstrip('/').rstrip('/')
         self.query_params = self.get_params(self.server_request.url.query) if server_request else {}
@@ -55,12 +56,16 @@ class BaseRequest:
         if self.slug.startswith('api'): self.headers['accept'] = JSON_RES
         self.type: Union[TEXT_RES, JSON_RES, EVENT_RES] = self.headers.get('accept')
         self.status_code: int = 200
-        self.app_ctx_name: str = app.name
-        self.app_ctx_ref = app
+        self._app_ctx_ref = None
+        self.app = app
         self.auth: Optional[Auth] = None
         self.flashes: dict = self.get_flash_messages() if server_request else {}
         if server_request:
             self.server_request.session['previous_url'] = self.headers.get('referer', '')
+
+    @property
+    def app_ctx_ref(self):
+        return self._app_ctx_ref or self.app
 
     @property
     def session_token(self):
@@ -144,10 +149,9 @@ class BaseRequest:
                 form = await self.server_request.form()
                 files = []
                 for name, content in form.multi_items():
-                    if name == 'files':
-                        # filedata = await content.read()
-                        mediaFile = (secure_upload_filename(content.filename), content, Site.uploads_dirpath)
-                        self.files.append(mediaFile)
+                    if hasattr(content, "filename"):
+                        setattr(content, "ext", os.path.splitext(content.filename)[1])
+                        self.files.append(content)
                     else:
                         if self.form.get(name): # convert form name into a list
                             currvalue = self.form[name]
@@ -178,12 +182,12 @@ class BaseRequest:
 
     def get_context(self) -> None:
         """Gets the routing context from web request"""
-        path_str = self.path.replace(self.app_ctx_ref.API_ROUTE, '')
+        path_str = self.path.replace(self.app.API_ROUTE, '')
         res = None
-        for plg in self.app_ctx_ref.activated_plugins:
+        for plg in self.app.activated_plugins:
             if not hasattr(plg, 'endpoint'): continue
-            if plg.endpoint.startswith(path_str):
-                self.app_ctx_ref = plg
+            if path_str.startswith(plg.endpoint):
+                self._app_ctx_ref = plg
                 print(f"Request has switched to {plg.name} context")
                 break
         return res
@@ -196,12 +200,19 @@ class BaseRequest:
             "status": self.status_code,
             "res": self.server_response,
             "title": f"{self.path} was not found!",
-            "content": f"Perhaps this page once lived but has now been archived or permanently removed from {self.app_ctx_name}."
+            "content": f"Perhaps this page once lived but has now been archived or permanently removed from {self.app_ctx_ref.name}."
         }
 
     def resolve_request_to_file(self, app: BaseApp, path_str: str = None) -> Tuple[BaseApp, Optional['Parsely']]:
-        """Resolve a request URL to a file on disk, checking plugin paths first, then the main app."""
+        """
+        Resolve a request URL to its corresponding resource.
+
+        The function checks plugin-provided paths first, then falls back to the main
+        application's file system. If no matching file or virtual route is found,
+        a 404 page is returned.
+        """
         from pyonir.parser import Parsely
+        from pyonir.models.app import BaseApp
         path_str = path_str or self.path
         is_home = path_str == '/'
         ctx_route, ctx_paths = app.request_paths or ('', [])
@@ -210,18 +221,6 @@ class BaseRequest:
         path_slug = path_str[1:]
         app_scope, *path_segments = path_slug.split('/')
         is_api_request = (len(path_segments) and path_segments[0] == app.API_DIRNAME) or path_str.startswith(app.API_ROUTE)
-
-        # First, check plugins if available and not home
-        # if not is_home and not plugin_routing_ctx:
-            # for plugin in app.plugins_activated:
-            #     if not hasattr(plugin, 'request_paths') or plugin.request_paths is None: continue
-            #     if plugin.name == app_scope and is_api_request:
-            #         path_str = path_str.replace('/'+app_scope, '')
-            #     resolved_app, parsed = self.resolve_request_to_file(app, path_str=path_str, plugin_routing_ctx=plugin.request_paths)
-            #     if parsed:
-            #         virtual_path = Parsely(plugin.routes_filepath, app_ctx=plugin.app_ctx)
-            #         return plugin, (parsed if parsed.file_exists else virtual_path)
-
 
         # Normalize API prefix and path segments
         if is_api_request:
@@ -241,8 +240,8 @@ class BaseRequest:
         for root_path in ctx_paths:
             if not is_api_request and root_path.endswith(app.API_DIRNAME): continue
             category_index = os.path.join(root_path, *request_segments, 'index.md')
-            single_page = os.path.join(root_path, *request_segments) + app.EXTENSIONS['file']
-            single_protected_page = os.path.join(root_path, *protected_segment) + app.EXTENSIONS['file']
+            single_page = os.path.join(root_path, *request_segments) + BaseApp.EXTENSIONS['file']
+            single_protected_page = os.path.join(root_path, *protected_segment) + BaseApp.EXTENSIONS['file']
 
             for candidate in (category_index, single_page, single_protected_page):
                 if os.path.exists(candidate):
@@ -283,7 +282,7 @@ class BaseServer(Starlette):
         self.resolvers = {}
         self.services = {}
         self.request: Optional[BaseRequest] = None
-        self.virtual_routes = app.collect_virtual_routes()
+        self.virtual_routes: Optional[OrderedDict] = None
 
     @property
     def allowed_hosts(self):
@@ -310,7 +309,7 @@ class BaseServer(Starlette):
         self.init_pyonir_endpoints(self.app)
         print(f"/************** ASGI APP SERVER RUNNING on {'http' if self.app.is_dev else 'sock'} ****************/")
         print(f"\
-        \n\t- App env: {'DEV' if self.app.is_dev else 'PROD'}\
+        \n\t- App env: {'DEV' if self.app.is_dev else 'PROD'}:{self.app.VERSION}\
         \n\t- App name: {self.app.name}\
         \n\t- App domain: {self.app.domain}\
         \n\t- App host: {self.app.host}\
@@ -429,13 +428,13 @@ class BaseServer(Starlette):
                                 )
         self.add_middleware(CSRFProtectMiddleware, csrf_secret=self.app.SECRET_SAUCE)
 
-    def get_virtual(self, url: str) -> tuple[dict, Optional[dict]]:
-        """Returns vitual page data values"""
-        for vpath, vdata in self.virtual_routes.items():
-            has_match = self.matching_route(url, vpath)
+    def get_virtual(self, url: str) -> Union[tuple[str, dict, dict], tuple[None, None, None]]:
+        """Performs url pattern matching against virtual routes and returns vitual page data and new path parameter values."""
+        for vurl, vdata in self.virtual_routes.items():
+            has_match = self.matching_route(url, vurl)
             if has_match:
-                return vdata, has_match
-        return {}, None
+                return vurl, vdata, has_match
+        return None, None, None
 
     @staticmethod
     async def build_response(pyonir_request: BaseRequest, dec_func: callable):
@@ -463,12 +462,12 @@ class BaseServer(Starlette):
         # Process request context i.e plugin vs app
         pyonir_request.get_context()
         # Process file associated with request
-        app_ctx, req_file = pyonir_request.resolve_request_to_file(Site)
+        app_ctx, req_file = pyonir_request.resolve_request_to_file(pyonir_request.app_ctx_ref)
         pyonir_request.file = req_file
         pyonir_request.app_ctx_name = app_ctx.name
 
         # Preprocess routes or resolver endpoint from file
-        req_file = await app_ctx.apply_virtual_routes(pyonir_request)
+        app_ctx.apply_virtual_routes(pyonir_request)
         await req_file.process_resolver(pyonir_request)
 
         route_func = dec_func if not callable(req_file.resolver) else req_file.resolver
@@ -483,7 +482,7 @@ class BaseServer(Starlette):
             is_async = inspect.iscoroutinefunction(route_func)
 
             default_args = dict(get_type_hints(route_func))
-            default_args.update(**pyonir_request.path_params)
+            default_args.update(**pyonir_request.path_params.__dict__)
             default_args.update(**pyonir_request.query_params.__dict__)
             default_args.update(**pyonir_request.form)
             args = cls_mapper(default_args, route_func, from_request=pyonir_request)
@@ -531,9 +530,10 @@ class BaseServer(Starlette):
         """Returns path parameters when match is found for virtual routes"""
         from starlette.routing import compile_path
         path_regex, path_format, *args = compile_path(regex_path)
-        match = path_regex.match(route_path) # check if request path matches the router regex
-        if match:
-            return match.groupdict()
+        match = path_regex.match(route_path)# check if request path matches the router regex
+        trail_match = match or path_regex.match(route_path+'/')
+        if trail_match:
+            return trail_match.groupdict()
 
     @staticmethod
     def serve_static(app: BaseApp, request: BaseRequest):

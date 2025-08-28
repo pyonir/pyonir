@@ -131,7 +131,7 @@ def cls_mapper(file_obj: object, cls: Union[type, list[type]], from_request=None
         elif is_iterable(actual_type):
             itypes = mapable[0] if len(mapable) == 1 else mapable
             itype = itypes[0] if itypes and len(itypes) == 1 else None
-            cls_args[name] = [cls_mapper(v, itype) for v in value] if itype else actual_type(value)
+            cls_args[name] = [cls_mapper(v, itype) for v in value] if itype else value if isinstance(value, actual_type) else actual_type(value)
 
         elif is_callable_type(actual_type):
             cls_args[name] = value

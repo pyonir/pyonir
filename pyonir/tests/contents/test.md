@@ -1,4 +1,6 @@
 inline_list_of_scalrs_types:- 1, true, hello, 3.14
+single_item_list:- just one thing here
+string_phonenumber: (111) 123-3456
 string_types: 1, true, hello, 3.14
 # single line comment
 basic: scalar value

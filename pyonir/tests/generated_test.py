@@ -8,6 +8,15 @@ class ParselyTests(unittest.TestCase):
         App = init(__file__, use_themes=False)
         cls.parselyFile = Parsely(os.path.join(os.path.dirname(__file__),'contents', 'test.md'), App.app_ctx)
 
+    def test_inline_list_of_scalrs_types(self):
+        self.assertEqual([1, true, "hello", 3.14, 1, true, "hello", 3.14], self.parselyFile.data.get('inline_list_of_scalrs_types'))
+
+    def test_single_item_list(self):
+        self.assertEqual(["just one thing here"], self.parselyFile.data.get('single_item_list'))
+
+    def test_string_types(self):
+        self.assertEqual("1, true, hello, 3.14", self.parselyFile.data.get('string_types'))
+
     def test_basic(self):
         self.assertEqual("scalar value", self.parselyFile.data.get('basic'))
 
@@ -20,14 +29,11 @@ class ParselyTests(unittest.TestCase):
     def test_dynamic_list_blocks(self):
         self.assertEqual([{"ages": [1, true, "hello", 3.14, {"dict_key": "dict_value"}]}, {"this": {"age": 3, "key": "some value"}}], self.parselyFile.data.get('dynamic_list_blocks'))
 
-    def test_inline_list_of_scalrs_types(self):
-        self.assertEqual([1, true, "hello", 3.14], self.parselyFile.data.get('inline_list_of_scalrs_types'))
-
     def test_inline_list_of_maps(self):
         self.assertEqual([{"one": 1}, {"two": true}, {"three": "hello"}], self.parselyFile.data.get('inline_list_of_maps'))
 
     def test_inline_dict_value(self):
-        self.assertEqual({"my_lnkey": "my_lnvalue", "another_lnkey": "another_lnvalue"}, self.parselyFile.data.get('inline_dict_value'))
+        self.assertEqual("my_lnkey: my_lnvalue, another_lnkey: another_lnvalue", self.parselyFile.data.get('inline_dict_value'))
 
     def test_multiline_block(self):
         self.assertEqual("What is this here? Content types enable you to organize and manage content in a consistent way for specific kinds of pages.\nthere is no such thing as a Python JSON object. JSON is a language independent file \nformat that finds its roots in JavaScript, and is supported by many languages. end of mulitiline block.\n", self.parselyFile.data.get('multiline_block'))

@@ -2,6 +2,8 @@ import os, json
 
 from pyonir.parser import Parsely
 from pyonir.tests.backend.demo_controller import DemoService
+from pyonir.utilities import deserialize_datestr
+
 
 def generate_pyonir_types():
     from pyonir.core import PyonirApp, PyonirRequest
@@ -53,6 +55,8 @@ def generate_parsely_tests(parsely: Parsely):
 
 if __name__=='__main__':
     app_dirpath = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'libs', 'app_setup')
+    date = '2025-08-20T14:08:14.653281'
+    dd = deserialize_datestr(date)
     # generate_pyonir_types()
     # App = init(__file__, serve_frontend=False)
     # DemoService(App)

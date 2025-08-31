@@ -3,7 +3,7 @@ import sqlite3
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Optional, Type, Iterable, Callable, Union, Iterator
+from typing import Any, Dict, Optional, Type, Iterable, Callable, Union, Iterator, Generator
 
 from pyonir.models.schemas import BaseSchema
 from pyonir.pyonir_types import PyonirApp, AppCtx
@@ -180,9 +180,9 @@ class BaseCollection:
         self.dict_to_class = dict_to_class
 
         self._query_path = ''
-        key = lambda x: self.get_attr(x, sort_key or 'file_created_on')
+        key = lambda x: self.get_attr(x, sort_key or 'file_created_on') or self.get_attr(x, 'created_on') or x
+        # items = list(items)
         try:
-            items = list(items)
             self.collection = SortedList(items, key=key)
         except Exception as e:
             raise
@@ -228,8 +228,6 @@ class BaseCollection:
         from pyonir.utilities import query_files
         gen_data = query_files(query_path, app_ctx=app_ctx, model=model, name_pattern=name_pattern,
                                exclude_dirs=exclude_dirs, exclude_names=exclude_names, force_all=force_all)
-        # gen_data = get_all_files_from_dir(query_path, app_ctx=app_ctx, entry_type=data_model, include_only=include_only,
-        #                                   exclude_dirs=exclude_dirs, exclude_file=exclude_file, force_all=force_all)
         return cls(gen_data, sort_key=sort_key)
 
     def prev_next(self, input_file: 'Parsely'):
@@ -346,3 +344,40 @@ class BaseCollection:
 
     def __iter__(self):
         return iter(self.collection)
+
+
+def query_fs(abs_dirpath: str,
+                app_ctx: AppCtx = None,
+                model: Union[object, str] = None,
+                name_pattern: str = None,
+                exclude_dirs: tuple = None,
+                exclude_names: tuple = None,
+                force_all: bool = True) -> Generator:
+    """Returns a generator of files from a directory path"""
+    from pathlib import Path
+    from pyonir.parser import Parsely, Page
+    from pyonir.models.page import BaseMedia
+
+    # results = []
+    hidden_file_prefixes = ('.', '_', '<', '>', '(', ')', '$', '!', '._')
+    allowed_content_extensions = ('prs', 'md', 'json', 'yaml')
+    def get_datatype(filepath) -> Union[object, Parsely, BaseMedia]:
+        if model == 'path': return str(filepath)
+        if model == BaseMedia: return BaseMedia(filepath)
+        pf = Parsely(str(filepath), app_ctx=app_ctx, model=model)
+        if model == 'parsely': return pf
+        if pf.is_page and not model: pf.schema = Page
+        res = pf.map_to_model(pf.schema)
+        return res if pf.schema else pf
+
+    def skip_file(file_path: Path) -> bool:
+        """Checks if the file should be skipped based on exclude_dirs and exclude_file"""
+        is_private_file = file_path.name.startswith(hidden_file_prefixes)
+        is_excluded_file = exclude_names and file_path.name in exclude_names
+        is_allowed_file = file_path.suffix[1:] in allowed_content_extensions
+        if not is_private_file and force_all: return False
+        return is_excluded_file or is_private_file or not is_allowed_file
+
+    for path in Path(abs_dirpath).rglob(name_pattern or "*"):
+        if skip_file(path): continue
+        yield get_datatype(path)

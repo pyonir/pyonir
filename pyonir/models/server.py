@@ -83,6 +83,32 @@ class BaseRequest:
         file_redirect = self.file.data.get('redirect_to', self.file.data.get('redirect'))
         return self.form.get('redirect_to', self.form.get('redirect', file_redirect))
 
+    def process_resolver(self):
+        from pyonir import Site
+        from pyonir.models.parser import FileStatuses
+        req_file = self.file
+        resolver_obj = req_file.data.get(req_file.RESOLVER_KEY, {})
+        resolver_action = resolver_obj.get(self.method)
+        # if resolver_obj and not resolver_action:
+        #     req_file.status = FileStatuses.FORBIDDEN
+        #     self.type = JSON_RES
+        if not resolver_action or req_file.resolver is not None: return
+        resolver_path = resolver_action.get('call')
+        resolver_args = resolver_action.get('args')
+        resolver_redirect = resolver_action.get('redirect')
+
+        self.type = resolver_action.get('headers', {}).get('accept', self.type)
+        app_plugin = list(filter(lambda p: p.name == resolver_path.split('.')[0], Site.activated_plugins))
+        app_plugin = app_plugin[0] if len(app_plugin) else Site
+        resolver = app_plugin.reload_resolver(resolver_path)
+        if resolver and resolver_args:
+            self.form.update(resolver_args)
+        if resolver and resolver_redirect:
+            self.form['redirect'] = resolver_redirect
+        if not resolver:
+            resolver = self.auth.responses.ERROR.response(message=f"Unable to resolve endpoint")
+        return resolver
+
     def ssg_request(self, page, params):
         self.file = page
         self.url = page.data.get('url')
@@ -180,7 +206,7 @@ class BaseRequest:
             code = 200
         self.status_code = code #200 if self.file.file_exists or is_router_method else 404
 
-    def get_context(self) -> None:
+    def set_context(self) -> None:
         """Gets the routing context from web request"""
         path_str = self.path.replace(self.app.API_ROUTE, '')
         res = None
@@ -284,6 +310,9 @@ class BaseServer(Starlette):
         self.request: Optional[BaseRequest] = None
         self.virtual_routes: Optional[OrderedDict] = None
 
+        self.initialize_starlette()
+
+
     @property
     def allowed_hosts(self):
         """Returns a list of domains allowed to access the web application"""
@@ -322,6 +351,7 @@ class BaseServer(Starlette):
         \n\t- System Version: {sys.version_info}")
         self.app.run_plugins(PyonirHooks.AFTER_INIT)
         # self.app.run_hooks(PyonirHooks.AFTER_INIT)
+        self.is_active = True
         uvicorn.run(self.app.server, **uvicorn_options)
 
     def init_app_endpoints(self, endpoints: list):
@@ -344,6 +374,12 @@ class BaseServer(Starlette):
                 self.create_route(func, path=f'{endpoint}{path}', methods=methods, *opts)
                 pass
 
+    @staticmethod
+    def create_static_route(assets_dir: str):
+        """Creates a route for serving static files"""
+        from starlette.staticfiles import StaticFiles
+        return StaticFiles(directory=assets_dir)
+
     def create_route(self, dec_func: Callable,
                        path: str = '',
                        methods=None,
@@ -362,7 +398,7 @@ class BaseServer(Starlette):
             methods = ['GET']
 
         if static_path:
-            static_route = self.serve_static(static_path)
+            static_route = self.create_static_route(static_path)
             self.mount(path, static_route)
             self.url_map[path.lstrip('/')
             .replace('/', '_')] = {'path': path, 'dir': static_path, 'exists': os.path.exists(static_path)}
@@ -382,13 +418,13 @@ class BaseServer(Starlette):
             "route": path,  # has regex pattern
             "path": route_path,
             "methods": methods,
-            # "models": req_models,
             "name": name,
             "auth": auth,
             "sse": sse,
             "ws": ws,
             "async": is_async,
             "async_gen": is_asyncgen,
+            "func": dec_func
         }
         # Add route path into categories
         self.endpoints.append(f"{endpoint_route}{route_path}")
@@ -417,7 +453,6 @@ class BaseServer(Starlette):
         from starlette.middleware.trustedhost import TrustedHostMiddleware
         # from starlette.middleware.gzip import GZipMiddleware
 
-        # allowed_hosts = ['localhost', '*.localhost']
         self.add_middleware(TrustedHostMiddleware)
         # star_app.add_middleware(GZipMiddleware, minimum_size=500)
         self.add_middleware(SessionMiddleware,
@@ -447,8 +482,8 @@ class BaseServer(Starlette):
         Site.server.request = pyonir_request
         default_system_router = dec_func.__name__ == 'pyonir_index'
         # Serve static urls
-        if pyonir_request.is_static:
-            return Site.server.serve_static(Site, pyonir_request)
+        if pyonir_request.is_static and default_system_router:
+            return Site.server.resolve_static(Site, pyonir_request)
 
         # Update template globals
         Site.TemplateEnvironment.globals['request'] = pyonir_request
@@ -457,18 +492,18 @@ class BaseServer(Starlette):
         await pyonir_request.process_request_data()
         # Init Auth handler
         pyonir_request.auth = Auth(pyonir_request, Site)
-
+        pyonir_response = BaseRestResponse(status_code=pyonir_request.status_code)
 
         # Process request context i.e plugin vs app
-        pyonir_request.get_context()
+        pyonir_request.set_context()
         # Process file associated with request
         app_ctx, req_file = pyonir_request.resolve_request_to_file(pyonir_request.app_ctx_ref)
         pyonir_request.file = req_file
-        pyonir_request.app_ctx_name = app_ctx.name
 
         # Preprocess routes or resolver endpoint from file
         app_ctx.apply_virtual_routes(pyonir_request)
         await req_file.process_resolver(pyonir_request)
+        # pyonir_request.process_resolver(pyonir_request)
 
         route_func = dec_func if not callable(req_file.resolver) else req_file.resolver
 
@@ -486,7 +521,7 @@ class BaseServer(Starlette):
             default_args.update(**pyonir_request.query_params.__dict__)
             default_args.update(**pyonir_request.form)
             args = cls_mapper(default_args, route_func, from_request=pyonir_request)
-            pyonir_request.router_args = args
+            # pyonir_request.router_args = args
 
             # Resolve route decorator methods
             pyonir_request.server_response = await route_func(**args) if is_async else route_func(**args)
@@ -506,13 +541,15 @@ class BaseServer(Starlette):
         # await Site.run_async_hooks(PyonirHooks.ON_REQUEST, pyonir_request)
 
         # Finalize response output
-        is_auth_res = isinstance(pyonir_request.server_response, BaseRestResponse)
-        pyonir_response = pyonir_request.server_response if is_auth_res else BaseRestResponse(status_code=pyonir_request.status_code)
-        if not is_auth_res:
+        if isinstance(pyonir_request.server_response, BaseRestResponse):
+            pyonir_response = pyonir_request.server_response
+        else:
             if pyonir_request.type == JSON_RES:
                 pyonir_response.set_json(pyonir_request.server_response or pyonir_request.file.data)
+            elif pyonir_request.type == TEXT_RES:
+                pyonir_response.set_html(pyonir_request.file.output_html(pyonir_request))
             else:
-                pyonir_response.set_html(req_file.output_html(pyonir_request))
+                print(f'{pyonir_request.type} doesnt have a handler')
 
         # Set headers
         pyonir_response.set_media(pyonir_request.type)
@@ -520,6 +557,9 @@ class BaseServer(Starlette):
         pyonir_response.set_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
         pyonir_response.set_header("Pragma", "no-cache")
         pyonir_response.set_header("Expires", "0")
+
+        if pyonir_request.is_static:
+            return pyonir_request.server_response
 
         # Generate response
         pyonir_response.set_server_response()
@@ -536,16 +576,19 @@ class BaseServer(Starlette):
             return trail_match.groupdict()
 
     @staticmethod
-    def serve_static(app: BaseApp, request: BaseRequest):
-        from starlette.responses import FileResponse, PlainTextResponse
+    def resolve_static(app: BaseApp, request: BaseRequest):
         from_frontend = request.path.startswith(app.frontend_assets_route)
         from_public = request.path.startswith(app.public_assets_route)
         base_path = app.frontend_assets_dirpath if from_frontend else app.public_assets_dirpath if from_public else ''
         req_path = request.parts[1:] if len(request.parts) > 1 else request.parts
         path = os.path.join(base_path, *req_path)
         if not os.path.exists(path): print('Pyonir: skipping static: '+ path)
-        return FileResponse(path, 200) if os.path.exists(path) else PlainTextResponse(f"{request.path} not found",
-                                                                                      status_code=404)
+        return BaseServer.serve_static(path)
+
+    @staticmethod
+    def serve_static(path: str):
+        from starlette.responses import FileResponse, PlainTextResponse
+        return FileResponse(path, 200) if os.path.exists(path) else PlainTextResponse(f"{os.path.basename(path)} not found", status_code=404)
 
     @staticmethod
     def response_renderer(value, media_type):

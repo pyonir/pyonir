@@ -376,7 +376,6 @@ class Auth:
         self.app: PyonirApp = app
         self.request: PyonirRequest = request
 
-        # self.security: AuthSecurity = AuthSecurity(self)
         self.request_token = self.request.headers.get('X-CSRF-Token', self.request.form.get('csrf_token'))
         """CSRF token for the request, used to prevent cross-site request forgery."""
 
@@ -576,7 +575,7 @@ class Auth:
     def query_account(self, user_email: str = None) -> User:
         """Queries the user account based on the provided credentials."""
         uid =  generate_id(self.user_creds.email) if not self.user_creds.has_session else user_email or self.user_creds.email
-        user_account_path = os.path.join(self.app.contents_dirpath, 'users', uid, 'profile.json')
+        user_account_path = os.path.join(self.app.contents_dirpath, 'users', uid or '', 'profile.json')
         user_account = User.from_file(user_account_path, app_ctx=self.app.app_ctx) if os.path.exists(user_account_path) else None
         return user_account
 
@@ -615,19 +614,6 @@ class Auth:
             media_file = await BaseMedia.save_upload(file, directory_path)
             files.append(media_file)
         self.response = self.responses.SUCCESS.response(message=f"Successfully uploaded {len(files)}. into {os.path.basename(directory_path)}")
-        return files
-
-    async def upload_file(self, directory_path: str, file_name: str = None, limit: int = 0) -> Optional[list[str]]:
-        """Saves file(s) into the file system directory"""
-        can_upload = self.user.has_perms([PermissionLevel.WRITE])
-        self.response = self.responses.UNAUTHORIZED
-        if not can_upload: return None
-        files = []
-        for file in self.request.files:
-            if limit and len(files) == limit: break
-            file.filename = file_name or file.filename
-            media_file = await BaseMedia.save_upload(file, directory_path)
-            files.append(media_file)
         return files
 
     def send_email(self):

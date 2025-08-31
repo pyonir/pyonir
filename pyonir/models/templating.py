@@ -1,4 +1,5 @@
 import os
+from dataclasses import dataclass
 from typing import Optional, Dict
 
 from jinja2 import Environment
@@ -42,7 +43,6 @@ class TemplateEnvironment(Environment):
         app_loader = self.loader
         if not app_loader: return
         self.loader.loaders.append(FileSystemLoader(template_path))
-        # app_loader.searchpath.append(template_path)
 
     def add_filter(self, filter: callable):
         name = filter.__name__
@@ -50,6 +50,7 @@ class TemplateEnvironment(Environment):
         self.filters.update({name: filter})
         pass
 
+@dataclass
 class Theme:
     _orm_options = {'mapper': {'theme_dirname': 'file_dirname', 'theme_dirpath': 'file_dirpath'}}
     name: str
@@ -59,6 +60,8 @@ class Theme:
     """Directory path for theme folder within frontend/themes directory"""
     details: Optional['Parsely'] = None
     """Represents a theme available in the frontend/themes directory."""
+    _template_dirname = 'templates'
+    _static_dirname = 'static'
 
     def __post_init__(self):
         self.details = self.readme()
@@ -69,12 +72,12 @@ class Theme:
     @property
     def static_dirname(self):
         """directory name for theme's jinja templates"""
-        return self.details.data.get('static_dirname', 'static') if self.details else 'static'
+        return self.details.data.get('static_dirname', self._static_dirname) if self.details else self._static_dirname
 
     @property
     def templates_dirname(self):
         """directory name for theme's jinja templates"""
-        return self.details.data.get('templates_dirname', 'layouts') if self.details else 'layouts'
+        return self.details.data.get('templates_dirname', self._template_dirname) if self.details else self._template_dirname
 
     @property
     def static_dirpath(self):
@@ -112,17 +115,20 @@ class PyonirThemes:
         from pyonir import Site
         from pyonir.parser import get_attr
         if not Site or not self.available_themes: return None
-        # self.available_themes = self.query_themes()
         site_theme = get_attr(Site.settings, 'app.theme_name')
         site_theme = self.available_themes.get(site_theme)
         return site_theme
 
     def query_themes(self) -> Optional[Dict[str, Theme]]:
         """Returns a collection of available themes within the frontend/themes directory"""
+        from pyonir import Site
         themes_map = {}
         for theme_dir in os.listdir(self.themes_dirpath):
             if theme_dir.startswith(BaseApp.IGNORE_WITH_PREFIXES): continue
-            theme = Theme(name=theme_dir, theme_dirname=theme_dir, theme_dirpath=os.path.join(self.themes_dirpath, theme_dir))
+            theme = Theme(name=theme_dir, theme_dirname=theme_dir,
+                          theme_dirpath=os.path.join(self.themes_dirpath, theme_dir))
+            theme._template_dirname = Site.TEMPLATES_DIRNAME
+            theme._static_dirname = Site.FRONTEND_ASSETS_DIRNAME
             themes_map[theme_dir] = theme
         return themes_map if themes_map else None
 

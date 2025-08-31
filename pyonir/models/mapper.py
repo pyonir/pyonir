@@ -35,9 +35,9 @@ def unwrap_optional(tp):
         value_tps = get_args(tp)
         return origin_tp, value_tps
     if origin_tp is Union:
-        args = [a for a in get_args(tp) if a is not type(None)]
+        args = [unwrap_optional(a) for a in get_args(tp) if a is not type(None)]
         if len(args):
-            return args
+            return args[0]
     return tp, None
 
 def is_callable_type(tp):
@@ -57,8 +57,18 @@ def coerce_union(t, v):
         print(f"failed to coerce {v} into {t}")
         return None
 
-def add_props_to_object(res, data, file_src=None):
-    itr = [*data.keys(), *(file_src.default_file_attributes if file_src else [])]
+def collect_type_hints(t):
+    hints = get_type_hints(t)
+    try:
+        init_hints = get_type_hints(t.__init__)
+        hints.update(init_hints)
+        del hints['return']
+    except Exception as exc:
+        pass
+    return hints
+
+def add_props_to_object(res, data: dict, file_src: object =None):
+    itr = [*data.keys(), *(file_src.default_file_attributes if file_src and hasattr(file_src, 'default_file_attributes') else [] )]
     for key in itr:
         if key[0] == '_': continue
         # if frozen and not hasattr(res, key): continue
@@ -75,7 +85,7 @@ def cls_mapper(file_obj: object, cls: Union[type, list[type]], from_request=None
         return file_obj
 
     # Union types
-    if isinstance(cls, list):
+    if isinstance(cls, (list, tuple, set)):
         _value = None
         for ct in cls:
             if isinstance(file_obj, ct):
@@ -89,8 +99,8 @@ def cls_mapper(file_obj: object, cls: Union[type, list[type]], from_request=None
         return cls(file_obj)
 
     is_generic_type = cls.__name__ == 'GenericQueryModel'
-    param_type_map = get_type_hints(cls)
-    data = get_attr(file_obj, 'data', {}) or {}
+    param_type_map = collect_type_hints(cls)
+    data = get_attr(file_obj, 'data') or {}
 
     # Merge nested access if ORM opts define mapper_key
     orm_opts = getattr(cls, "_orm_options", {})
@@ -103,12 +113,13 @@ def cls_mapper(file_obj: object, cls: Union[type, list[type]], from_request=None
 
     cls_args = cls() if is_generic_type else {}
     for name, hint in param_type_map.items():
-        # name = get_attr(mapper_keys, name, None) or name
+        mapper_name = get_attr(mapper_keys, name, None) or name
         if name.startswith("_") or name == "return":
             continue
 
         actual_type, *mapable = unwrap_optional(hint)
         value = get_attr(data, name) or get_attr(file_obj, name)
+        value = (get_attr(data, mapper_name) or get_attr(file_obj, mapper_name)) if not value else value
         if value is None:
             cls_args[name] = None
             continue
@@ -139,7 +150,8 @@ def cls_mapper(file_obj: object, cls: Union[type, list[type]], from_request=None
         elif callable(value) or isinstance(value, actual_type):
             cls_args[name] = value
         elif is_custom_class(actual_type):
-            cls_args[name] = cls_mapper(value, actual_type)
+            custom_mapper_fn = getattr(cls, f'map_to_{name}', None)
+            cls_args[name] = cls_mapper(value, actual_type) if not custom_mapper_fn else custom_mapper_fn(value)
 
         else:
             try:
@@ -151,11 +163,12 @@ def cls_mapper(file_obj: object, cls: Union[type, list[type]], from_request=None
     if callable(cls) and from_request:
         return cls_args
 
-    res = cls() if is_generic_type else cls(**cls_args)
-    # Pass additional fields that are not specified on model
+    res = cls_args if is_generic_type else cls(**cls_args)
     if is_generic_type:
+        data = file_obj if not data and isinstance(file_obj, dict) else data
         res = add_props_to_object(res, data, file_src=file_obj)
 
+    # Pass additional fields that are not specified on model
     if not is_frozen:
         for key, value in data.items():
             if isinstance(getattr(cls, key, None), property):
@@ -165,4 +178,30 @@ def cls_mapper(file_obj: object, cls: Union[type, list[type]], from_request=None
             setattr(res, key, value)
 
     return res
-    # return cls(**cls_args)
+
+
+def dict_to_class(data: dict, name: Union[str, callable] = None, deep: bool = True) -> object:
+    """
+    Converts a dictionary into a class object with the given name.
+
+    Args:
+        data (dict): The dictionary to convert.
+        name (str): The name of the class.
+        deep (bool): If True, convert all dictionaries recursively.
+    Returns:
+        object: An instance of the dynamically created class with attributes from the dictionary.
+    """
+    # Dynamically create a new class
+    cls = type(name or 'T', (object,), {}) if not callable(name) and deep!='update' else name
+
+    # Create an instance of the class
+    instance = cls() if deep!='update' else cls
+    setattr(instance, 'update', lambda d: dict_to_class(d, instance, 'update') )
+    # Assign dictionary keys as attributes of the instance
+    for key, value in data.items():
+        if isinstance(getattr(cls, key, None), property): continue
+        if deep and isinstance(value, dict):
+            value = dict_to_class(value, key)
+        setattr(instance, key, value)
+
+    return instance

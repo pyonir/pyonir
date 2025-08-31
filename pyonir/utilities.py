@@ -1,8 +1,13 @@
 from __future__ import annotations
+
+import json
 import os
 import typing
 from typing import Union, Generator, Iterable, Callable, Mapping, get_origin, get_args, get_type_hints, Any
 from collections.abc import Iterable as ABCIterable
+from datetime import datetime
+from typing import Optional, Union
+import pytz
 
 from pyonir.pyonir_types import AppCtx, EnvConfig
 
@@ -233,38 +238,101 @@ def camel_to_snake(camel_str):
     snake_str = re.sub(r'(?<!^)(?=[A-Z])', '_', camel_str).lower()
     return snake_str
 
-
-def deserialize_datestr(datestr, timestr="00:00", fmt="%Y-%m-%d %H:%M:%S %p", zone="US/Eastern", auto_correct=True):
+def get_file_created(file_path: str, platform: str = 'ios') -> datetime:
     from datetime import datetime
-    import pytz
-    if not isinstance(datestr, str): return datestr
+    import pathlib
 
-    def correct_format(date_str):
+    # create a file path
+    path = pathlib.Path(file_path)
+
+    if platform == 'ios':
+        # get modification time
+        timestamp = path.stat().st_mtime
+        # convert time to dd-mm-yyyy hh:mm:ss
+        m_time = datetime.fromtimestamp(timestamp)
+        # print(f'Modified Date/Time: {os.path.basename(file_path)}', m_time)
+        return m_time
+    if platform == 'windows':
+        # get creation time on windows
+        current_timestamp = path.stat().st_ctime
+        c_time = datetime.fromtimestamp(current_timestamp)
+        # print('Created Date/Time on:', c_time)
+        return c_time
+
+def deserialize_datestr(
+    datestr: Union[str, datetime],
+    fmt: str = "%Y-%m-%d %I:%M:%S",   # %I for 12-hour format
+    zone: str = "US/Eastern",
+    auto_correct: bool = True
+) -> Optional[datetime]:
+    """
+    Convert a date string into a timezone-aware datetime.
+
+    Args:
+        datestr: Input string or datetime.
+        fmt: Expected datetime format (default "%Y-%m-%d %I:%M:%S %p").
+        zone: Timezone name (default "US/Eastern").
+        auto_correct: Whether to attempt corrections for sloppy inputs.
+
+    Returns:
+        Timezone-aware datetime (in UTC), or None if parsing fails.
+    """
+    if isinstance(datestr, datetime):
+        return pytz.utc.localize(datestr) if datestr.tzinfo is None else datestr.astimezone(pytz.utc)
+    if not isinstance(datestr, str):
+        return None
+
+    tz = pytz.timezone(zone)
+
+    def correct_format(raw: str, dfmt: str) -> tuple[str, str]:
+        """Try to normalize sloppy date strings like 2025/8/9 13:00."""
         try:
-            date_str = date_str.strip().replace('/', '-')
-            date_str, _, timestr = date_str.partition(" ")
-            timestr = timestr if timestr != "" else '12:13:14 AM'
-            has_period = timestr.endswith("M")
-            if not has_period:
-                timestr += " AM"
-            y, m, *d = date_str.split("-")
-            d = "".join(d)
-            fdate = f"{y}-{int(m):02d}-{d}"
+            raw = raw.strip().replace("/", "-")
+            if 'T' in raw:
+                date_part, _, time_part = raw.partition('T')
+            else:
+                date_part, _, time_part = raw.partition(" ")
+
+            # Use fallback timestr if missing
+            time_part = time_part or "12:00:00.0000"
+            hr,*minsec = time_part.split(':')
+            is_military_tme = "%H" in dfmt or int(hr) > 12
+            dfmt = dfmt.replace("%I", "%H") if is_military_tme else fmt
+
+            parts = date_part.split("-")
+            if len(parts) != 3:
+                return raw, dfmt
+
+            y, m, d = parts
+            # Pad month/day
+            m, d = f"{int(m):02d}", f"{int(d):02d}"
+
+            # Basic sanity check: if year looks like day
             if int(y) < int(d):
-                fdate = f"{d}-{int(y):02d}-{m}"
-                print(f"\tIncorrect format on date string {date_str}. it should be {fdate}")
-                return fdate
-            return f"{fdate} {timestr}"
+                # Swap year/day (common human error)
+                y, d = d, y
+                print(f"⚠️  Corrected malformed date string: {raw} → {y}-{m}-{d}")
+
+            return f"{y}-{m}-{d} {time_part}", dfmt
         except Exception as e:
-            return None
+            return raw, dfmt
 
     try:
-        return pytz.utc.localize(datetime.strptime(datestr, fmt))
-    except ValueError as e:
-        # return str(e)
-        if not auto_correct: return str(e)
-        datestr = correct_format(datestr)
-        return pytz.utc.localize(datetime.strptime(datestr, fmt)) if datestr else None
+        # Try direct parse first
+        dt = datetime.strptime(datestr, fmt)
+    except ValueError:
+        if not auto_correct:
+            return None
+        corrected, fmt = correct_format(datestr, fmt)
+        if not corrected:
+            return None
+        try:
+            dt = datetime.strptime(corrected, fmt)
+        except ValueError:
+            return None
+
+    # Localize to input zone, then convert to UTC
+    return tz.localize(dt).astimezone(pytz.utc)
 
 
 def sortBykey(listobj, sort_by_key="", limit="", reverse=True):
@@ -296,10 +364,9 @@ def sortBykey(listobj, sort_by_key="", limit="", reverse=True):
 def parse_query_model_to_object(model_fields: str) -> object:
     if not model_fields: return None
     from pyonir.parser import Parsely
-    import importlib
     mapper = {}
     params = {"_orm_options": {'mapper': mapper}}
-    for k in Parsely.default_file_attributes+model_fields.split(','):
+    for k in model_fields.split(','):
         if ':' in k:
             k,_, src = k.partition(':')
             mapper[k] = src
@@ -315,12 +382,15 @@ def query_files(abs_dirpath: str,
                 force_all: bool = True) -> Generator:
     """Returns a generator of files from a directory path"""
     from pathlib import Path
-    from pyonir.parser import Parsely, ParselyMedia, Page
+    from pyonir.parser import Parsely, Page
+    from pyonir.models.page import BaseMedia
+
     # results = []
     hidden_file_prefixes = ('.', '_', '<', '>', '(', ')', '$', '!', '._')
     allowed_content_extensions = ('prs', 'md', 'json', 'yaml')
-    def get_datatype(filepath) -> Union[object, Parsely, ParselyMedia]:
-        if model == 'path': return filepath
+    def get_datatype(filepath) -> Union[object, Parsely, BaseMedia]:
+        if model == 'path': return str(filepath)
+        if model == BaseMedia: return BaseMedia(filepath)
         pf = Parsely(str(filepath), app_ctx=app_ctx, model=model)
         if model == 'parsely': return pf
         if pf.is_page and not model: pf.schema = Page
@@ -332,13 +402,13 @@ def query_files(abs_dirpath: str,
         is_private_file = file_path.name.startswith(hidden_file_prefixes)
         is_excluded_file = exclude_names and file_path.name in exclude_names
         is_allowed_file = file_path.suffix[1:] in allowed_content_extensions
+        if not is_private_file and force_all: return False
         return is_excluded_file or is_private_file or not is_allowed_file
 
     for path in Path(abs_dirpath).rglob(name_pattern or "*"):
         if skip_file(path): continue
         yield get_datatype(path)
-        # results.append(get_datatype(path))
-    # return results
+
 
 
 def delete_file(full_filepath):
@@ -363,7 +433,6 @@ def create_file(file_abspath: str, data: any = None, is_json: bool = False, mode
         bool: The return value if file was created successfully
     """
     def write_file(file_abspath, data, is_json=False, mode='w'):
-        import json
         with open(file_abspath, mode, encoding="utf-8") as f:
             if is_json:
                 json.dump(data, f, indent=2, sort_keys=True, default=json_serial)
@@ -408,8 +477,8 @@ def json_serial(obj):
         return list(obj)
     elif isinstance(obj, Parsely):
         return obj.data
-    elif hasattr(obj, 'to_json'):
-        return obj.to_json()
+    elif hasattr(obj, 'to_dict'):
+        return obj.to_dict()
     else:
         return obj if not hasattr(obj, '__dict__') else obj.__dict__
 
@@ -444,24 +513,16 @@ def import_module(pkg_path: str, callable_name: str) -> typing.Callable:
     return mod
 
 def get_module(pkg_path: str, callable_name: str) -> tuple[typing.Any, typing.Callable]:
-    import sys, importlib
+    import importlib
     spec = importlib.util.spec_from_file_location(callable_name, pkg_path)
     if spec is None or spec.loader is None:
         raise ImportError(f"Could not load spec for {callable_name} from {pkg_path}")
 
     module = importlib.util.module_from_spec(spec)
-    # sys.modules[callable_name] = module  # Optional: allows intra-module imports to resolve
     spec.loader.exec_module(module)
 
     func = get_attr(module, callable_name) or get_attr(module, module.__name__)
     return module, func
-
-# def _get_module(pkg_path: str, callable_name: str) -> tuple[any, typing.Callable]:
-#     from importlib import util
-#     mod = util.spec_from_file_location(callable_name, pkg_path).loader.load_module(callable_name)
-#     func = getattr(mod, callable_name)
-#
-#     return (mod, func)
 
 def generate_id():
     import uuid

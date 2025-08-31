@@ -1,7 +1,9 @@
-import pytest
+import pytest, os
 from typing import Optional, Union, List, Dict
 
+from pyonir import Parsely
 from pyonir.models.mapper import cls_mapper
+from pyonir.models.parser import DeserializeFile
 from pyonir.parser import Page
 from pyonir.utilities import parse_query_model_to_object
 
@@ -33,17 +35,40 @@ class User:
         self.tags = tags
         self.meta = meta
 
+class Article:
+    """a media post."""
+
+    _orm_options = {'mapper': {'id': 'file_name', 'caption': 'content'},'frozen': True}
+    """dict: Internal mapping of model fields to source attributes."""
+
+    def __init__(self, caption: str = None, title: str = None, alt: str = None):
+        from datetime import datetime
+        import uuid
+        self.title: str = title
+        self.caption: str = caption
+        self.alt: str = alt
+        self.id: str = uuid.uuid4().hex
+        self.created_on: datetime = datetime.now()
+        self.last_updated: datetime = datetime.now()
+
 generic_model = parse_query_model_to_object('title,url,author,date:file_created_on')
 page_model = Page(url='/test')
+article_filepath = os.path.join(os.path.dirname(__file__), 'contents', 'article.md')
 # ==== Tests ====
 
-# def test_no_hint_mapping():
-#     obj = {"title": "hunter", "author": "Alice", "url": "/foo", "date": None}
-#     user = cls_mapper(obj, generic_model)
-#     assert isinstance(user.id, int)
-#     assert user.id == 123
-#     assert user.name == "Alice"
-#     assert user.email is None
+def test_parsely_to_custom_mapping():
+    obj = DeserializeFile(article_filepath)
+    article = cls_mapper(obj, Article)
+    assert isinstance(article, Article)
+    assert article.id is not None
+    assert article.caption == obj.data['content']
+
+
+def test_no_hint_mapping():
+    obj = {"title": "hunter", "author": "Alice", "url": "/foo", "date": None}
+    genmodel = cls_mapper(obj, generic_model)
+    assert genmodel.author == "Alice"
+    assert genmodel.url == '/foo'
 
 def test_scalar_mapping():
     obj = {"id": "123", "name": "Alice", "email": None, "address": None, "tags": [], "meta": {}}

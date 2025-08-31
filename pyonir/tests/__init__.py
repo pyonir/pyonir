@@ -1,10 +1,9 @@
-import os, json, textwrap
-import subprocess
-import sys
+import os, json
 
-from pyonir.parser import Parsely, Page
-from pyonir import init
+from pyonir.parser import Parsely
 from pyonir.tests.backend.demo_controller import DemoService
+from pyonir.utilities import deserialize_datestr
+
 
 def generate_pyonir_types():
     from pyonir.core import PyonirApp, PyonirRequest
@@ -27,7 +26,7 @@ def generate_dataclass_from_class(cls, output_dir="types"):
     with open(os.path.join(os.path.dirname(__file__), output_dir, f"{cls.__name__}.py"), "w") as f:
         f.write("\n".join(lines))
 
-def generate_tests(parsely: Parsely):
+def generate_parsely_tests(parsely: Parsely):
     cases = []
     name = parsely.__class__.__name__
     indent = " " * 4
@@ -47,7 +46,7 @@ def generate_tests(parsely: Parsely):
         f"{indent}def setUpClass(cls):\n"
         f"{indent*2}from pyonir.parser import Parsely\n"
         f"{indent*2}from pyonir import init\n"
-        f"{indent*2}App = init(__file__, serve_frontend=False)\n"
+        f"{indent*2}App = init(__file__, use_themes=False)\n"
         f"{indent*2}cls.parselyFile = Parsely(os.path.join(os.path.dirname(__file__),'contents', 'test.md'), App.app_ctx)\n\n"
         f"{case_meths}"
     )
@@ -56,6 +55,8 @@ def generate_tests(parsely: Parsely):
 
 if __name__=='__main__':
     app_dirpath = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'libs', 'app_setup')
+    date = '2025-08-20T14:08:14.653281'
+    dd = deserialize_datestr(date)
     # generate_pyonir_types()
     # App = init(__file__, serve_frontend=False)
     # DemoService(App)
@@ -89,7 +90,7 @@ if __name__=='__main__':
     # filex = App.parse_file(os.path.join(os.path.dirname(__file__),'contents','pages','form-demo.md'))
 
 
-    # generate_tests(file)
+    # generate_parsely_tests(file)
     # print(file.data)
 
     # configs = query_files(os.path.join(app_dirpath, 'contents', 'configs'), app_ctx=App.app_ctx)

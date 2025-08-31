@@ -1,10 +1,15 @@
+import uuid
+from datetime import datetime
 from typing import Type, TypeVar, Dict
+
+from pyonir.utilities import json_serial, deserialize_datestr
 
 T = TypeVar("T")
 class BaseSchema:
     """
     Interface for immutable dataclass models with CRUD and session support.
     Provides per-instance validation and session helpers.
+    _private_keys - list of field names to be hidden publically
     """
 
     def __init__(self):
@@ -12,6 +17,14 @@ class BaseSchema:
         self._errors: list[str] = []
         self._deleted: bool = False
         self._private_keys: list[str] = []
+
+    @staticmethod
+    def generate_date(date_value: str = None) -> datetime:
+        return deserialize_datestr(date_value or datetime.now())
+
+    @staticmethod
+    def generate_id():
+        return uuid.uuid4().hex
 
     def is_valid(self) -> bool:
         """Returns True if there are no validation errors."""
@@ -96,5 +109,6 @@ class BaseSchema:
 
     def to_json(self, obfuscate = True) -> str:
         """Returns the user data as a JSON serializable dictionary"""
+        from pyonir.utilities import json_serial
         import json
         return json.dumps(self.to_dict(obfuscate))

@@ -337,9 +337,9 @@ class BaseServer(Starlette):
             else:
                 uvicorn_options = {'uds': self.app.unix_socket_filepath}
 
-        if self.app.is_secure:
-            uvicorn_options["ssl_keyfile"] = self.app.ssl_key_file
-            uvicorn_options["ssl_certfile"] = self.app.ssl_cert_file
+            if self.app.is_secure:
+                uvicorn_options["ssl_keyfile"] = self.app.ssl_key_file
+                uvicorn_options["ssl_certfile"] = self.app.ssl_cert_file
 
         # Setup logs
         Path(self.app.logs_dirpath).mkdir(parents=True, exist_ok=True)

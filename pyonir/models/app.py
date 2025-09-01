@@ -474,12 +474,14 @@ class BaseApp(Base):
 
     @property
     def nginx_config_filepath(self):
-        return os.path.join(self.app_dirpath, self.name + '.conf')
+        default = os.path.join(self.app_dirpath, self.name + '.conf')
+        return get_attr(self.env, 'app.nginx_conf_dirpath', default)
 
     @property
     def unix_socket_filepath(self):
         """WSGI socket file reference"""
-        return os.path.join(self.app_dirpath, self.name+'.sock')
+        default = os.path.join(self.app_dirpath, self.name+'.sock')
+        return get_attr(self.env, 'app.unix_socket_dirpath', default)
 
     # DIRECTORIES
     @property

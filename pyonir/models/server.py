@@ -344,7 +344,6 @@ class BaseServer(Starlette):
         # Setup logs
         Path(self.app.logs_dirpath).mkdir(parents=True, exist_ok=True)
         # Initialize routers
-        # if endpoints: init_app_endpoints(endpoints)
         self.init_pyonir_endpoints(self.app)
         print(f"/************** ASGI APP SERVER RUNNING on {'http' if self.app.is_dev else 'sock'} ****************/")
         print(f"\
@@ -365,8 +364,8 @@ class BaseServer(Starlette):
         self.is_active = True
         uvicorn.run(self.app.server, **uvicorn_options)
 
-    def init_app_endpoints(self, endpoints: list):
-        for endpoint, routes in endpoints:
+    def init_app_endpoints(self, router: PyonirRouters):
+        for endpoint, routes in router:
             for path, func, methods, *opts in routes:
                 self.create_route(func, path=f'{endpoint}{path}', methods=methods, *opts)
                 pass
@@ -378,12 +377,12 @@ class BaseServer(Starlette):
         app.server.create_route(pyonir_index, "/", methods='*')
         app.server.create_route(pyonir_index, "/{path:path}", methods='*')
 
-    def create_router(self, endpoints: PyonirRouters):
-        """A collection (or group) of routes, usually organized by feature or resource, and often mounted under"""
-        for endpoint, routes in endpoints:
-            for path, func, methods, *opts in routes:
-                self.create_route(func, path=f'{endpoint}{path}', methods=methods, *opts)
-                pass
+    # def create_router(self, endpoints: PyonirRouters):
+    #     """A collection (or group) of routes, usually organized by feature or resource, and often mounted under"""
+    #     for endpoint, routes in endpoints:
+    #         for path, func, methods, *opts in routes:
+    #             self.create_route(func, path=f'{endpoint}{path}', methods=methods, *opts)
+    #             pass
 
     @staticmethod
     def create_static_route(assets_dir: str):

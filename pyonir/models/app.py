@@ -436,7 +436,7 @@ class BaseApp(Base):
         return getattr(self.env, 'APP_ENV') == DEV_ENV and not self.SSG_IN_PROGRESS
 
     @property
-    def host(self) -> str: return get_attr(self.env, 'app.host', '0.0.0.0') #if self.configs else '0.0.0.0'
+    def host(self) -> str: return '0.0.0.0' if self.is_dev else '127.0.0.1'
 
     @property
     def port(self) -> int:
@@ -627,121 +627,6 @@ class BaseApp(Base):
         if not self.salt:
             raise ValueError(f"You are attempting to run the application without proper configurations. .env file must include app.salt to protect the application.")
         self.server.run_uvicorn_server(endpoints=endpoints)
-
-    # def register_resolver(self, name: str, cls_or_path, args=(), kwargs=None, hot_reload=False):
-    #     import inspect
-    #     """
-    #     Register a class for later instantiation.
-    #
-    #     cls_or_path - Either a class object or dotted path string
-    #     hot_reload  - Only applies if cls_or_path is a dotted path
-    #     """
-    #     if inspect.isclass(cls_or_path):
-    #         class_path = f"{cls_or_path.__module__}.{cls_or_path.__qualname__}"
-    #         # hot_reload = False  # No reload possible if you pass the class directly
-    #     elif isinstance(cls_or_path, str):
-    #         class_path = cls_or_path
-    #     else:
-    #         raise TypeError("cls_or_path must be a class object or dotted path string")
-    #
-    #     self._resolvers[name] = {
-    #         "class_path": class_path,
-    #         "args": args,
-    #         "kwargs": kwargs or {},
-    #         "hot_reload": hot_reload
-    #     }
-
-    # def reload_resolver(self, name) -> Optional[callable]:
-    #     """
-    #     Instantiate the registered class.
-    #     Reload if hot_reload is enabled and class was registered by path.
-    #     """
-    #     import importlib, sys
-    #     from pyonir.utilities import get_attr
-    #     from pyonir.parser import Parsely
-    #
-    #     cls_path, meth_name = name.rsplit(".", 1)
-    #     is_pyonir = name.startswith('pyonir')
-    #     entry = get_attr(self._resolvers, cls_path)
-    #
-    #     # access module instance
-    #     if entry:
-    #         module_path, cls_name = entry["class_path"].rsplit(".", 1)
-    #
-    #         if entry["hot_reload"] and module_path in sys.modules:
-    #             importlib.reload(sys.modules[module_path])
-    #         elif module_path not in sys.modules:
-    #             importlib.import_module(module_path)
-    #
-    #         cls = getattr(sys.modules[module_path], cls_name)
-    #         new_instance = cls(*entry["args"], **entry["kwargs"])
-    #         return getattr(new_instance, meth_name)
-    #
-    #     # access constant value or methods on application instance
-    #     resolver = get_attr(self, name)
-    #
-    #     # access modules from loader
-    #     if not resolver:
-    #         from pyonir import PYONIR_DIRPATH
-    #         resolver = Parsely.load_resolver(name,
-    #                                       base_path=PYONIR_DIRPATH if is_pyonir else self.app_dirpath,
-    #                                       from_system=is_pyonir)
-    #     if not resolver:
-    #         print(f"Unable to load {name}")
-    #
-    #     return resolver
-    #
-    # @staticmethod
-    # def generate_resolvers(cls: callable, output_dirpath: str, namespace: str = ''):
-    #     """Automatically generate api endpoints from service class or module."""
-    #     import textwrap, inspect
-    #     from pyonir.utilities import create_file
-    #
-    #     def process_docs(meth: callable):
-    #         docs = meth.__doc__
-    #         if not docs: return '', docs
-    #         res = textwrap.dedent(docs).strip()
-    #         _r = res.split('---')
-    #         meta = _r.pop(1) if '---' in res else ''
-    #         return meta, "".join(_r)
-    #
-    #     resolver_template = textwrap.dedent("""\
-    #     {meta}
-    #     ===
-    #     {docs}
-    #     """).strip()
-    #
-    #     name = ''
-    #
-    #     if inspect.ismodule(cls):
-    #         name = cls.__name__
-    #         endpoint_meths = [
-    #             m for m, obj in inspect.getmembers(cls, inspect.isfunction)
-    #             if obj.__module__ == name
-    #         ]
-    #         call_path_fn = lambda meth_name: f"{namespace}.{name}.{meth_name}"
-    #
-    #     else:  # Means cls is an instance
-    #         klass = type(cls)
-    #         name = klass.__name__
-    #         output_dirpath = os.path.join(output_dirpath, namespace)
-    #         call_path_fn = lambda meth_name: f"{namespace}.{meth_name}"
-    #         endpoint_meths = [
-    #             m for m in dir(cls)
-    #             if not m.startswith('_') and callable(getattr(cls, m))
-    #         ]
-    #
-    #     print(f"Generating {name} API endpoint definitions for:")
-    #     for meth_name in endpoint_meths:
-    #         file_path = os.path.join(output_dirpath, meth_name+'.md')
-    #         method_import_path = call_path_fn(meth_name)
-    #         meth: callable = getattr(cls, meth_name)
-    #         meta, docs = process_docs(meth)
-    #         if not meta: continue
-    #         meta = textwrap.dedent(meta.replace('{method_import_path}', method_import_path)).strip()
-    #         m_temp = resolver_template.format(docs=docs, meta=meta)
-    #         create_file(file_path, m_temp)
-    #         print(f"\t{meth_name} at {file_path}")
 
     def generate_static_website(self):
         """Generates Static website"""

@@ -318,21 +318,29 @@ class BaseServer(Starlette):
         """Returns a list of domains allowed to access the web application"""
         return ['localhost', '*.localhost']
 
-    def run_uvicorn_server(self, endpoints: PyonirRouters = None):
+    def run_uvicorn_server(self, uvicorn_options: dict = None):
         """Starts the webserver"""
         import uvicorn, sys
         from pathlib import Path
 
         # """Uvicorn web server configurations"""
-        uvicorn_options = {
-            "port": self.app.port,
-            "host": self.app.host
-        }
+        # Uvicorn’s config only allows one binding method at a time:
+        # TCP socket → use host + port (+ optional SSL)
+        # Unix domain socket → use uds (+ optional SSL)
+        uvicorn_options = uvicorn_options or {}
+        if not uvicorn_options:
+            if self.app.is_dev:
+                uvicorn_options.update({
+                    "port": self.app.port,
+                    "host": self.app.host
+                })
+            else:
+                uvicorn_options = {'uds': self.app.unix_socket_filepath}
+
         if self.app.is_secure:
             uvicorn_options["ssl_keyfile"] = self.app.ssl_key_file
             uvicorn_options["ssl_certfile"] = self.app.ssl_cert_file
-        if not self.app.is_dev:
-            uvicorn_options['uds'] = self.app.unix_socket_filepath
+
         # Setup logs
         Path(self.app.logs_dirpath).mkdir(parents=True, exist_ok=True)
         # Initialize routers

@@ -321,6 +321,7 @@ class BaseServer(Starlette):
     def run_uvicorn_server(self, endpoints: PyonirRouters = None):
         """Starts the webserver"""
         import uvicorn, sys
+        from pathlib import Path
 
         # """Uvicorn web server configurations"""
         uvicorn_options = {
@@ -332,7 +333,8 @@ class BaseServer(Starlette):
             uvicorn_options["ssl_certfile"] = self.app.ssl_cert_file
         if not self.app.is_dev:
             uvicorn_options['uds'] = self.app.unix_socket_filepath
-
+        # Setup logs
+        Path(self.app.logs_dirpath).mkdir(parents=True, exist_ok=True)
         # Initialize routers
         # if endpoints: init_app_endpoints(endpoints)
         self.init_pyonir_endpoints(self.app)
@@ -340,7 +342,7 @@ class BaseServer(Starlette):
         print(f"\
         \n\t- App env: {'DEV' if self.app.is_dev else 'PROD'}:{self.app.VERSION}\
         \n\t- App name: {self.app.name}\
-        \n\t- App domain: {self.app.domain}\
+        \n\t- App domain: {self.app.domain_name}\
         \n\t- App host: {self.app.host}\
         \n\t- App port: {self.app.port}\
         \n\t- App sock: {self.app.unix_socket_filepath}\
@@ -349,6 +351,7 @@ class BaseServer(Starlette):
         \n\t- App Server: Uvicorn \
         \n\t- NGINX config: {self.app.nginx_config_filepath} \
         \n\t- System Version: {sys.version_info}")
+        print(uvicorn_options)
         self.app.run_plugins(PyonirHooks.AFTER_INIT)
         # self.app.run_hooks(PyonirHooks.AFTER_INIT)
         self.is_active = True
@@ -614,7 +617,7 @@ class BaseServer(Starlette):
             .render(
             app_name=app.name,
             app_name_id=app.name.replace(' ', '_').lower(),
-            domain=app.domain,
+            domain=app.domain_name,
             is_secure=app.is_secure,
             ssl_cert_file=app.ssl_cert_file,
             ssl_key_file=app.ssl_key_file,

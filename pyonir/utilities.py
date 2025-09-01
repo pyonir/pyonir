@@ -614,10 +614,17 @@ def get_version(toml_file: str) -> str:
     import re
     from pathlib import Path
     try:
+        # Try using installed metadata first
+        from importlib.metadata import version
+        return version("pyonir")
+    except Exception:
+        pass
+
+    try:
         content = Path(toml_file).read_text()
         return re.search(r'^version\s*=\s*["\']([^"\']+)["\']', content, re.MULTILINE).group(1)
     except Exception as e:
-        print('Error: unable to parse pyonir version from project toml',e)
+        print('Error: unable to parse pyonir version from project toml',e, toml_file)
         return 'UNKNOWN'
 
 class PrntColrs:

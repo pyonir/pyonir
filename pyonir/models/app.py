@@ -112,11 +112,6 @@ class Base:
         return os.path.join(self.backend_dirpath, self.FILTERS_DIRNAME)
 
     @property
-    def datastore_dirpath(self) -> str:
-        """Directory path for datastorage"""
-        return os.path.join(self.app_dirpath, self.DATA_DIRNAME)
-
-    @property
     def frontend_dirpath(self) -> str:
         """Directory path for site's theme folders"""
         return os.path.join(self.app_dirpath, self.FRONTEND_DIRNAME)
@@ -475,15 +470,27 @@ class BaseApp(Base):
     @property
     def nginx_config_filepath(self):
         default = os.path.join(self.app_dirpath, self.name + '.conf')
-        return get_attr(self.env, 'app.nginx_conf_dirpath', default)
+        return get_attr(self.env, 'app.nginx_conf_dirpath') or default
 
     @property
     def unix_socket_filepath(self):
         """WSGI socket file reference"""
         default = os.path.join(self.app_dirpath, self.name+'.sock')
-        return get_attr(self.env, 'app.unix_socket_dirpath', default)
+        return get_attr(self.env, 'app.unix_socket_dirpath') or default
 
     # DIRECTORIES
+    @property
+    def app_account_dirpath(self) -> str:
+        """Parent directory location for applications"""
+        return os.path.dirname(self.app_dirpath)
+
+    @property
+    def datastore_dirpath(self) -> str:
+        """Directory path for file system data storage is one level above the application directory
+        and labeled as {appname}_data_stores"""
+        default = os.path.join(self.app_account_dirpath, f"{self.name}_{self.DATA_DIRNAME}")
+        return get_attr(self.env, 'app.data_dirpath') or default
+
     @property
     def frontend_assets_dirpath(self) -> str:
         """Directory location for template related assets"""

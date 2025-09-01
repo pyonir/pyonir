@@ -526,6 +526,9 @@ class BaseApp(Base):
         self.server.virtual_routes = virtual_routes
 
     # RUNTIME
+    def load_routers(self, routers: list):
+        """Loads a list of routers into the application server"""
+        self.server.init_app_endpoints(routers)
 
     def apply_globals(self, global_vars: dict = None):
         """Updates the jinja global variables dictionary"""
@@ -611,7 +614,7 @@ class BaseApp(Base):
             print('parse_pyformat', e, string)
             return string
 
-    def run(self, endpoints: list = None):
+    def run(self, uvicorn_options: list = None):
         """Runs the Uvicorn webserver"""
 
         self.apply_globals()
@@ -626,7 +629,7 @@ class BaseApp(Base):
         # Initialize Server instance
         if not self.salt:
             raise ValueError(f"You are attempting to run the application without proper configurations. .env file must include app.salt to protect the application.")
-        self.server.run_uvicorn_server(endpoints=endpoints)
+        self.server.run_uvicorn_server(uvicorn_options=uvicorn_options)
 
     def generate_static_website(self):
         """Generates Static website"""

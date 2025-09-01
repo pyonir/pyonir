@@ -27,7 +27,7 @@ PyonirRoute = Tuple[RoutePath, RouteFunction, RouteMethods]
 """A single route entry containing the path, its handler function, and allowed HTTP methods."""
 
 PyonirRouters = List[Tuple[RoutePath, List[PyonirRoute]]]
-"""A list of route groups, each keyed by a base path and containing multiple PyonirRoute entries."""
+"""A collection (or group) of routes, usually organized by feature or resource, and often mounted under"""
 
 
 # === Application Module Definitions ===

@@ -48,7 +48,7 @@ class BaseRequest:
         self.is_static = bool(list(os.path.splitext(self.path)).pop()) if server_request else False
         self.form = {}
         self.files = []
-        self.ip = self.server_request.client.host if server_request else ''
+        # self.ip = self.server_request.client.host if server_request else ''
         self.host = str(self.server_request.base_url).rstrip('/') if server_request else app.host
         self.protocol = self.server_request.scope.get('type') + "://" if server_request else app.protocol
         self.headers = self.process_header(self.server_request.headers) if server_request else {}
@@ -639,7 +639,7 @@ class BaseServer(Starlette):
             site_uploads_route=app.uploads_route,
             site_uploads_dirpath=app.uploads_dirpath,
             site_ssg_dirpath=app.ssg_dirpath,
-            custom_nginx_locations=get_attr(app._env, 'nginx_locations')
+            custom_nginx_locations=get_attr(app.server, 'nginx_locations')
         )
 
         return create_file(app.nginx_config_filepath, nginx_conf, False)

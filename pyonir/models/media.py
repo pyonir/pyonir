@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from typing import Optional
+from typing import Optional, Any, Coroutine
 
 from starlette.datastructures import UploadFile
 
@@ -47,21 +47,23 @@ class MediaManager:
         pass
 
     # --- General Uploading ---
-    async def upload(self, request: PyonirRequest, directory_name: str = None, file_name: str = None, limit: int = None) -> str:
+    async def upload(self, request: PyonirRequest, directory_name: str = None, file_name: str = None, limit: int = None) -> tuple[list[str | None], list[Any]]:
         """Uploads a resource into specified directory
         :param request: PyonirRequest instance
         :param directory_name: directory name
         :param file_name: strict file name for resource
         :param limit: maximum number of files to upload
         """
-        files = []
+        resource_file_ids = []
+        file_names = []
         for file in request.files:
-            if limit and len(files) == limit: break
+            if limit and len(resource_file_ids) == limit: break
             if file_name:
                 file._filename = file_name
-            up_file = await self.upload_bytes(file, directory_name=directory_name or self.default_media_dirname)
-            files.append(up_file)
-        return files
+            resource_file_id = await self.upload_bytes(file, directory_name=directory_name or self.default_media_dirname)
+            resource_file_ids.append(resource_file_id)
+            file_names.append(file.filename)
+        return resource_file_ids, file_names
 
     async def upload_bytes(self, file: UploadFile, directory_name: str = None, caption: str = None) -> Optional[str]:
         """
@@ -73,14 +75,14 @@ class MediaManager:
         filename = file.filename
         _strict_name = getattr(file, '_filename', None)
         if not filename: return None
-        resource_name = [f"{directory_name.strip()}", f"{_strict_name.strip() if _strict_name else BaseMedia.encode_filename(filename, caption=caption)}"]
-        path = os.path.join(self.storage_dirpath, *resource_name)
+        resource_id = [f"{directory_name.strip()}", f"{_strict_name.strip() if _strict_name else BaseMedia.encode_filename(filename, caption=caption)}"]
+        path = os.path.join(self.storage_dirpath, *resource_id)
         Path(os.path.dirname(path)).mkdir(parents=True, exist_ok=True)
         with open(path, "wb") as buffer:
             while chunk := await file.read(1024 * 1024):  # 1MB chunks
                 buffer.write(chunk)
 
-        return filename
+        return "/".join(resource_id)
 
 
 

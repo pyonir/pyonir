@@ -420,7 +420,7 @@ class BaseApp(Base):
     def env(self) -> EnvConfig: return self._env
 
     @property
-    def use_ssl(self) -> str: return get_attr(self.env, 'app.use_ssl')
+    def use_ssl(self) -> bool: return get_attr(self.env, 'app.use_ssl',  '').strip().lower() in ('true', '1', 'yes')
 
     @property
     def salt(self) -> str: return get_attr(self.env, 'app.salt')

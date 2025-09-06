@@ -5,7 +5,6 @@ from typing import Tuple, Any, Dict, Optional
 
 from starlette_wtf import csrf_token
 
-from pyonir.models.page import BaseMedia
 from pyonir.models.user import User, Role, PermissionLevel, Roles, UserSignIn
 from pyonir.pyonir_types import PyonirRequest, PyonirApp, PyonirRestResponse
 
@@ -616,19 +615,6 @@ class Auth:
 
         return UserCredentials(email=username, has_session=True)
 
-    async def create_file(self, directory_path: str, file_name: str = None, limit: int = 0) -> Optional[list[str]]:
-        """Saves file(s) into the file system directory"""
-        can_upload = self.user.has_perms([PermissionLevel.WRITE])
-        self.response = self.responses.UNAUTHORIZED
-        if not can_upload: return None
-        files = []
-        for file in self.request.files:
-            if limit and len(files) == limit: break
-            file.filename = file_name or file.filename
-            media_file = await BaseMedia.save_upload(file, directory_path)
-            files.append(media_file)
-        self.response = self.responses.SUCCESS.response(message=f"Successfully uploaded {len(files)}. into {os.path.basename(directory_path)}")
-        return files
 
     def send_email(self):
         """Sends an email to the user."""

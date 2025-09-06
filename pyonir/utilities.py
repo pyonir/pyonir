@@ -318,8 +318,8 @@ def deserialize_datestr(
             return raw, dfmt
 
     try:
-        # Try direct parse first
-        dt = datetime.strptime(datestr, fmt)
+        # Try direct nomalizing of date value into correct format first
+        dt = datetime.strptime(datetime.fromisoformat(datestr).strftime(fmt), fmt)
     except ValueError:
         if not auto_correct:
             return None
@@ -365,7 +365,7 @@ def parse_query_model_to_object(model_fields: str) -> object:
     if not model_fields: return None
     from pyonir.parser import Parsely
     mapper = {}
-    params = {"_orm_options": {'mapper': mapper}}
+    params = {"_orm_options": {'mapper': mapper},'file_created_on': None}
     for k in model_fields.split(','):
         if ':' in k:
             k,_, src = k.partition(':')
@@ -383,7 +383,7 @@ def query_files(abs_dirpath: str,
     """Returns a generator of files from a directory path"""
     from pathlib import Path
     from pyonir.parser import Parsely, Page
-    from pyonir.models.page import BaseMedia
+    from pyonir.models.media import BaseMedia
 
     # results = []
     hidden_file_prefixes = ('.', '_', '<', '>', '(', ')', '$', '!', '._')
@@ -471,11 +471,12 @@ def json_serial(obj):
     """JSON serializer for nested objects not serializable by default jsonify"""
     from datetime import datetime
     from .parser import Parsely
+    from .models.parser import DeserializeFile
     if isinstance(obj, datetime):
         return obj.isoformat()
     elif isinstance(obj, Generator) or hasattr(obj, 'mapping'):
         return list(obj)
-    elif isinstance(obj, Parsely):
+    elif isinstance(obj, (Parsely, DeserializeFile)):
         return obj.data
     elif hasattr(obj, 'to_dict'):
         return obj.to_dict()

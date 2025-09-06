@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os, sys
 import shutil
 from pyonir.utilities import copy_assets, PrntColrs

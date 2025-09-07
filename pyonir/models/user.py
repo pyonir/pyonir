@@ -187,9 +187,3 @@ class User(PyonirSchema):
         """Convert instance to a serializable dict."""
         request.server_request.session[key or 'user'] = value or self.id
 
-
-if __name__ == "__main__":
-    user = User(email="test@example.com", role=Roles.ADMIN.name, auth_token='3rweraf', password='1234')
-    userd = user.to_dict()
-    print(userd)  # ['read', 'write', 'update', 'delete']
-    print(user.has_perm(PermissionLevel.WRITE))  # True

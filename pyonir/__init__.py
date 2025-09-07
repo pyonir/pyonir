@@ -2,7 +2,6 @@
 import os, sys
 from pyonir import utilities
 from pyonir.models.app import BaseApp, Optional
-from pyonir.parser import Parsely
 from pyonir.core import PyonirApp
 from pyonir.utilities import get_version
 

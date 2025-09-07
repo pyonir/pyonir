@@ -18,7 +18,7 @@ class TemplateEnvironment(Environment):
 
         installed_extensions = load_modules_from(PYONIR_JINJA_EXTS_DIRPATH, True)
         app_extensions = [AssetsExtension, *installed_extensions]
-        jinja_template_paths = ChoiceLoader([FileSystemLoader(PYONIR_JINJA_TEMPLATES_DIRPATH),FileSystemLoader(app.frontend_templates_dirpath)])
+        jinja_template_paths = ChoiceLoader([FileSystemLoader(app.frontend_templates_dirpath), FileSystemLoader(PYONIR_JINJA_TEMPLATES_DIRPATH)])
         super().__init__(loader=jinja_template_paths, extensions=app_extensions)
 
         #  Custom filters

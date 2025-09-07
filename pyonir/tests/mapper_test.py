@@ -1,10 +1,9 @@
 import pytest, os
 from typing import Optional, Union, List, Dict
 
-from pyonir import Parsely
 from pyonir.models.mapper import cls_mapper
+from pyonir.models.page import BasePage
 from pyonir.models.parser import DeserializeFile
-from pyonir.parser import Page
 from pyonir.utilities import parse_query_model_to_object
 
 
@@ -52,7 +51,6 @@ class Article:
         self.last_updated: datetime = datetime.now()
 
 generic_model = parse_query_model_to_object('title,url,author,date:file_created_on')
-page_model = Page(url='/test')
 article_filepath = os.path.join(os.path.dirname(__file__), 'contents', 'article.md')
 # ==== Tests ====
 

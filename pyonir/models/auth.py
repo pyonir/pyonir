@@ -5,7 +5,6 @@ from typing import Tuple, Any, Dict, Optional
 
 from starlette_wtf import csrf_token
 
-from pyonir.models.page import BaseMedia
 from pyonir.models.user import User, Role, PermissionLevel, Roles, UserSignIn
 from pyonir.pyonir_types import PyonirRequest, PyonirApp, PyonirRestResponse
 
@@ -144,19 +143,29 @@ def format_time_remaining(time_remaining):
         time_str = f"{secs}s"
     return time_str
 
+def get_client_ip(request):
+    # Handle reverse proxy / load balancer headers first
+    forwarded_for = request.headers.get("x-forwarded-for")
+    if forwarded_for:
+        return forwarded_for.split(",")[0].strip()
 
-def client_location(request: PyonirRequest) -> dict:
+def get_geolocation(ip_address: str) -> Dict[str, Any]:
+    """Returns geolocation information for the given IP address."""
+    if not ip_address:
+        return None
+    from requests import get
+    loc = get(f'https://ipapi.co/{ip_address}/json/')
+    loc = loc.json()
+    return loc
+
+def client_location(request: PyonirRequest) -> Optional[dict]:
     """Returns the requester's location information."""
     if not request or not request.headers:
         return None
-    import json, urllib
-    try:
-        r = urllib.request.urlopen('https://ident.me/json').read().decode('utf8')
-        j = json.loads(r)
-        j["device"] = request.headers.get('user-agent')
-        return j
-    except Exception:
-        return None
+    ip = get_client_ip(request)
+    if not ip: return None
+    location = get_geolocation(ip)
+    return location
 
 def jwt_decoder(jwt_token: str, salt: str)-> dict:
     """Returns decoded jwt object"""
@@ -564,8 +573,12 @@ class Auth:
         if not self.request.server_request: return False
         return self.session.get('login_attempts', 0) >= self.SIGNIN_ATTEMPTS
 
-    def get_auth_user(self) -> User:
+    def get_auth_user(self) -> Optional[User]:
         user = self.query_account()
+        if not user:
+            self.response = self.responses.SESSION_EXPIRED
+            self.session.clear()
+            return None
         # update jwt expiration time
         user.save_to_session(self.request, value=self.create_jwt(user.id, user.role))
         self.response = self.responses.ACTIVE_SESSION
@@ -602,19 +615,6 @@ class Auth:
 
         return UserCredentials(email=username, has_session=True)
 
-    async def create_file(self, directory_path: str, file_name: str = None, limit: int = 0) -> Optional[list[str]]:
-        """Saves file(s) into the file system directory"""
-        can_upload = self.user.has_perms([PermissionLevel.WRITE])
-        self.response = self.responses.UNAUTHORIZED
-        if not can_upload: return None
-        files = []
-        for file in self.request.files:
-            if limit and len(files) == limit: break
-            file.filename = file_name or file.filename
-            media_file = await BaseMedia.save_upload(file, directory_path)
-            files.append(media_file)
-        self.response = self.responses.SUCCESS.response(message=f"Successfully uploaded {len(files)}. into {os.path.basename(directory_path)}")
-        return files
 
     def send_email(self):
         """Sends an email to the user."""

@@ -1,12 +1,13 @@
 from __future__ import annotations
 import os
 from dataclasses import dataclass, field
-from typing import Optional, Union, Tuple, Callable, get_type_hints, OrderedDict, TYPE_CHECKING
+from typing import Optional, Union, Tuple, Callable, get_type_hints, OrderedDict, TYPE_CHECKING, Any
 
 from starlette.applications import Starlette
 from starlette.requests import Request as StarletteRequest
 
 from pyonir.models.app import BaseApp
+from pyonir.models.parser import DeserializeFile
 from pyonir.pyonir_types import PyonirRouters, PyonirHooks
 from pyonir.utilities import dict_to_class
 
@@ -28,10 +29,9 @@ class BaseRequest:
     def __init__(self, server_request: Optional[StarletteRequest], app: BaseApp):
         from pyonir.utilities import get_attr
         from pyonir.models.auth import Auth
-        from pyonir.parser import Parsely
 
         self.server_response = None
-        self.file: Optional[Parsely] = None
+        self.file: Optional[DeserializeFile] = None
         self.server_request: StarletteRequest = server_request
         self.raw_path = "/".join(str(self.server_request.url).split(str(self.server_request.base_url))) if server_request else ''
         self.method = self.server_request.method if server_request else 'GET'
@@ -193,16 +193,16 @@ class BaseRequest:
 
     def derive_status_code(self, is_router_method: bool):
         """Create status code for web request based on a file's availability, status_code property"""
-        from pyonir.parser import ParselyFileStatus
+        from pyonir.models.parser import FileStatuses
 
         code = 404
         if self.file.is_router:
             # If the file is a router method, we assume it is valid
             code = 200
-        elif self.file.status in (ParselyFileStatus.PROTECTED, ParselyFileStatus.FORBIDDEN):
+        elif self.file.file_status in (FileStatuses.PROTECTED, FileStatuses.FORBIDDEN):
             self.file.data = {'template': '40x.html', 'content': f'Unauthorized access to this resource.', 'url': self.url, 'slug': self.slug}
             code = 401
-        elif self.file.file_status == ParselyFileStatus.PUBLIC or is_router_method:
+        elif self.file.file_status == FileStatuses.PUBLIC or is_router_method:
             code = 200
         self.status_code = code #200 if self.file.file_exists or is_router_method else 404
 
@@ -237,8 +237,8 @@ class BaseRequest:
         application's file system. If no matching file or virtual route is found,
         a 404 page is returned.
         """
-        from pyonir.parser import Parsely
         from pyonir.models.app import BaseApp
+        from pyonir.models.page import BasePage, DeserializeFile
         path_str = path_str or self.path
         is_home = path_str == '/'
         ctx_route, ctx_paths = app.request_paths or ('', [])
@@ -271,9 +271,9 @@ class BaseRequest:
 
             for candidate in (category_index, single_page, single_protected_page):
                 if os.path.exists(candidate):
-                    return app, Parsely(candidate, app.app_ctx)
+                    return app, DeserializeFile(candidate, app_ctx=app.app_ctx)
 
-        errorpage = Parsely('404_ERROR', app.app_ctx)
+        errorpage = DeserializeFile('404_ERROR')
         errorpage.data = self.render_error()
         return app, errorpage
 
@@ -286,14 +286,33 @@ class BaseRequest:
         return nheaders
 
     @staticmethod
-    def get_params(url):
+    def get_params(url, as_dict=False):
         import urllib
         from pyonir.utilities import dict_to_class
         args = {params.split('=')[0]: urllib.parse.unquote(params.split("=").pop()) for params in
                 url.split('&') if params != ''}
         if args.get('model'): del args['model']
-        return dict_to_class(args, 'query_params')
+        return args if as_dict else dict_to_class(args, 'query_params')
 
+    def process_resolver(self, request: 'BaseRequest') -> Optional[Union[callable, Any]]:
+        """Updates request data a callable method to execute during request."""
+        from pyonir import Site
+        from pyonir.utilities import get_attr
+        resolver_obj = self.file.data.get('@resolvers', {})
+        resolver_action = resolver_obj.get(request.method)
+        if not resolver_action: return
+        resolver_path = resolver_action.get('call')
+        del resolver_action['call']
+
+        app_plugin = list(filter(lambda p: p.name == resolver_path.split('.')[0], Site.activated_plugins))
+        app_plugin = app_plugin[0] if len(app_plugin) else Site
+        resolver = app_plugin.reload_resolver(resolver_path)
+
+        request.type = get_attr(resolver_action, 'headers.accept') or request.type
+        request.form.update(resolver_action)
+        if not resolver:
+            request.auth.response = request.auth.responses.ERROR.response(message=f"Unable to resolve endpoint")
+        return resolver
 
 class BaseServer(Starlette):
 
@@ -512,10 +531,10 @@ class BaseServer(Starlette):
 
         # Preprocess routes or resolver endpoint from file
         app_ctx.apply_virtual_routes(pyonir_request)
-        await req_file.process_resolver(pyonir_request)
+        resolver = pyonir_request.process_resolver(pyonir_request)
         # pyonir_request.process_resolver(pyonir_request)
 
-        route_func = dec_func if not callable(req_file.resolver) else req_file.resolver
+        route_func = dec_func if not callable(resolver) else resolver
 
         # Check resolver route security
         security = pyonir_request.auth.security.check(pyonir_request.auth)
@@ -625,6 +644,7 @@ class BaseServer(Starlette):
             app_name=app.name,
             app_name_id=app.name.replace(' ', '_').lower(),
             domain=app.domain_name,
+            is_dev=app.is_dev,
             is_secure=app.is_secure,
             ssl_cert_file=app.ssl_cert_file,
             ssl_key_file=app.ssl_key_file,

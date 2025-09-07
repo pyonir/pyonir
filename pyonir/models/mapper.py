@@ -1,4 +1,5 @@
-from typing import get_type_hints
+from dataclasses import is_dataclass
+from typing import get_type_hints, Any
 from typing import get_origin, get_args, Union, Callable, Mapping, Iterable, Generator
 from collections.abc import Iterable as ABCIterable, Mapping as ABCMapping, Generator as ABCGenerator
 
@@ -37,7 +38,7 @@ def unwrap_optional(tp):
     if origin_tp is Union:
         args = [unwrap_optional(a) for a in get_args(tp) if a is not type(None)]
         if len(args):
-            return args[0]
+            return [arg for arg,_ in args]
     return tp, None
 
 def is_callable_type(tp):
@@ -67,8 +68,9 @@ def collect_type_hints(t):
         pass
     return hints
 
-def add_props_to_object(res, data: dict, file_src: object =None):
-    itr = [*data.keys(), *(file_src.default_file_attributes if file_src and hasattr(file_src, 'default_file_attributes') else [] )]
+def add_props_to_object(res, data: dict, file_src: object =None, attrs: list = None):
+    """Add all properties from data and file_src to res object"""
+    itr = [*data.keys(), *(attrs or [])]
     for key in itr:
         if key[0] == '_': continue
         # if frozen and not hasattr(res, key): continue
@@ -76,6 +78,23 @@ def add_props_to_object(res, data: dict, file_src: object =None):
         value = get_attr(data, key) or get_attr(file_src, key)
         setattr(res, key, value)
     return res
+
+def required_parameters(cls):
+    import inspect
+    sig = inspect.signature(cls.__init__)
+    required = []
+    for name, param in sig.parameters.items():
+        if name in ("self","args","kwargs"):  # skip self, *args, **kwargs
+            continue
+        if param.default is inspect.Parameter.empty:
+            required.append(name)
+    return required
+
+def set_attr(target: object, attr: str, value: Any):
+    if isinstance(target, dict):
+        target.update({attr: value})
+    else:
+        setattr(target, attr, value)
 
 def cls_mapper(file_obj: object, cls: Union[type, list[type]], from_request=None):
     """Recursively map dict-like input into `cls` with type-safe field mapping."""
@@ -98,6 +117,7 @@ def cls_mapper(file_obj: object, cls: Union[type, list[type]], from_request=None
     if is_scalar_type(cls):
         return cls(file_obj)
 
+    is_dclass = is_dataclass(cls) or len(required_parameters(cls)) > 0
     is_generic_type = cls.__name__ == 'GenericQueryModel'
     param_type_map = collect_type_hints(cls)
     data = get_attr(file_obj, 'data') or {}
@@ -111,62 +131,70 @@ def cls_mapper(file_obj: object, cls: Union[type, list[type]], from_request=None
     if nested_value:
         data.update(**nested_value)
 
-    cls_args = cls() if is_generic_type else {}
+    cls_args = {} if from_request or is_dclass else cls()
     for name, hint in param_type_map.items():
         mapper_name = get_attr(mapper_keys, name, None) or name
         if name.startswith("_") or name == "return":
             continue
 
         actual_type, *mapable = unwrap_optional(hint)
-        value = get_attr(data, name) or get_attr(file_obj, name)
+        value = get_attr(data, name) or get_attr(file_obj, name) or get_attr(cls, name)
         value = (get_attr(data, mapper_name) or get_attr(file_obj, mapper_name)) if not value else value
         if value is None:
-            cls_args[name] = None
+            set_attr(cls_args, name, value)
             continue
         # Handle Special Pyonir objects
         if from_request and hint in (PyonirApp, PyonirRequest):
             from pyonir import Site
             value = Site if hint == PyonirApp else from_request
-            cls_args[name] = value
+            set_attr(cls_args, name, value)
             continue
         if from_request and hint == value:
-            cls_args[name] = None
+            set_attr(cls_args, name, value)
             continue
 
         # Handle containers
-        if is_mappable_type(actual_type) and len(mapable) and mapable[0]:
+        custom_mapper_fn = getattr(cls, f'map_to_{name}', None)
+        if custom_mapper_fn:
+            value = custom_mapper_fn(value)
+        elif is_scalar_type(actual_type):
+            value = actual_type(value)
+        elif is_callable_type(actual_type) or callable(value):
+            pass
+        elif is_mappable_type(actual_type) and len(mapable) and mapable[0]:
             key_type, value_types = mapable
-            vtype = value_types[0] if len(value_types) == 1 else None
-            cls_args[name] = {key_type(k): cls_mapper(v, vtype or value_types) for k, v in value.items()} #if vtype else actual_type(value)
-
+            vtype = value_types[0] if len(value_types)==1 else None
+            value = {key_type(k): cls_mapper(v, vtype or value_types) for k, v in value.items()}
         elif is_iterable(actual_type):
             itypes = mapable[0] if len(mapable) == 1 else mapable
             itype = itypes[0] if itypes and len(itypes) == 1 else None
-            cls_args[name] = [cls_mapper(v, itype) for v in value] if itype else value if isinstance(value, actual_type) else actual_type(value)
-
-        elif is_callable_type(actual_type):
-            cls_args[name] = value
-
-        elif callable(value) or isinstance(value, actual_type):
-            cls_args[name] = value
+            value = [cls_mapper(v, itype) for v in value] if itype else value if isinstance(value, actual_type) else actual_type(value)
+        elif isinstance(value, actual_type):
+            pass
         elif is_custom_class(actual_type):
-            custom_mapper_fn = getattr(cls, f'map_to_{name}', None)
-            cls_args[name] = cls_mapper(value, actual_type) if not custom_mapper_fn else custom_mapper_fn(value)
-
+            value = cls_mapper(value, actual_type)
         else:
             try:
-                cls_args[name] = actual_type(value)
+                value = actual_type(value)
             except Exception as e:
-                cls_args[name] = value # fallback if constructor fails
+                pass
+        set_attr(cls_args, name, value)
 
     # Methods passed from request are returned to be called later
     if callable(cls) and from_request:
         return cls_args
 
-    res = cls_args if is_generic_type else cls(**cls_args)
+    res = cls(**cls_args) if is_dclass else cls_args
     if is_generic_type:
         data = file_obj if not data and isinstance(file_obj, dict) else data
-        res = add_props_to_object(res, data, file_src=file_obj)
+        keys = list(cls.__dict__.keys()) + ['file_name','file_created_on']
+        for key in keys:
+            if key[0] == '_': continue
+            _key = mapper_keys.get(key, key)
+            value = get_attr(data, _key or key) or get_attr(file_obj, _key or key)
+            set_attr(res, key, value)
+        return res
+        # res = add_props_to_object(res, data, file_src=file_obj, attrs=mapper_keys)
 
     # Pass additional fields that are not specified on model
     if not is_frozen:
@@ -178,7 +206,6 @@ def cls_mapper(file_obj: object, cls: Union[type, list[type]], from_request=None
             setattr(res, key, value)
 
     return res
-
 
 def dict_to_class(data: dict, name: Union[str, callable] = None, deep: bool = True) -> object:
     """

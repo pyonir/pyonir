@@ -46,7 +46,6 @@ def get_module(pkg_path: str, callable_name: str) -> tuple[Any, Callable]:
     func = get_attr(module, callable_name) or get_attr(module, module.__name__)
     return module, func
 
-
 def get_version(toml_file: str) -> str:
     import re
     from pathlib import Path
@@ -56,7 +55,6 @@ def get_version(toml_file: str) -> str:
     except Exception as e:
         print('Error: unable to parse pyonir version from project toml',e)
         return 'UNKNOWN'
-
 
 def load_env(path=".env") -> EnvConfig:
     import warnings
@@ -98,3 +96,26 @@ def load_env(path=".env") -> EnvConfig:
             set_nested(env_data, keys, value)
 
     return dict_to_class(env_data, EnvConfig)
+
+def load_resolver(relative_module_path: str, base_path: str = '', from_system: bool = False):
+    if '.' not in relative_module_path: return None
+    pkg = relative_module_path.split('.')
+    if from_system: base_path = os.path.dirname(base_path)
+    meth_name = pkg.pop()
+    pkg_path = ".".join(pkg)
+    module_base = pkg[:-1]
+    module_name = pkg[-1]
+    _pkg_dpath = os.path.join(base_path, *module_base) + '.py' # is a /path/to/module
+    _module_dpath = os.path.join(base_path, *module_base, module_name+'.py') # is a /path/to/module.py
+    _module_pkg_dpath = os.path.join(base_path, *pkg, '__init__.py') # is a /path/to/module/__init__.py
+    if os.path.exists(_pkg_dpath):
+        pkg_path = ".".join(module_base)
+        meth_name = f"{module_name}.{meth_name}"
+    elif os.path.exists(_module_dpath):
+        meth_name = f"{module_name}.{meth_name}"
+    elif os.path.exists(_module_pkg_dpath):
+        pass
+    else:
+        return None
+    module_callable = import_module(pkg_path, callable_name=meth_name)
+    return module_callable

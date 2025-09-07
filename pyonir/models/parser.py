@@ -2,8 +2,8 @@ import json
 import os
 import re
 
-from pyonir.core import PyonirCollection
-from pyonir.utilities import get_attr, import_module, parse_query_model_to_object
+from pyonir.models.mapper import cls_mapper
+from pyonir.utilities import get_attr, import_module, parse_query_model_to_object, get_file_created
 
 REG_ILN_LIST = r'([-$@\s*=\w.]+)(\:-)(.*)'
 REG_MAP_LST = r'(^[-$@\s*=\w.]+)(\:[`:`-]?)(.*)'
@@ -33,31 +33,88 @@ class FileStatuses(str):
     PUBLIC = 'public'
     """Access external and internal with READ and WRITE."""
 
+def parse_markdown(content, kwargs):
+    """Parse markdown string using mistletoe with htmlattributesrenderer"""
+    import html, mistletoe
+    # from mistletoe.html_attributes_renderer import HTMLAttributesRenderer
+    if not content: return content
+    res = mistletoe.markdown(content)
+    # res = mistletoe.markdown(content, renderer=HTMLAttributesRenderer)
+    return html.unescape(res)
+
 
 class DeserializeFile:
     """Parsely is a static file parser"""
-    default_file_attributes = ['file_name','file_path','file_dirpath','file_data_type','file_ctx','file_created_on']
+    _routes_filename = '.routes.md'
+    _routes_dirname = 'pages'
+    """Directory name that contains page files served as file based routing"""
 
-    def __init__(self, file_path: str, contents_dirpath: str = None):
+    def __lt__(self, other: 'DeserializeFile') -> bool:
+        """Compares two DeserializeFile instances based on their created_on attribute."""
+        if not isinstance(other, DeserializeFile):
+            return True
+        return self.file_created_on < other.file_created_on
 
-        name, ext = os.path.splitext(file_path)
+    def __init__(self, file_path: str, app_ctx: 'AppCtx' = None, model: object = None):
+        name, ext = os.path.splitext(os.path.basename(file_path))
+        self.app_ctx = app_ctx
         self._cursor = None
+        self.schema = model
         self._blob_keys = []
-        self.file_ext = ext[1:]
+        self.file_ext = ext
         self.file_name = name
         self.file_path = str(file_path)
         self.file_dirpath = os.path.dirname(file_path) # path to files contents directory
-        self.file_contents_dirpath = contents_dirpath or self.file_dirpath
+        self.file_dirname = os.path.basename(self.file_dirpath)
+        self.file_exists = os.path.exists(file_path)
         # file data processing
         self.file_contents = ''
         self.file_lines = None
         self.file_line_count = None
         self.data = {}
-        self.deserializer()
 
+        # Page specific attributes
+        ctx_name, ctx_url, contents_dirpath, ssg_path = app_ctx or ('', '', '', '')
+        contents_relpath = file_path.replace(contents_dirpath,'').lstrip('/') if contents_dirpath else ''
+        contents_dirname = contents_relpath.split('/')[0]
+        is_page = contents_dirname == self._routes_dirname
+        self.file_contents_dirpath = contents_dirpath or self.file_dirpath
+        self.is_page = is_page
+        self.is_home = is_page and contents_relpath == f'{self._routes_dirname}/index'
+        self.is_router = self.file_path.endswith(self._routes_filename)
+        # page attributes
+        # if is_page:
+        surl = re.sub(fr'\b{contents_dirname}/\b|\bindex\b', '', contents_relpath) if is_page else contents_relpath
+        slug = f'{ctx_url or ""}/{surl}'.lstrip('/').rstrip('/').lower().replace(self.file_ext, '')
+        url = '/' if self.is_home else '/' + slug
+        self.data['url']  = url
+        self.data['slug'] = slug
+
+        # cache
+        # if EmbeddedTypes.get(self.file_path):
+        #     print(f'Debug: returning cached lookup for {self.file_path}')
+        #     self.data = EmbeddedTypes.get(self.file_path).data
+        #     return
+
+        # process file data
+        self.deserializer()
         # Post-processing
         self.apply_filters()
+        # EmbeddedTypes[self.file_path] = self
+    @property
+    def file_modified_on(self):  # Datetime
+        from datetime import datetime
+        import pytz
+        return datetime.fromtimestamp(os.path.getmtime(self.file_path), tz=pytz.UTC) if self.file_exists else None
 
+    @property
+    def file_created_on(self):  # Datetime
+        return get_file_created(self.file_path) if self.file_exists else None
+
+    @property
+    def file_status(self) -> str:  # String
+        return FileStatuses.PROTECTED if self.file_name.startswith('_') else \
+            FileStatuses.FORBIDDEN if self.file_name.startswith('.') else FileStatuses.PUBLIC
 
     def apply_template(self, prop_names: list = None, context: dict = None):
         """Render python format strings for data property values"""
@@ -85,11 +142,11 @@ class DeserializeFile:
 
     def deserializer(self):
         """Deserialize file line strings into map object"""
-        if self.file_ext == 'md' or self.file_contents:
+        if self.file_ext == '.md' or self.file_contents:
             self.process_setup()
             if self.file_line_count > 0:
                 self.process_line(0, output_data=self.data)
-        elif self.file_ext == 'json':
+        elif self.file_ext == '.json':
             self.data = self.open_file(self.file_path, rtn_as='json') or {}
 
         return True
@@ -262,7 +319,7 @@ class DeserializeFile:
             return True
         elif valuestr.strip().startswith('$'):
             if valuestr.startswith('$') and '{' in valuestr:
-                valuestr = self.process_site_filter('pyformat', valuestr if valuestr.startswith(LOOKUP_DIR_PREFIX) else valuestr[1:])
+                valuestr = self.process_site_filter('pyformat', (valuestr if valuestr.startswith(LOOKUP_DIR_PREFIX) else valuestr[1:]), self.__dict__)
             return self.process_lookups(valuestr)
 
         return valuestr.lstrip('$')
@@ -338,6 +395,8 @@ class DeserializeFile:
         def parse_ref_to_files(filepath, as_dir=0):
 
             if as_dir:
+                from pyonir.models.database import BaseFSQuery
+
                 # use proper app context for path reference outside of scope is always the root level
                 # Ref parameters with model will return a generic model to represent the data value
                 model = None
@@ -348,17 +407,14 @@ class DeserializeFile:
                         model = import_module(pkg, callable_name=mod)
                     if not model:
                         model = parse_query_model_to_object(generic_model_properties)
-
-                collection = PyonirCollection.query(filepath,
-                                    app_ctx=None,
-                                    force_all=return_all_files,
-                                    model=model,
-                                    exclude_names=(self.file_name + '.' + self.file_ext, 'index.md')
-                                                  )
-                data = collection.paginated_collection(query_params)
+                collection = BaseFSQuery(filepath, app_ctx=self.app_ctx,
+                                      model=model,
+                                      exclude_names=(self.file_name + self.file_ext, 'index.md'),
+                                      force_all=return_all_files)
+                data = collection.set_params(query_params).paginated_collection()
             else:
                 rtn_key = has_attr_path or 'data'
-                p = DeserializeFile(filepath)
+                p = DeserializeFile(filepath, app_ctx=self.app_ctx)
                 data = get_attr(p, rtn_key) or p
             return data
 
@@ -384,6 +440,59 @@ class DeserializeFile:
                 })
                 return None
             return parse_ref_to_files(lookup_fpath, os.path.isdir(lookup_fpath))
+        return valuestr
+
+    def prev_next(self):
+        from pyonir.models.database import BaseFSQuery
+        if self.file_dirname != 'pages' or self.is_home:
+            return None
+        return BaseFSQuery.prev_next(self)
+
+    def output_html(self, req: 'PyonirRequest') -> str:
+        """Renders and html output"""
+        from pyonir import Site
+        from pyonir.models.page import BasePage
+        # from pyonir.models.mapper import add_props_to_object
+        # refresh_model = get_attr(req, 'query_params.rmodel')
+        page = cls_mapper(self, self.schema or BasePage)
+        Site.apply_globals({'prevNext': self.prev_next, 'page': page})
+        html = Site.TemplateEnvironment.get_template(page.template).render()
+        Site.TemplateEnvironment.block_pull_cache.clear()
+        return html
+
+    def generate_static_file(self, page_request=None, rtn_results=False):
+        """Generate target file as html or json. Takes html or json content to save"""
+        count = 0
+        html_data = None
+        json_data = None
+
+        def render_save():
+            # -- Render Content --
+            html_data = self.output_html(page_request)
+            json_data = self.output_json(as_str=False)
+            # -- Save contents --
+            self.save(path_to_static_html, html_data, self.file_ssg_html_dirpath)
+            self.save(path_to_static_api, json_data, self.file_ssg_api_dirpath)
+            return 2
+
+        # -- Get static paths --
+        path_to_static_api = os.path.join(self.file_ssg_api_dirpath, "index.json")
+        path_to_static_html = os.path.join(self.file_ssg_html_dirpath, "index.html")
+
+        count += render_save()
+
+        if page_request:
+            for pgnum in range(1, page_request.paginate):
+                path_to_static_html = os.path.join(self.file_ssg_html_dirpath, str(pgnum + 1), "index.html")
+                path_to_static_api = os.path.join(self.file_ssg_api_dirpath, str(pgnum + 1), "index.json")
+                page_request.query_params['pg'] = pgnum + 1
+                count += render_save()
+
+        # -- Return contents without saving --
+        if rtn_results:
+            return html_data, json_data
+
+        return count
 
 def update_nested(attr_path, data_src: dict, data_merge=None, data_update=None, find=None) -> tuple[bool, dict]:
     """
@@ -530,3 +639,4 @@ def serializer(json_map: any, namespace: list = [], inline_mode: bool = False, f
         if multi_line_keys:
             [lines.append(f"{mlk}\n{mlv}") for mlk, mlv in multi_line_keys]
         return "\n".join(lines)
+

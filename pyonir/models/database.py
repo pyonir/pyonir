@@ -5,6 +5,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Optional, Type, Iterable, Callable, Union, Iterator, Generator
 
+from sortedcontainers import SortedList
+
+from pyonir.models.mapper import cls_mapper
+from pyonir.models.parser import DeserializeFile
 from pyonir.models.schemas import BaseSchema
 from pyonir.pyonir_types import PyonirApp, AppCtx
 
@@ -14,9 +18,9 @@ class BasePagination:
     max_count: int = 0
     curr_page: int = 0
     page_nums: list[int, int] = field(default_factory=list)
-    items: list['Parsely'] = field(default_factory=list)
+    items: list['DeserializeFile'] = field(default_factory=list)
 
-    def __iter__(self) -> Iterator['Parsely']:
+    def __iter__(self) -> Iterator['DeserializeFile']:
         return iter(self.items)
 
 class DatabaseService(ABC):
@@ -166,6 +170,149 @@ class DatabaseService(ABC):
 
 
 
+class BaseFSQuery:
+    """Base class for querying files and directories"""
+    _cache: Dict[str, Any] = {}
+
+    def __init__(self, query_path: str,
+                app_ctx: AppCtx = None,
+                model: Optional[object] = None,
+                name_pattern: str = None,
+                exclude_dirs: tuple = None,
+                exclude_names: tuple = None,
+                force_all: bool = True) -> None:
+
+        self.query_path = query_path
+        self.sort_by: str = 'file_created_on'
+        self.limit: int = 0
+        self.max_count: int = 0
+        self.curr_page: int = 0
+        self.page_nums: list[int, int] = None
+        self.where_key: str = None
+        self.sorted_files: SortedList = None
+        self.files: Generator[DeserializeFile] = query_fs(query_path,
+                              app_ctx = app_ctx,
+                              model = model,
+                              name_pattern = name_pattern,
+                              exclude_dirs = exclude_dirs,
+                              exclude_names = exclude_names,
+                              force_all = force_all)
+
+    def set_params(self, params: dict):
+        for k in ['sort_by', 'limit', 'curr_page','max_count','page_nums']:
+            if k in params:
+                if k in ('limit', 'curr_page', 'max_count') and params[k]:
+                    params[k] = int(params[k])
+                setattr(self, k, params[k])
+        return self
+
+    def paginated_collection(self)-> Optional[BasePagination]:
+        """Paginates a list into smaller segments based on curr_pg and display limit"""
+        from pyonir import Site
+        from sortedcontainers import SortedList
+        from pyonir.models.utils import get_attr
+        # from pyonir.core import PyonirRequest
+        if not Site: return None
+        # request: PyonirRequest = Site.TemplateEnvironment.globals['request'] if Site.TemplateEnvironment else None
+        # if not self.limit: return None
+        # req_pg = self.get_attr(request.query_params, 'pg') or 1
+        if self.sort_by:
+            self.sorted_files = SortedList(self.files, lambda x: get_attr(x, self.sort_by) or x)
+        if self.where_key:
+            where_key = [self.parse_params(ex) for ex in self.where_key.split(',')]
+            self.sorted_files = SortedList(self.where(**where_key[0]), lambda x: get_attr(x, self.sort_by))
+        force_all = not self.limit
+
+        self.max_count = len(self.sorted_files)
+        page_num = 0 if force_all else int(self.curr_page)
+        start = (page_num * self.limit) - self.limit
+        end = (self.limit * page_num)
+        pg = (self.max_count // self.limit) + (self.max_count % self.limit > 0) if self.limit > 0 else 0
+        pag_data = self.paginate(start=start, end=end, reversed=True) if not force_all else self.sorted_files
+
+        return BasePagination(**{
+            'curr_page': page_num,
+            'page_nums': [n for n in range(1, pg + 1)] if pg else None,
+            'limit': self.limit,
+            'max_count': self.max_count,
+            'items': list(pag_data)
+        })
+
+    @staticmethod
+    def parse_params(param: str):
+        k, _, v = param.partition(':')
+        op = '='
+        is_eq = lambda x: x[1]==':'
+        if v.startswith('>'):
+            eqs = is_eq(v)
+            op = '>=' if eqs else '>'
+            v = v[1:] if not eqs else v[2:]
+        elif v.startswith('<'):
+            eqs = is_eq(v)
+            op = '<=' if eqs else '<'
+            v = v[1:] if not eqs else v[2:]
+            pass
+        else:
+            pass
+        return {"attr": k.strip(), "op":op, "value":BaseCollection.coerce_bool(v)}
+
+
+    def paginate(self, start: int, end: int, reversed: bool = False):
+        """Returns a slice of the items list"""
+        sl = self.sorted_files.islice(start, end, reverse=reversed) if end else self.sorted_files
+        return sl
+
+    @staticmethod
+    def prev_next(input_file: 'DeserializeFile'):
+        """Returns the previous and next files relative to the input file"""
+        from pyonir.models.mapper import dict_to_class
+        prv = None
+        nxt = None
+        pc = BaseFSQuery(input_file.file_dirpath)
+        _collection = iter(pc.files)
+        for cfile in _collection:
+            if cfile.file_status == 'hidden': continue
+            if cfile.file_path == input_file.file_path:
+                nxt = next(_collection, None)
+                break
+            else:
+                prv = cfile
+        return dict_to_class({"next": nxt, "prev": prv})
+
+    def find(self, value: any, from_attr: str = 'file_name'):
+        """Returns the first item where attr == value"""
+        return next((item for item in self.collection if getattr(item, from_attr, None) == value), None)
+
+    def where(self, attr, op="=", value=None):
+        """Returns a list of items where attr == value"""
+        # if value is None:
+        #     # assume 'op' is actually the value if only two args were passed
+        #     value = op
+        #     op = "="
+
+        def match(item):
+            actual = self.get_attr(item, attr)
+            if not hasattr(item, attr):
+                return False
+            if actual and not value:
+                return True # checking only if item has an attribute
+            elif op == "=":
+                return actual == value
+            elif op == "in" or op == "contains":
+                return actual in value if actual is not None else False
+            elif op == ">":
+                return actual > value
+            elif op == "<":
+                return actual < value
+            elif op == ">=":
+                return actual >= value
+            elif op == "<=":
+                return actual <= value
+            elif op == "!=":
+                return actual != value
+            return False
+        if isinstance(attr, Callable): match = attr
+        return filter(match, list(self.sorted_files or self.files))
 
 class BaseCollection:
     SortedList = None
@@ -181,7 +328,7 @@ class BaseCollection:
 
         self._query_path = ''
         key = lambda x: self.get_attr(x, sort_key or 'file_created_on') or self.get_attr(x, 'created_on') or x
-        # items = list(items)
+        items = list(items)
         try:
             self.collection = SortedList(items, key=key)
         except Exception as e:
@@ -226,7 +373,7 @@ class BaseCollection:
                 sort_key: str = None):
         """queries the file system for list of files"""
         from pyonir.utilities import query_files
-        gen_data = query_files(query_path, app_ctx=app_ctx, model=model, name_pattern=name_pattern,
+        gen_data = query_fs(query_path, app_ctx=app_ctx, model=model, name_pattern=name_pattern,
                                exclude_dirs=exclude_dirs, exclude_names=exclude_names, force_all=force_all)
         return cls(gen_data, sort_key=sort_key)
 
@@ -355,20 +502,20 @@ def query_fs(abs_dirpath: str,
                 force_all: bool = True) -> Generator:
     """Returns a generator of files from a directory path"""
     from pathlib import Path
-    from pyonir.parser import Parsely, Page
-    from pyonir.models.page import BaseMedia
+    from pyonir.models.page import BasePage, DeserializeFile
+    from pyonir.models.media import BaseMedia
 
     # results = []
     hidden_file_prefixes = ('.', '_', '<', '>', '(', ')', '$', '!', '._')
     allowed_content_extensions = ('prs', 'md', 'json', 'yaml')
-    def get_datatype(filepath) -> Union[object, Parsely, BaseMedia]:
+    def get_datatype(filepath) -> Union[object, BasePage, BaseMedia]:
         if model == 'path': return str(filepath)
         if model == BaseMedia: return BaseMedia(filepath)
-        pf = Parsely(str(filepath), app_ctx=app_ctx, model=model)
+        pf = DeserializeFile(str(filepath), app_ctx=app_ctx, model=model)
         if model == 'parsely': return pf
-        if pf.is_page and not model: pf.schema = Page
-        res = pf.map_to_model(pf.schema)
-        return res if pf.schema else pf
+        if pf.is_page and not model: pf.schema = BasePage
+        res = cls_mapper(pf, pf.schema) if pf.schema else pf
+        return res
 
     def skip_file(file_path: Path) -> bool:
         """Checks if the file should be skipped based on exclude_dirs and exclude_file"""
@@ -379,5 +526,5 @@ def query_fs(abs_dirpath: str,
         return is_excluded_file or is_private_file or not is_allowed_file
 
     for path in Path(abs_dirpath).rglob(name_pattern or "*"):
-        if skip_file(path): continue
+        if skip_file(path) or path.is_dir(): continue
         yield get_datatype(path)

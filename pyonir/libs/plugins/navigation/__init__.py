@@ -1,9 +1,9 @@
-import dataclasses
 import os
+from dataclasses import dataclass
 
 from pyonir.core import PyonirRequest, PyonirApp
 
-@dataclasses.dataclass
+@dataclass
 class Menu:
     _orm_options = {'mapper_key': 'menu'}
     url: str
@@ -64,13 +64,14 @@ class Navigation:
                 pass
 
     def build_navigation(self, app: PyonirApp):
-        from pyonir.utilities import query_files
+        # from pyonir.utilities import query_files
+        from pyonir.models.database import query_fs
         from collections import defaultdict
         if app is None: return None
         assert hasattr(app, 'pages_dirpath'), "Get menus 'app' parameter does not have a pages dirpath property"
         menus = {}
         submenus = {}
-        file_list = query_files(app.pages_dirpath, app_ctx=app.app_ctx, model=Menu)
+        file_list = query_fs(app.pages_dirpath, app_ctx=app.app_ctx, model=Menu)
 
         def group_by_menu(items):
             grouped = defaultdict(list)

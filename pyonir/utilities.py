@@ -154,9 +154,10 @@ def cls_mapper(file_obj: object, cls: typing.Callable, from_request: 'PyonirRequ
 
 def process_contents(path, app_ctx=None, file_model: any = None) -> object:
     """Deserializes all files within the contents directory"""
+    from pyonir.models.database import query_fs
     key = os.path.basename(path)
     res = type(key, (object,), {"__name__": key})() # generic map
-    pgs = query_files(path, app_ctx=app_ctx, model=file_model)
+    pgs = query_fs(path, app_ctx=app_ctx, model=file_model)
     for pg in pgs:
         name = getattr(pg, 'file_name')
         setattr(res, name, pg.map_to_model(None) if hasattr(pg, 'map_to_model') else pg)
@@ -363,51 +364,50 @@ def sortBykey(listobj, sort_by_key="", limit="", reverse=True):
 
 def parse_query_model_to_object(model_fields: str) -> object:
     if not model_fields: return None
-    from pyonir.parser import Parsely
     mapper = {}
-    params = {"_orm_options": {'mapper': mapper},'file_created_on': None}
+    params = {"_orm_options": {'mapper': mapper},'file_created_on': None, 'file_name': None}
     for k in model_fields.split(','):
         if ':' in k:
             k,_, src = k.partition(':')
             mapper[k] = src
         params[k] = None
     return type('GenericQueryModel', (object,), params)
-
-def query_files(abs_dirpath: str,
-                app_ctx: AppCtx = None,
-                model: Union[object, str] = None,
-                name_pattern: str = None,
-                exclude_dirs: tuple = None,
-                exclude_names: tuple = None,
-                force_all: bool = True) -> Generator:
-    """Returns a generator of files from a directory path"""
-    from pathlib import Path
-    from pyonir.parser import Parsely, Page
-    from pyonir.models.media import BaseMedia
-
-    # results = []
-    hidden_file_prefixes = ('.', '_', '<', '>', '(', ')', '$', '!', '._')
-    allowed_content_extensions = ('prs', 'md', 'json', 'yaml')
-    def get_datatype(filepath) -> Union[object, Parsely, BaseMedia]:
-        if model == 'path': return str(filepath)
-        if model == BaseMedia: return BaseMedia(filepath)
-        pf = Parsely(str(filepath), app_ctx=app_ctx, model=model)
-        if model == 'parsely': return pf
-        if pf.is_page and not model: pf.schema = Page
-        res = pf.map_to_model(pf.schema)
-        return res if pf.schema else pf
-
-    def skip_file(file_path: Path) -> bool:
-        """Checks if the file should be skipped based on exclude_dirs and exclude_file"""
-        is_private_file = file_path.name.startswith(hidden_file_prefixes)
-        is_excluded_file = exclude_names and file_path.name in exclude_names
-        is_allowed_file = file_path.suffix[1:] in allowed_content_extensions
-        if not is_private_file and force_all: return False
-        return is_excluded_file or is_private_file or not is_allowed_file
-
-    for path in Path(abs_dirpath).rglob(name_pattern or "*"):
-        if skip_file(path): continue
-        yield get_datatype(path)
+#
+# def query_files(abs_dirpath: str,
+#                 app_ctx: AppCtx = None,
+#                 model: Union[object, str] = None,
+#                 name_pattern: str = None,
+#                 exclude_dirs: tuple = None,
+#                 exclude_names: tuple = None,
+#                 force_all: bool = True) -> Generator:
+#     """Returns a generator of files from a directory path"""
+#     from pathlib import Path
+#     from pyonir.parser import Parsely, Page
+#     from pyonir.models.media import BaseMedia
+#
+#     # results = []
+#     hidden_file_prefixes = ('.', '_', '<', '>', '(', ')', '$', '!', '._')
+#     allowed_content_extensions = ('prs', 'md', 'json', 'yaml')
+#     def get_datatype(filepath) -> Union[object, Parsely, BaseMedia]:
+#         if model == 'path': return str(filepath)
+#         if model == BaseMedia: return BaseMedia(filepath)
+#         pf = Parsely(str(filepath), app_ctx=app_ctx, model=model)
+#         if model == 'parsely': return pf
+#         if pf.is_page and not model: pf.schema = Page
+#         res = pf.map_to_model(pf.schema)
+#         return res if pf.schema else pf
+#
+#     def skip_file(file_path: Path) -> bool:
+#         """Checks if the file should be skipped based on exclude_dirs and exclude_file"""
+#         is_private_file = file_path.name.startswith(hidden_file_prefixes)
+#         is_excluded_file = exclude_names and file_path.name in exclude_names
+#         is_allowed_file = file_path.suffix[1:] in allowed_content_extensions
+#         if not is_private_file and force_all: return False
+#         return is_excluded_file or is_private_file or not is_allowed_file
+#
+#     for path in Path(abs_dirpath).rglob(name_pattern or "*"):
+#         if skip_file(path): continue
+#         yield get_datatype(path)
 
 
 
@@ -470,13 +470,12 @@ def copy_assets(src: str, dst: str, purge: bool = True):
 def json_serial(obj):
     """JSON serializer for nested objects not serializable by default jsonify"""
     from datetime import datetime
-    from .parser import Parsely
     from .models.parser import DeserializeFile
     if isinstance(obj, datetime):
         return obj.isoformat()
     elif isinstance(obj, Generator) or hasattr(obj, 'mapping'):
         return list(obj)
-    elif isinstance(obj, (Parsely, DeserializeFile)):
+    elif isinstance(obj, DeserializeFile):
         return obj.data
     elif hasattr(obj, 'to_dict'):
         return obj.to_dict()

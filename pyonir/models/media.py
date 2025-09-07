@@ -56,6 +56,7 @@ class BaseMedia(BaseFile):
         '''
         from PIL import Image
         from pyonir import Site
+        from pathlib import Path
         raw_img = self.open_image()
         if sizes is None:
             sizes = [Site.THUMBNAIL_DEFAULT]
@@ -76,6 +77,7 @@ class BaseMedia(BaseFile):
     def decode_filename(encoded_filename: str) -> Optional[dict]:
         """ Reverse of encode_filename. """
         from urllib.parse import parse_qs
+        import base64
 
         try:
             # restore padding
@@ -93,6 +95,8 @@ class BaseMedia(BaseFile):
         Build filename as url encoded string, then Base64 encode (URL-safe, no '.' in output).
         """
         from urllib.parse import urlencode
+        from datetime import datetime
+        import base64
 
         file_name, file_ext = os.path.splitext(os.path.basename(file_path))
         created_date = int(datetime.now().timestamp())
@@ -104,6 +108,7 @@ class BaseMedia(BaseFile):
     @staticmethod
     async def save_upload(file, img_folder_abspath) -> str:
         """Saves base64 file contents into file system"""
+        from pathlib import Path
         file_name, file_ext = os.path.splitext(file.filename)
         new_dir_path = Path(img_folder_abspath)
         new_dir_path.mkdir(parents=True, exist_ok=True)

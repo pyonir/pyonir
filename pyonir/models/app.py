@@ -153,18 +153,19 @@ class Base:
         from pyonir.utilities import process_contents
         self._settings = process_contents(self.configs_dirpath, app_ctx=self.app_ctx)
 
-    def parse_file(self, file_path: str) -> 'Parsely':
+    def parse_file(self, file_path: str) -> 'DeserializeFile':
         """Parses a file and returns a Parsely instance for the file."""
-        from pyonir.parser import Parsely
-        return Parsely(file_path, app_ctx=self.app_ctx)
+        # from pyonir.parser import Parsely
+        from pyonir.models.page import DeserializeFile
+        return DeserializeFile(file_path, app_ctx=self.app_ctx)
 
     def apply_virtual_routes(self, pyonir_request: 'BaseRequest') -> 'Parsely':
         """Reads and applies virtual .routes.md file specs onto or updates the request file"""
-        from pyonir.parser import ParselyFileStatus, Parsely
+        from pyonir.models.parser import DeserializeFile, FileStatuses
         server = pyonir_request.app.server
         virtual_route_url, virtual_route_data, virtual_path_params = server.get_virtual(pyonir_request.path)
         if virtual_route_data:
-            rfile: Parsely = pyonir_request.file
+            rfile: DeserializeFile = pyonir_request.file
             pyonir_request.path_params.update(virtual_path_params)
             if rfile.file_exists:
                 rfile.data.update(virtual_route_data)
@@ -176,9 +177,9 @@ class Base:
                 vurl_data = vfile.data.get(virtual_route_url) or {}
                 vurl_data.update(**{'url': pyonir_request.path, 'slug': pyonir_request.slug})
                 vfile.data = vurl_data
-                vfile.status = ParselyFileStatus.PUBLIC
-                vfile.file_ssg_html_dirpath = vfile.file_ssg_html_dirpath.replace(vfile.file_name, pyonir_request.slug)
-                vfile.file_ssg_api_dirpath = vfile.file_ssg_api_dirpath.replace(vfile.file_name, pyonir_request.slug)
+                vfile.status = FileStatuses.PUBLIC
+                # vfile.file_ssg_html_dirpath = vfile.file_ssg_html_dirpath.replace(vfile.file_name, pyonir_request.slug)
+                # vfile.file_ssg_api_dirpath = vfile.file_ssg_api_dirpath.replace(vfile.file_name, pyonir_request.slug)
                 pyonir_request.file = vfile
 
     def register_resolver(self, name: str, cls_or_path, args=(), kwargs=None, hot_reload=False):
@@ -211,7 +212,7 @@ class Base:
         """
         import importlib, sys
         from pyonir.utilities import get_attr
-        from pyonir.parser import Parsely
+        from pyonir.models.loaders import load_resolver
 
         cls_path, meth_name = name.rsplit(".", 1)
         is_pyonir = name.startswith('pyonir')
@@ -236,7 +237,7 @@ class Base:
         # access modules from loader
         if not resolver:
             from pyonir import PYONIR_DIRPATH
-            resolver = Parsely.load_resolver(name,
+            resolver = load_resolver(name,
                                           base_path=PYONIR_DIRPATH if is_pyonir else self.app_dirpath,
                                           from_system=is_pyonir)
         if not resolver:
@@ -387,8 +388,9 @@ class BaseApp(Base):
     def __init__(self, app_entrypoint: str, use_themes: bool = None):
         from pyonir.models.templating import TemplateEnvironment
         from pyonir.core import PyonirServer
-        from pyonir.parser import parse_markdown
+        from pyonir.models.parser import parse_markdown, DeserializeFile
         from pyonir import __version__
+        DeserializeFile._routes_dirname = self.PAGES_DIRNAME
         self.VERSION = __version__
         self.SECRET_SAUCE = generate_id()
         self.SESSION_KEY = f"{self.name}_session"
@@ -615,10 +617,11 @@ class BaseApp(Base):
 
     def parse_pyformat(self, string, context=None) -> str:
         """Formats python template string"""
-        ctx = self.TemplateEnvironment.globals if self.TemplateEnvironment else {}
+        if not context: context = {}
+        if self.TemplateEnvironment:
+            context.update(self.TemplateEnvironment.globals)
         try:
-            if context is not None: ctx.update(context)
-            return string.format(**ctx)
+            return string.format(**context)
         except Exception as e:
             print('parse_pyformat', e, string)
             return string

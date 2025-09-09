@@ -150,7 +150,7 @@ def cls_mapper(file_obj: object, cls: Union[type, list[type]], from_request=None
             set_attr(cls_args, name, value)
             continue
         if from_request and hint == value:
-            set_attr(cls_args, name, value)
+            set_attr(cls_args, name, None)
             continue
 
         # Handle containers

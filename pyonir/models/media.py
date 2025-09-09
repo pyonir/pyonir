@@ -1,13 +1,52 @@
 from __future__ import annotations
 
 import os
-from typing import Optional
+from typing import Optional, Union
 from starlette.datastructures import UploadFile
 
 from pyonir.core import PyonirRequest
 from pyonir.models.database import BaseCollection
 from pyonir.models.page import BaseFile
 
+from enum import Enum, unique
+
+@unique
+class AudioFormat(Enum):
+    MP3  = "mp3"
+    WAV  = "wav"
+    FLAC = "flac"
+    AAC  = "aac"
+    OGG  = "ogg"
+    M4A  = "m4a"
+
+    def __str__(self):
+        return self.value
+
+@unique
+class VideoFormat(Enum):
+    MP4  = "mp4"
+    MKV  = "mkv"
+    AVI  = "avi"
+    MOV  = "mov"
+    WEBM = "webm"
+    FLV  = "flv"
+
+    def __str__(self):
+        return self.value
+
+@unique
+class ImageFormat(Enum):
+    JPG   = "jpg"
+    JPEG  = "jpeg"
+    PNG   = "png"
+    GIF   = "gif"
+    BMP   = "bmp"
+    TIFF  = "tiff"
+    WEBP  = "webp"
+    SVG   = "svg"
+
+    def __str__(self):
+        return self.value
 
 class BaseMedia(BaseFile):
     """Represents an image file and its details."""
@@ -159,11 +198,34 @@ class MediaManager:
 
     def __init__(self, app: 'BaseApp'):
         self.app = app
+        self.supported_formats = {ImageFormat.JPG, ImageFormat.PNG, VideoFormat.MP4, AudioFormat.MP3}
         self._storage_dirpath: str = os.path.join(app.contents_dirpath, self.default_media_dirname)
         """Location on fs to save file uploads"""
 
     @property
     def storage_dirpath(self) -> str: return self._storage_dirpath
+
+    def is_supported(self, ext: str) -> bool:
+        """Check if the media file has a supported format."""
+        ext = ext.lstrip('.').lower()
+        return ext in {fmt.value for fmt in self.supported_formats}
+
+    def add_supported_format(self, fmt: Union[ImageFormat, AudioFormat, VideoFormat, None]):
+        """Add a supported media format."""
+        self.supported_formats.add(fmt)
+
+    @staticmethod
+    def media_type(ext: str) -> Optional[str]:
+        """Return the media type based on file extension."""
+        ext = ext.lstrip('.').lower()
+
+        if ext in (f.value for f in AudioFormat):
+            return "audio"
+        elif ext in (f.value for f in VideoFormat):
+            return "video"
+        elif ext in (f.value for f in ImageFormat):
+            return "image"
+        return None
 
     def set_storage_dirpath(self, storage_dirpath):
         self._storage_dirpath = storage_dirpath
@@ -188,8 +250,9 @@ class MediaManager:
         """Delete file by ID. Returns True if deleted."""
         from pathlib import Path
         path = os.path.join(self.storage_dirpath, media_id)
+        if not Path(path).exists(): return False
         Path(path).unlink()
-        return Path(path).exists()
+        return True
 
     # --- General Uploading ---
     async def upload(self, request: PyonirRequest, directory_name: str = None, file_name: str = None, limit: int = None) -> \
@@ -205,6 +268,7 @@ class MediaManager:
             if limit and len(resource_files) == limit: break
             if file_name:
                 file._filename = file_name
+            directory_name = directory_name or self.media_type(file.ext)
             media_file: BaseMedia = await self._upload_bytes(file, directory_name=directory_name or self.default_media_dirname)
             if media_file:
                 resource_files.append(media_file)

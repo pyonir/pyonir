@@ -5,7 +5,7 @@ from typing import Optional, Union
 from starlette.datastructures import UploadFile
 
 from pyonir.core import PyonirRequest
-from pyonir.models.database import BaseCollection
+from pyonir.models.database import BaseFSQuery
 from pyonir.models.page import BaseFile
 
 from enum import Enum, unique
@@ -243,7 +243,7 @@ class MediaManager:
 
     def get_medias(self, file_type: str) -> list[BaseMedia]:
         """Retrieves user paginated media files"""
-        files = BaseCollection.query(self.storage_dirpath, model=BaseMedia, force_all=True)
+        files = BaseFSQuery(self.storage_dirpath, model=BaseMedia, force_all=True)
         return list(files)
 
     def delete_media(self, media_id: str) -> bool:

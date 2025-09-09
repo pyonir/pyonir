@@ -1,7 +1,10 @@
 from dataclasses import is_dataclass
+from datetime import datetime
 from typing import get_type_hints, Any
 from typing import get_origin, get_args, Union, Callable, Mapping, Iterable, Generator
 from collections.abc import Iterable as ABCIterable, Mapping as ABCMapping, Generator as ABCGenerator
+
+from sqlmodel import SQLModel
 
 from pyonir.utilities import get_attr
 
@@ -38,7 +41,8 @@ def unwrap_optional(tp):
     if origin_tp is Union:
         args = [unwrap_optional(a) for a in get_args(tp) if a is not type(None)]
         if len(args):
-            return [arg for arg,_ in args]
+            res = [arg for arg, *rest in args]
+            return res
     return tp, None
 
 def is_callable_type(tp):
@@ -68,16 +72,16 @@ def collect_type_hints(t):
         pass
     return hints
 
-def add_props_to_object(res, data: dict, file_src: object =None, attrs: list = None):
-    """Add all properties from data and file_src to res object"""
-    itr = [*data.keys(), *(attrs or [])]
-    for key in itr:
-        if key[0] == '_': continue
-        # if frozen and not hasattr(res, key): continue
-        # if isinstance(val, property): continue
-        value = get_attr(data, key) or get_attr(file_src, key)
-        setattr(res, key, value)
-    return res
+# def add_props_to_object(res, data: dict, file_src: object =None, attrs: list = None):
+#     """Add all properties from data and file_src to res object"""
+#     itr = [*data.keys(), *(attrs or [])]
+#     for key in itr:
+#         if key[0] == '_': continue
+#         # if frozen and not hasattr(res, key): continue
+#         # if isinstance(val, property): continue
+#         value = get_attr(data, key) or get_attr(file_src, key)
+#         setattr(res, key, value)
+#     return res
 
 def required_parameters(cls):
     import inspect
@@ -96,6 +100,8 @@ def set_attr(target: object, attr: str, value: Any):
     else:
         setattr(target, attr, value)
 
+def func_request_mapper(func: Callable, data: object) -> dict: pass
+
 def cls_mapper(file_obj: object, cls: Union[type, list[type]], from_request=None):
     """Recursively map dict-like input into `cls` with type-safe field mapping."""
     from pyonir.core import PyonirRequest, PyonirApp
@@ -113,13 +119,17 @@ def cls_mapper(file_obj: object, cls: Union[type, list[type]], from_request=None
             _value = coerce_union(ct, file_obj)
         return _value
 
+    # datetime passthrough
+    if cls == datetime:
+        return file_obj
+
     # Scalars just wrap
     if is_scalar_type(cls):
         return cls(file_obj)
-
+    is_sqlmodel = lambda t: isinstance(t, type) and issubclass(t, SQLModel)
     is_dclass = is_dataclass(cls) or len(required_parameters(cls)) > 0
     is_generic_type = cls.__name__ == 'GenericQueryModel'
-    param_type_map = collect_type_hints(cls)
+    param_type_map =  {k: field.annotation for k, field in cls.model_fields.items()} if is_sqlmodel(cls) else collect_type_hints(cls)
     data = get_attr(file_obj, 'data') or {}
 
     # Merge nested access if ORM opts define mapper_key
@@ -133,13 +143,16 @@ def cls_mapper(file_obj: object, cls: Union[type, list[type]], from_request=None
 
     cls_args = {} if from_request or is_dclass else cls()
     for name, hint in param_type_map.items():
-        mapper_name = get_attr(mapper_keys, name, None) or name
+        mapper_name = get_attr(mapper_keys, name, None) #or name
         if name.startswith("_") or name == "return":
             continue
 
         actual_type, *mapable = unwrap_optional(hint)
-        value = get_attr(data, name) or get_attr(file_obj, name) or get_attr(cls, name)
-        value = (get_attr(data, mapper_name) or get_attr(file_obj, mapper_name)) if not value else value
+        # value = None
+        for ds in (data, file_obj, cls): # try to get value from data, file_obj, cls (in that order)
+            value = get_attr(ds, mapper_name or name)
+            if value is not None: break
+
         if value is None:
             set_attr(cls_args, name, value)
             continue
@@ -157,6 +170,8 @@ def cls_mapper(file_obj: object, cls: Union[type, list[type]], from_request=None
         custom_mapper_fn = getattr(cls, f'map_to_{name}', None)
         if custom_mapper_fn:
             value = custom_mapper_fn(value)
+        elif is_sqlmodel(hint):
+            value = cls_mapper(value, hint) if isinstance(value, dict) else value
         elif is_scalar_type(actual_type):
             value = actual_type(value)
         elif is_callable_type(actual_type) or callable(value):
@@ -194,10 +209,10 @@ def cls_mapper(file_obj: object, cls: Union[type, list[type]], from_request=None
             value = get_attr(data, _key or key) or get_attr(file_obj, _key or key)
             set_attr(res, key, value)
         return res
-        # res = add_props_to_object(res, data, file_src=file_obj, attrs=mapper_keys)
 
     # Pass additional fields that are not specified on model
-    if not is_frozen:
+    if not is_frozen and not is_sqlmodel(cls):
+        # keys = data.keys() if is_sqlmodel(cls) else data.model_fields.keys()
         for key, value in data.items():
             if isinstance(getattr(cls, key, None), property):
                 continue  # skip properties

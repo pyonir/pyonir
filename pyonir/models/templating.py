@@ -90,13 +90,13 @@ class Theme:
 
     def readme(self):
         """Returns the theme's README.md file content if available"""
-        from pyonir.parser import Parsely
         from pyonir import Site
+        from pyonir.models.parser import DeserializeFile
         theme_ctx = list(Site.app_ctx)
         theme_ctx[2] = Site.frontend_dirpath
         theme_readme = os.path.join(self.theme_dirpath,'README.md')
         theme_readme =  theme_readme if os.path.exists(theme_readme) else os.path.join(self.theme_dirpath,'readme.md')
-        readme = Parsely(theme_readme, app_ctx=theme_ctx)
+        readme = DeserializeFile(theme_readme, app_ctx=theme_ctx)
         if not readme.file_exists:
             raise ValueError(f"Theme {self.name} does not have a README.md file.")
         return readme
@@ -113,7 +113,7 @@ class PyonirThemes:
     @property
     def active_theme(self) -> Optional[Theme]:
         from pyonir import Site
-        from pyonir.parser import get_attr
+        from pyonir.models.utils import get_attr
         if not Site or not self.available_themes: return None
         site_theme = get_attr(Site.settings, 'app.theme_name')
         site_theme = self.available_themes.get(site_theme)

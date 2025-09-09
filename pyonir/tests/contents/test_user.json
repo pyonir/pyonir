@@ -1,0 +1,23 @@
+{
+  "auth_from": "basic",
+  "avatar": "/user/files/media/avatar.jpg?t=1757343865",
+  "email": "pyonir@site.com",
+  "file_dirpath": "/pyonir/pyonir/tests/contents/test_user.json",
+  "file_path": "/pyonir/pyonir/tests/contents/test_user.json",
+  "id": "com_pyonir@site",
+  "meta": {
+    "first_name": "Test",
+    "last_name": "User",
+    "phone": "1234567890",
+    "about_you": "to the people and the world",
+    "age": 3,
+    "gender": null,
+    "height": null,
+    "weight": null
+  },
+  "name": "PyonirUserName",
+  "password": "$argon2id$v=19$m=65536,t=3,p=4$1xBLjE6QDHxYVlO/WfmFmg$xtZ2LzH7ivRGithAfa8wqkwKMtNblyiyMu9ihF40hQk",
+  "role": "contributor",
+  "signin_locations": null,
+  "verified_email": false
+}

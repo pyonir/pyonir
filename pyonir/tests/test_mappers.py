@@ -2,7 +2,6 @@ import pytest, os
 from typing import Optional, Union, List, Dict
 
 from pyonir.models.mapper import cls_mapper
-from pyonir.models.page import BasePage
 from pyonir.models.parser import DeserializeFile
 from pyonir.utilities import parse_query_model_to_object
 

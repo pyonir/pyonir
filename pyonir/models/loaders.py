@@ -1,9 +1,9 @@
 import os
-from typing import Any, Callable
+from typing import Any, Callable, Union
 from pyonir.pyonir_types import EnvConfig
 
 
-def load_modules_from(pkg_dirpath, as_list: bool = False, only_packages:bool = False)-> dict[Any, Any] | list[Any]:
+def load_modules_from(pkg_dirpath, as_list: bool = False, only_packages:bool = False)-> Union[dict[Any, Any], list[Any]]:
     loaded_mods = {} if not as_list else []
     loaded_funcs = {} if not as_list else []
     if not os.path.exists(pkg_dirpath): return loaded_funcs

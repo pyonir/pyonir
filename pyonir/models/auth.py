@@ -489,7 +489,8 @@ class Auth:
         new_location = client_location(self.request)
         if not new_location: return
         match_keys = ["ip", "device"]
-        locations = user.signin_locations
+        locations = user.signin_locations or []
+        print(new_location)
         # Find matches using list comprehension
         matches = [loc for loc in locations if all(loc[k] == new_location[k] for k in match_keys)]
 

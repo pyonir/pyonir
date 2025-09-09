@@ -1,5 +1,6 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
+from typing import Optional
 
 from pyonir.core import PyonirSchema
 from pyonir.pyonir_types import PyonirRequest
@@ -91,19 +92,6 @@ class Roles:
         return [cls.SUPER, cls.ADMIN, cls.AUTHOR, cls.CONTRIBUTOR, cls.GUEST]
 
 @dataclass
-class UserMeta(PyonirSchema):
-    """Represents details about a user"""
-    first_name: str = ''
-    last_name: str = ''
-    gender: str = ''
-    age: int = 0
-    height: int = 0
-    weight: int = 0
-    phone: str = ''
-    about_you: str = ''
-
-
-@dataclass
 class UserSignIn(PyonirSchema):
     """Represents a user sign in request"""
 
@@ -125,8 +113,17 @@ class UserSignIn(PyonirSchema):
         elif len(self.password) < 6:
             self._errors.append("Password must be at least 6 characters long")
 
+class UserMeta(PyonirSchema):
+    """Represents details about a user"""
+    first_name: Optional[str] = ''
+    last_name: Optional[str] = ''
+    gender: Optional[str] = ''
+    age: Optional[int] = ''
+    height: Optional[int] = 0
+    weight: Optional[int] = 0
+    phone: Optional[str] = ''
+    about_you: Optional[str] = ''
 
-@dataclass
 class User(PyonirSchema):
     """Represents an app user"""
 
@@ -139,13 +136,11 @@ class User(PyonirSchema):
     # configurable user details
     name: str = ''
     avatar: str = ''
-    meta: UserMeta = field(default_factory=UserMeta)
+    meta: UserMeta = None #field(default_factory=UserMeta)
 
     # system specific fields
     id: str = ''
     """Unique identifier for the user"""
-    auth_token: str = ''
-    """Authentication token verifying the user"""
     role: str = ''
     """Role assigned to the user, defaults to 'none'"""
     verified_email: bool = False
@@ -154,25 +149,27 @@ class User(PyonirSchema):
     """File path for user-specific files"""
     file_dirpath: str = ''
     """Directory path for user-specific files"""
-    auth_from: str = 'basic'
+    auth_from: Optional[str] = 'basic'
     """Authentication method used by the user (e.g., 'google', 'email')"""
-    signin_locations: list = field(default_factory=list)
+    signin_locations: Optional[list] = []
     """Locations capture during signin"""
-    _private_keys: list[str] = field(default_factory=lambda: ['id', 'password', 'auth_token'])
+    auth_token: Optional[str] = ''
+    """Authentication token verifying the user"""
+    _private_keys: list[str] = ['id', 'password', 'auth_token']
     """List of private keys that should not be included in JSON serialization"""
+
+    def __init__(self, **data):
+        super().__init__(**data)
+        if not self.role:
+            self.role = Roles.NONE.name
+        if not self.avatar:
+            self.avatar = '/public/images/default-avatar.png'
 
     @property
     def perms(self) -> list[PermissionLevel]:
         """Returns the permissions for the user based on their role"""
         user_role = getattr(Roles, self.role.upper()) or Roles.NONE
         return user_role.perms
-
-    def __post_init__(self):
-        """Post-initialization to set default values and validate role"""
-        if not self.role:
-            self.role = Roles.NONE.name
-        if not self.avatar:
-            self.avatar = '/public/images/default-avatar.png'
 
     def has_perm(self, action: PermissionLevel) -> bool:
         """Checks if the user has a specific permission based on their role"""

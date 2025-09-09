@@ -208,14 +208,9 @@ class BaseFSQuery:
 
     def paginated_collection(self)-> Optional[BasePagination]:
         """Paginates a list into smaller segments based on curr_pg and display limit"""
-        from pyonir import Site
         from sortedcontainers import SortedList
         from pyonir.models.utils import get_attr
-        # from pyonir.core import PyonirRequest
-        if not Site: return None
-        # request: PyonirRequest = Site.TemplateEnvironment.globals['request'] if Site.TemplateEnvironment else None
-        # if not self.limit: return None
-        # req_pg = self.get_attr(request.query_params, 'pg') or 1
+
         if self.sort_by:
             self.sorted_files = SortedList(self.files, lambda x: get_attr(x, self.sort_by) or x)
         if self.where_key:
@@ -228,38 +223,19 @@ class BaseFSQuery:
         start = (page_num * self.limit) - self.limit
         end = (self.limit * page_num)
         pg = (self.max_count // self.limit) + (self.max_count % self.limit > 0) if self.limit > 0 else 0
-        pag_data = self.paginate(start=start, end=end, reversed=True) if not force_all else self.sorted_files
+        pag_data = self.paginate(start=start, end=end, reverse=True) if not force_all else self.sorted_files
 
-        return BasePagination(**{
-            'curr_page': page_num,
-            'page_nums': [n for n in range(1, pg + 1)] if pg else None,
-            'limit': self.limit,
-            'max_count': self.max_count,
-            'items': list(pag_data)
-        })
+        return BasePagination(
+            curr_page = page_num,
+            page_nums = [n for n in range(1, pg + 1)] if pg else None,
+            limit = self.limit,
+            max_count = self.max_count,
+            items = list(pag_data)
+        )
 
-    @staticmethod
-    def parse_params(param: str):
-        k, _, v = param.partition(':')
-        op = '='
-        is_eq = lambda x: x[1]==':'
-        if v.startswith('>'):
-            eqs = is_eq(v)
-            op = '>=' if eqs else '>'
-            v = v[1:] if not eqs else v[2:]
-        elif v.startswith('<'):
-            eqs = is_eq(v)
-            op = '<=' if eqs else '<'
-            v = v[1:] if not eqs else v[2:]
-            pass
-        else:
-            pass
-        return {"attr": k.strip(), "op":op, "value":BaseCollection.coerce_bool(v)}
-
-
-    def paginate(self, start: int, end: int, reversed: bool = False):
+    def paginate(self, start: int, end: int, reverse: bool = False):
         """Returns a slice of the items list"""
-        sl = self.sorted_files.islice(start, end, reverse=reversed) if end else self.sorted_files
+        sl = self.sorted_files.islice(start, end, reverse=reverse) if end else self.sorted_files
         return sl
 
     @staticmethod
@@ -281,17 +257,18 @@ class BaseFSQuery:
 
     def find(self, value: any, from_attr: str = 'file_name'):
         """Returns the first item where attr == value"""
-        return next((item for item in self.collection if getattr(item, from_attr, None) == value), None)
+        return next((item for item in self.sorted_files if getattr(item, from_attr, None) == value), None)
 
     def where(self, attr, op="=", value=None):
         """Returns a list of items where attr == value"""
+        from pyonir.models.utils import get_attr
         # if value is None:
         #     # assume 'op' is actually the value if only two args were passed
         #     value = op
         #     op = "="
 
         def match(item):
-            actual = self.get_attr(item, attr)
+            actual = get_attr(item, attr)
             if not hasattr(item, attr):
                 return False
             if actual and not value:
@@ -311,43 +288,22 @@ class BaseFSQuery:
             elif op == "!=":
                 return actual != value
             return False
-        if isinstance(attr, Callable): match = attr
+        if callable(attr): match = attr
+        if not self.sorted_files:
+            self.sorted_files = SortedList(self.files, lambda x: get_attr(x, self.sort_by) or x)
         return filter(match, list(self.sorted_files or self.files))
 
-class BaseCollection:
-    SortedList = None
-    get_attr =  None
-    dict_to_class = None
+    def __len__(self):
+        return self.sorted_files and len(self.sorted_files) or 0
 
-    def __init__(self, items: Iterable, sort_key: str = None):
-        from sortedcontainers import SortedList
-        from pyonir.utilities import get_attr, dict_to_class
-        self.SortedList = SortedList
-        self.get_attr = get_attr
-        self.dict_to_class = dict_to_class
-
-        self._query_path = ''
-        key = lambda x: self.get_attr(x, sort_key or 'file_created_on') or self.get_attr(x, 'created_on') or x
-        items = list(items)
-        try:
-            self.collection = SortedList(items, key=key)
-        except Exception as e:
-            raise
-
-    @staticmethod
-    def coerce_bool(value: str):
-        d = ['false', 'true']
-        try:
-            i = d.index(value.lower().strip())
-            return True if i else False
-        except ValueError as e:
-            return value.strip()
+    def __iter__(self):
+        return iter(self.sorted_files)
 
     @staticmethod
     def parse_params(param: str):
         k, _, v = param.partition(':')
         op = '='
-        is_eq = lambda x: x[1]==':'
+        is_eq = lambda x: x[1]=='='
         if v.startswith('>'):
             eqs = is_eq(v)
             op = '>=' if eqs else '>'
@@ -359,138 +315,16 @@ class BaseCollection:
             pass
         else:
             pass
-        return {"attr": k.strip(), "op":op, "value":BaseCollection.coerce_bool(v)}
+        return {"attr": k.strip(), "op":op, "value":BaseFSQuery.coerce_bool(v)}
 
-    @classmethod
-    def query(cls,
-                query_path: str,
-                app_ctx: AppCtx = None,
-                model: Optional[object] = None,
-                name_pattern: str = None,
-                exclude_dirs: tuple = None,
-                exclude_names: tuple = None,
-                force_all: bool = True,
-                sort_key: str = None):
-        """queries the file system for list of files"""
-        from pyonir.utilities import query_files
-        gen_data = query_fs(query_path, app_ctx=app_ctx, model=model, name_pattern=name_pattern,
-                               exclude_dirs=exclude_dirs, exclude_names=exclude_names, force_all=force_all)
-        return cls(gen_data, sort_key=sort_key)
-
-    def prev_next(self, input_file: 'Parsely'):
-        """Returns the previous and next files relative to the input file"""
-
-        prv = None
-        nxt = None
-        pc = self.query(input_file.file_dirpath)
-        pc.collection = iter(pc.collection)
-        for cfile in pc.collection:
-            if cfile.file_status == 'hidden': continue
-            if cfile.file_path == input_file.file_path:
-                nxt = next(pc.collection, None)
-                break
-            else:
-                prv = cfile
-        return self.dict_to_class({"next": nxt, "prev": prv})
-
-    def find(self, value: any, from_attr: str = 'file_name'):
-        """Returns the first item where attr == value"""
-        return next((item for item in self.collection if getattr(item, from_attr, None) == value), None)
-
-    def where(self, attr, op="=", value=None):
-        """Returns a list of items where attr == value"""
-        # if value is None:
-        #     # assume 'op' is actually the value if only two args were passed
-        #     value = op
-        #     op = "="
-
-        def match(item):
-            actual = self.get_attr(item, attr)
-            if not hasattr(item, attr):
-                return False
-            if actual and not value:
-                return True # checking only if item has an attribute
-            elif op == "=":
-                return actual == value
-            elif op == "in" or op == "contains":
-                return actual in value if actual is not None else False
-            elif op == ">":
-                return actual > value
-            elif op == "<":
-                return actual < value
-            elif op == ">=":
-                return actual >= value
-            elif op == "<=":
-                return actual <= value
-            elif op == "!=":
-                return actual != value
-            return False
-        if isinstance(attr, Callable): match = attr
-        return BaseCollection(filter(match, list(self.collection)))
-
-    def paginate(self, start: int, end: int, reversed: bool = False):
-        """Returns a slice of the items list"""
-        sl = self.collection.islice(start, end, reverse=reversed) if end else self.collection
-        return sl #self.collection[start:end]
-
-    def group_by(self, key: Union[str, Callable]):
-        """
-        Groups items by a given attribute or function.
-        If `key` is a string, it will group by that attribute.
-        If `key` is a function, it will call the function for each item.
-        """
-        from collections import defaultdict
-        grouped = defaultdict(list)
-
-        for item in self.collection:
-            k = key(item) if callable(key) else getattr(item, key, None)
-            grouped[k].append(item)
-
-        return dict(grouped)
-
-    def paginated_collection(self, query_params=None)-> BasePagination:
-        """Paginates a list into smaller segments based on curr_pg and display limit"""
-        if query_params is None: query_params = {}
-        from pyonir import Site
-        from pyonir.core import PyonirRequest
-        if not Site: return None
-        # from pyonir.core import ParselyPagination
-        request: PyonirRequest = Site.TemplateEnvironment.globals['request'] if Site.TemplateEnvironment else None
-        if not request or not hasattr(request, 'limit'): return None
-        req_pg = self.get_attr(request.query_params, 'pg') or 1
-        limit = query_params.get('limit', request.limit)
-        curr_pg = int(query_params.get('pg', req_pg)) or 1
-        sort_key = query_params.get('sort_key')
-        where_key = query_params.get('where')
-        if sort_key:
-            self.collection = self.SortedList(self.collection, lambda x: self.get_attr(x, sort_key))
-        if where_key:
-            where_key = [self.parse_params(ex) for ex in where_key.split(',')]
-            self.collection = self.where(**where_key[0])
-        force_all = limit=='*'
-
-        max_count = len(self.collection)
-        limit = 0 if force_all else int(limit)
-        page_num = 0 if force_all else int(curr_pg)
-        start = (page_num * limit) - limit
-        end = (limit * page_num)
-        pg = (max_count // limit) + (max_count % limit > 0) if limit > 0 else 0
-
-        pag_data = self.paginate(start=start, end=end, reversed=True) if not force_all else self.collection
-
-        return BasePagination(**{
-            'curr_page': page_num,
-            'page_nums': [n for n in range(1, pg + 1)] if pg else None,
-            'limit': limit,
-            'max_count': max_count,
-            'items': list(pag_data)
-        })
-
-    def __len__(self):
-        return self.collection._len
-
-    def __iter__(self):
-        return iter(self.collection)
+    @staticmethod
+    def coerce_bool(value: str):
+        d = ['false', 'true']
+        try:
+            i = d.index(value.lower().strip())
+            return True if i else False
+        except ValueError as e:
+            return value.strip()
 
 
 def query_fs(abs_dirpath: str,
@@ -511,9 +345,10 @@ def query_fs(abs_dirpath: str,
     def get_datatype(filepath) -> Union[object, BasePage, BaseMedia]:
         if model == 'path': return str(filepath)
         if model == BaseMedia: return BaseMedia(filepath)
-        pf = DeserializeFile(str(filepath), app_ctx=app_ctx, model=model)
-        if model == 'parsely': return pf
-        if pf.is_page and not model: pf.schema = BasePage
+        pf = DeserializeFile(str(filepath), app_ctx=app_ctx)
+        if model == 'file':
+            return pf
+        pf.schema = BasePage if (pf.is_page and not model) else model
         res = cls_mapper(pf, pf.schema) if pf.schema else pf
         return res
 

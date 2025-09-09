@@ -3,6 +3,21 @@ from datetime import datetime
 from collections.abc import Generator
 from typing import Optional, Union
 
+from pyonir.models.mapper import cls_mapper
+
+
+def process_contents(path, app_ctx=None, file_model: any = None) -> object:
+    """Deserializes all files within the contents directory"""
+    from pyonir.models.database import query_fs
+    key = os.path.basename(path)
+    res = type(key, (object,), {"__name__": key})() # generic map
+    pgs = query_fs(path, app_ctx=app_ctx, model=file_model)
+    for pg in pgs:
+        name = getattr(pg, 'file_name')
+        # pg_obj = type(name, (object,), {"__name__": name, 'file_path': pg.file_path})
+        # val = cls_mapper(pg, pg_obj)
+        setattr(res, name, pg.to_named_tuple())
+    return res
 
 def json_serial(obj):
     """JSON serializer for nested objects not serializable by default jsonify"""

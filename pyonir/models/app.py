@@ -150,7 +150,7 @@ class Base:
     # RUNTIME
     def process_configs(self):
         """Processes all context settings"""
-        from pyonir.utilities import process_contents
+        from pyonir.models.utils import process_contents
         self._settings = process_contents(self.configs_dirpath, app_ctx=self.app_ctx)
 
     def parse_file(self, file_path: str) -> 'DeserializeFile':
@@ -648,7 +648,8 @@ class BaseApp(Base):
         import time
         from pyonir import utilities
         from pyonir.models.server import BaseRequest
-        from pyonir.parser import Parsely
+        from pyonir.models.parser import DeserializeFile
+        from pyonir.models.database import query_fs
         self.SSG_IN_PROGRESS = True
         count = 0
         print(f"{utilities.PrntColrs.OKBLUE}1. Coping Assets")
@@ -663,13 +664,16 @@ class BaseApp(Base):
             ssg_req = BaseRequest(None, self)
             start_time = time.perf_counter()
 
-            all_pages: Generator[Parsely] = utilities.query_files(self.pages_dirpath, app_ctx=self.app_ctx, model='parsely')
+            all_pages: Generator[DeserializeFile] = query_fs(self.pages_dirpath, app_ctx=self.app_ctx, model='file')
             xmls = []
             for pgfile in all_pages:
-                virtual_data, path_params = self.server.get_virtual(pgfile.data.get('url'))
+                virtual_data, path_params, *rest = self.server.get_virtual(pgfile.data.get('url'))
                 if path_params: ssg_req.ssg_request(pgfile, path_params)
-                pgfile.data.update(virtual_data)
-                pgfile.apply_filters()
+                try:
+                    pgfile.data.update(path_params or {})
+                    pgfile.apply_filters()
+                except Exception as e:
+                    raise
                 self.TemplateEnvironment.globals['request'] = ssg_req  # pg_req
                 count += pgfile.generate_static_file()
                 t = f"<url><loc>{self.protocol}://{self.domain}{pgfile.data.get('url')}</loc><priority>1.0</priority></url>\n"

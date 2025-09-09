@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pyonir"
-version = "0.0.37"
+version = "0.0.38"
 description = "a python library for building web applications"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -24,7 +24,8 @@ dependencies = [
   "argon2-cffi",
   "PyJWT",
   "requests",
-  "mistletoe"
+  "mistletoe",
+  "sqlmodel"
 ]
 
 [project.urls]

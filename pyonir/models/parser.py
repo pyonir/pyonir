@@ -3,6 +3,7 @@ import os
 import re
 
 from pyonir.models.mapper import cls_mapper
+from pyonir.models.utils import create_file
 from pyonir.utilities import get_attr, import_module, parse_query_model_to_object, get_file_created
 
 REG_ILN_LIST = r'([-$@\s*=\w.]+)(\:-)(.*)'
@@ -101,6 +102,8 @@ class DeserializeFile:
         # Post-processing
         self.apply_filters()
         # EmbeddedTypes[self.file_path] = self
+
+
     @property
     def file_modified_on(self):  # Datetime
         from datetime import datetime
@@ -125,7 +128,6 @@ class DeserializeFile:
             data_value = context.get(prop)
             data_value = Site.parse_pyformat(data_value, self.data)
             update_nested(prop, data_src=self.data, data_update=data_value)
-
 
     def apply_filters(self):
         """Applies filter methods to data attributes"""
@@ -448,6 +450,13 @@ class DeserializeFile:
             return None
         return BaseFSQuery.prev_next(self)
 
+    def to_named_tuple(self):
+        """Returns a tuple representation of the file data"""
+        from collections import namedtuple
+        file_keys = [*self.data.keys(),'file_name', 'file_ext', 'file_path', 'file_dirpath', 'file_dirname']
+        PageTuple = namedtuple('PageTuple', file_keys)
+        return PageTuple(**self.data, file_name=self.file_name, file_ext=self.file_ext, file_path=self.file_path, file_dirpath=self.file_dirpath, file_dirname=self.file_dirname)
+
     def output_html(self, req: 'PyonirRequest') -> str:
         """Renders and html output"""
         from pyonir import Site
@@ -460,24 +469,33 @@ class DeserializeFile:
         Site.TemplateEnvironment.block_pull_cache.clear()
         return html
 
+    def output_json(self, data_value: any = None, as_str=True) -> str:
+        """Outputs a json string"""
+        from .utils import json_serial
+        data = data_value or self
+        if not as_str: return data
+        return json.dumps(data, default=json_serial)
+
     def generate_static_file(self, page_request=None, rtn_results=False):
         """Generate target file as html or json. Takes html or json content to save"""
+        from pyonir import Site
         count = 0
         html_data = None
         json_data = None
-
+        ctx_static_path = self.app_ctx[3] if self.app_ctx and len(self.app_ctx) > 3 else ''
+        slug = self.data.get('slug')
         def render_save():
             # -- Render Content --
             html_data = self.output_html(page_request)
             json_data = self.output_json(as_str=False)
             # -- Save contents --
-            self.save(path_to_static_html, html_data, self.file_ssg_html_dirpath)
-            self.save(path_to_static_api, json_data, self.file_ssg_api_dirpath)
+            create_file(path_to_static_html, html_data)
+            create_file(path_to_static_api, json_data)
             return 2
 
         # -- Get static paths --
-        path_to_static_api = os.path.join(self.file_ssg_api_dirpath, "index.json")
-        path_to_static_html = os.path.join(self.file_ssg_html_dirpath, "index.html")
+        path_to_static_api = os.path.join(ctx_static_path, Site.API_DIRNAME, slug, "index.json")
+        path_to_static_html = os.path.join(ctx_static_path, slug, "index.html")
 
         count += render_save()
 

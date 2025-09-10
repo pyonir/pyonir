@@ -118,7 +118,7 @@ class UserMeta(PyonirSchema):
     first_name: Optional[str] = ''
     last_name: Optional[str] = ''
     gender: Optional[str] = ''
-    age: Optional[int] = ''
+    age: Optional[int] = 0
     height: Optional[int] = 0
     weight: Optional[int] = 0
     phone: Optional[str] = ''
@@ -136,7 +136,7 @@ class User(PyonirSchema):
     # configurable user details
     name: str = ''
     avatar: str = ''
-    meta: UserMeta = None #field(default_factory=UserMeta)
+    meta: UserMeta = UserMeta()
 
     # system specific fields
     id: str = ''

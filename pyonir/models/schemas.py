@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from typing import Type, TypeVar, Dict, Iterable
+from typing import Type, TypeVar, Dict, Iterable, Any
 
 from sqlmodel import SQLModel
 from sqlmodel.main import SQLModelMetaclass
@@ -33,10 +33,20 @@ class SchemaTable(SQLModelMetaclass):
 
         return new_cls
 
-class BaseSchema(SQLModel):
+class BaseSchema(SQLModel, metaclass=SchemaTable):
     """
     Interface for immutable dataclass models with CRUD and session support.
     """
+    _errors: list[dict[str, Any]]
+
+    def model_post_init(self, __context):
+        object.__setattr__(self, "_errors", [])
+        self.validate_fields()
+
+    def __post_init__(self):
+        self._errors = []
+        self.validate_fields()
+
 
     def save_to_file(self, file_path: str) -> bool:
         """Saves the user data to a file in JSON format"""
@@ -67,6 +77,27 @@ class BaseSchema(SQLModel):
         """Returns a JSON serializable dictionary"""
         import json
         return json.dumps(self.to_dict(obfuscate))
+
+    def is_valid(self) -> bool:
+        """Returns True if there are no validation errors."""
+        return not self._errors
+
+    def validate_fields(self, field_name: str = None):
+        """
+        Validates fields by calling `validate_<fieldname>()` if defined.
+        Clears previous errors on every call.
+        """
+        if field_name is not None:
+            validator_fn = getattr(self, f"validate_{field_name}", None)
+            if callable(validator_fn):
+                validator_fn()
+            return
+        for name in self.__dict__.keys():
+            if name.startswith("_"):
+                continue
+            validator_fn = getattr(self, f"validate_{name}", None)
+            if callable(validator_fn):
+                validator_fn()
 
     @classmethod
     def from_file(cls: Type[T], file_path: str, app_ctx=None) -> T:

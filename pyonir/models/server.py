@@ -303,6 +303,7 @@ class BaseRequest:
         if not resolver_action: return
         resolver_path = resolver_action.get('call')
         del resolver_action['call']
+        self.file.data.update(resolver_action)
 
         app_plugin = list(filter(lambda p: p.name == resolver_path.split('.')[0], Site.activated_plugins))
         app_plugin = app_plugin[0] if len(app_plugin) else Site

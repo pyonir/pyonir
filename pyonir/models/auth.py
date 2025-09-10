@@ -520,6 +520,7 @@ class Auth:
         user_account_path = os.path.join(self.app.contents_dirpath, 'users', uid, 'profile.json')
         user.id = uid
         user.file_path = user_account_path
+        user.file_dirpath = os.path.dirname(user_account_path)
         if os.path.exists(user_account_path):
             self.response = self.responses.ACCOUNT_EXISTS
             return False

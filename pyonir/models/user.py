@@ -135,13 +135,13 @@ class User(PyonirSchema):
 
     # configurable user details
     name: str = ''
-    avatar: str = ''
+    avatar: str = '/public/images/default-avatar.png'
     meta: UserMeta = UserMeta()
 
     # system specific fields
     id: str = ''
     """Unique identifier for the user"""
-    role: str = ''
+    role: str = Roles.NONE.name
     """Role assigned to the user, defaults to 'none'"""
     verified_email: bool = False
     """Flag indicating if the user's email is verified"""
@@ -157,13 +157,6 @@ class User(PyonirSchema):
     """Authentication token verifying the user"""
     _private_keys: list[str] = ['id', 'password', 'auth_token']
     """List of private keys that should not be included in JSON serialization"""
-
-    def __init__(self, **data):
-        super().__init__(**data)
-        if not self.role:
-            self.role = Roles.NONE.name
-        if not self.avatar:
-            self.avatar = '/public/images/default-avatar.png'
 
     @property
     def perms(self) -> list[PermissionLevel]:

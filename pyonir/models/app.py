@@ -417,6 +417,7 @@ class BaseApp(Base):
             'pyformat': self.parse_pyformat,
             'md': parse_markdown
         }
+        self.domain
 
     @property
     def env(self) -> EnvConfig: return self._env
@@ -452,7 +453,9 @@ class BaseApp(Base):
     def domain_name(self) -> str: return get_attr(self.env, 'app.domain', self.host) # if self.configs else self.host
 
     @property
-    def domain(self) -> str: return f"{self.protocol}://{self.domain_name}{':'+str(self.port) if self.is_dev else ''}".replace('0.0.0.0','localhost') # if self.configs else self.host
+    def domain(self) -> str:
+        host = f"localhost:{self.port}" if self.is_dev else self.domain_name
+        return f"{self.protocol}://{host}"
 
     @property
     def activated_plugins(self) -> frozenset[BasePlugin]:

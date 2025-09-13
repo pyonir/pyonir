@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os, time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -5,8 +7,10 @@ from typing import Tuple, Any, Dict, Optional
 
 from starlette_wtf import csrf_token
 
+# from pyonir import BaseApp
+from pyonir.models.server import BaseRequest, BaseApp
 from pyonir.models.user import User, Role, PermissionLevel, Roles, UserSignIn
-from pyonir.pyonir_types import PyonirRequest, PyonirApp, PyonirRestResponse
+from pyonir.pyonir_types import PyonirRequest, PyonirRestResponse
 
 
 @dataclass
@@ -65,42 +69,34 @@ class UserCredentials:
         return cls(email=username, password=password, has_session=True) if username and password else None
 
 
-def auth_required(role: Role = None, perms: PermissionLevel = None):
-    """
-    Decorator for Auth methods to ensure the instance model is valid
-    before executing the method.
-    Raises ValueError if validation fails.
-    """
-    from functools import wraps
-
-    def decorator(func):
-        @wraps(func)
-        async def wrapper(*args, **kwargs):
-            from pyonir import Site
-            import inspect
-            is_async = inspect.iscoroutinefunction(func)
-
-            authorizer = Auth(request=Site.server.request, app=Site)
-            if not authorizer.user:
-                formatted_msg = authorizer.responses.UNAUTHORIZED.message.format(
-                    user=authorizer.user_creds,
-                    request=authorizer.request
-                )
-                authorizer.response = authorizer.responses.UNAUTHORIZED.response(message=formatted_msg)
-                # authorizer.response.data = authorizer.user_creds._errors
-                return authorizer.response
-            return await func(*args, **kwargs) if is_async else func(*args, **kwargs)
-        return wrapper
-
-    return decorator
-
-@auth_required()
-def test_auth(request: PyonirRequest, app: PyonirApp) -> 'AuthResponse':
-    authorizer = Auth(request, app)
-    authorizer.response = authorizer.responses.SUCCESS if authorizer.user else authorizer.responses.UNAUTHORIZED
-    if authorizer.user:
-        authorizer.response.data = authorizer.user
-    return authorizer.response
+# def auth_required(role: Role = None, perms: PermissionLevel = None):
+#     """
+#     Decorator for Auth methods to ensure the instance model is valid
+#     before executing the method.
+#     Raises ValueError if validation fails.
+#     """
+#     from functools import wraps
+#
+#     def decorator(func):
+#         @wraps(func)
+#         async def wrapper(*args, **kwargs):
+#             from pyonir import Site
+#             import inspect
+#             is_async = inspect.iscoroutinefunction(func)
+#
+#             authorizer = Auth(request=Site.server.request, app=Site)
+#             if not authorizer.user:
+#                 formatted_msg = authorizer.responses.UNAUTHORIZED.message.format(
+#                     user=authorizer.user_creds,
+#                     request=authorizer.request
+#                 )
+#                 authorizer.response = authorizer.responses.UNAUTHORIZED.response(message=formatted_msg)
+#                 # authorizer.response.data = authorizer.user_creds._errors
+#                 return authorizer.response
+#             return await func(*args, **kwargs) if is_async else func(*args, **kwargs)
+#         return wrapper
+#
+#     return decorator
 
 def generate_id(from_email=None) -> str:
     """Generates a unique identifier based on the from_email address."""
@@ -165,6 +161,7 @@ def client_location(request: PyonirRequest) -> Optional[dict]:
     ip = get_client_ip(request)
     if not ip: return None
     location = get_geolocation(ip)
+    location['device'] = request.headers.get('user-agent', 'UNKNOWN')
     return location
 
 def jwt_decoder(jwt_token: str, salt: str)-> dict:
@@ -381,9 +378,9 @@ class Auth:
     user_model = User
     """User model used for authentication, defaults to User class."""
 
-    def __init__(self, request: PyonirRequest, app: PyonirApp):
-        self.app: PyonirApp = app
-        self.request: PyonirRequest = request
+    def __init__(self, request: BaseRequest, app: BaseApp):
+        self.app: BaseApp = app
+        self.request: BaseRequest = request
 
         self.request_token = self.request.headers.get('X-CSRF-Token', self.request.form.get('csrf_token'))
         """CSRF token for the request, used to prevent cross-site request forgery."""
@@ -486,20 +483,24 @@ class Auth:
 
     def log_user_location(self, user: User):
         """logs user signin location"""
+        from pyonir.models.user import Location
         new_location = client_location(self.request)
         if not new_location: return
-        match_keys = ["ip", "device"]
+        new_location = Location(**new_location)
+        match_keys = ["ip", "city"]
         locations = user.signin_locations or []
         print(new_location)
         # Find matches using list comprehension
-        matches = [loc for loc in locations if all(loc[k] == new_location[k] for k in match_keys)]
+        # matches = [loc for loc in locations if all(loc[k] == new_location[k] for k in match_keys)]
+        matches = [loc for loc in locations if all(getattr(loc, k, None) == getattr(new_location, k, None) for k in match_keys)]
 
         if matches:
-            matches[0]["signin_count"] = matches[0].get("signin_count", 0) + 1
+            matches = matches[0]
+            matches.signin_count = (matches.signin_count or 0) + 1
         else:
-            new_loc = dict(new_location)
-            new_loc["signin_count"] = 1
-            locations.append(new_loc)
+            new_location.signin_count = 1
+            locations.append(new_location)
+        user.signin_locations = locations
 
 
     def refresh(self) -> bool:
@@ -591,7 +592,7 @@ class Auth:
         """Queries the user account based on the provided credentials."""
         uid =  generate_id(self.user_creds.email) if not self.user_creds.has_session else user_email or self.user_creds.email
         user_account_path = os.path.join(self.app.contents_dirpath, 'users', uid or '', 'profile.json')
-        user_account = User.from_file(user_account_path, app_ctx=self.app.app_ctx) if os.path.exists(user_account_path) else None
+        user_account = self.user_model.from_file(user_account_path, app_ctx=self.app.app_ctx) if os.path.exists(user_account_path) else None
         return user_account
 
     def get_user_creds(self) -> 'UserCredentials':

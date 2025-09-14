@@ -83,32 +83,6 @@ class BaseRequest:
         file_redirect = self.file.data.get('redirect_to', self.file.data.get('redirect'))
         return self.form.get('redirect_to', self.form.get('redirect', file_redirect))
 
-    def process_resolver(self):
-        from pyonir import Site
-        from pyonir.models.parser import FileStatuses
-        req_file = self.file
-        resolver_obj = req_file.data.get(req_file.RESOLVER_KEY, {})
-        resolver_action = resolver_obj.get(self.method)
-        # if resolver_obj and not resolver_action:
-        #     req_file.status = FileStatuses.FORBIDDEN
-        #     self.type = JSON_RES
-        if not resolver_action or req_file.resolver is not None: return
-        resolver_path = resolver_action.get('call')
-        resolver_args = resolver_action.get('args')
-        resolver_redirect = resolver_action.get('redirect')
-
-        self.type = resolver_action.get('headers', {}).get('accept', self.type)
-        app_plugin = list(filter(lambda p: p.name == resolver_path.split('.')[0], Site.activated_plugins))
-        app_plugin = app_plugin[0] if len(app_plugin) else Site
-        resolver = app_plugin.reload_resolver(resolver_path)
-        if resolver and resolver_args:
-            self.form.update(resolver_args)
-        if resolver and resolver_redirect:
-            self.form['redirect'] = resolver_redirect
-        if not resolver:
-            resolver = self.auth.responses.ERROR.response(message=f"Unable to resolve endpoint")
-        return resolver
-
     def ssg_request(self, page, params):
         self.file = page
         self.url = page.data.get('url')
@@ -238,7 +212,7 @@ class BaseRequest:
         a 404 page is returned.
         """
         from pyonir.models.app import BaseApp
-        from pyonir.models.page import BasePage, DeserializeFile
+        from pyonir.models.parser import DeserializeFile
         path_str = path_str or self.path
         is_home = path_str == '/'
         ctx_route, ctx_paths = app.request_paths or ('', [])
@@ -287,17 +261,16 @@ class BaseRequest:
 
     @staticmethod
     def get_params(url, as_dict=False):
-        import urllib
-        from pyonir.utilities import dict_to_class
-        args = {params.split('=')[0]: urllib.parse.unquote(params.split("=").pop()) for params in
-                url.split('&') if params != ''}
+        from pyonir.models.mapper import dict_to_class
+        from pyonir.models.utils import parse_url_params
+        args = parse_url_params(url)
         if args.get('model'): del args['model']
         return args if as_dict else dict_to_class(args, 'query_params')
 
     def process_resolver(self, request: 'BaseRequest') -> Optional[Union[callable, Any]]:
         """Updates request data a callable method to execute during request."""
         from pyonir import Site
-        from pyonir.utilities import get_attr
+        from pyonir.models.utils import get_attr
         resolver_obj = self.file.data.get('@resolvers', {})
         resolver_action = resolver_obj.get(request.method)
         if not resolver_action: return
@@ -512,7 +485,7 @@ class BaseServer(Starlette):
         Site.server.request = pyonir_request
         default_system_router = dec_func.__name__ == 'pyonir_index'
         # Serve static urls
-        if pyonir_request.is_static and default_system_router:
+        if default_system_router and pyonir_request.is_static:
             return Site.server.resolve_static(Site, pyonir_request)
 
         # Update template globals
@@ -533,7 +506,6 @@ class BaseServer(Starlette):
         # Preprocess routes or resolver endpoint from file
         app_ctx.apply_virtual_routes(pyonir_request)
         resolver = pyonir_request.process_resolver(pyonir_request)
-        # pyonir_request.process_resolver(pyonir_request)
 
         route_func = dec_func if not callable(resolver) else resolver
 
@@ -551,7 +523,6 @@ class BaseServer(Starlette):
             default_args.update(**pyonir_request.query_params.__dict__)
             default_args.update(**pyonir_request.form)
             args = cls_mapper(default_args, route_func, from_request=pyonir_request)
-            # pyonir_request.router_args = args
 
             # Resolve route decorator methods
             pyonir_request.server_response = await route_func(**args) if is_async else route_func(**args)
@@ -568,7 +539,6 @@ class BaseServer(Starlette):
 
         # Execute plugins hooks initial request
         await Site.run_async_plugins(PyonirHooks.ON_REQUEST, pyonir_request)
-        # await Site.run_async_hooks(PyonirHooks.ON_REQUEST, pyonir_request)
 
         # Finalize response output
         if isinstance(pyonir_request.server_response, BaseRestResponse):

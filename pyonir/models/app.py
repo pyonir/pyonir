@@ -155,8 +155,7 @@ class Base:
 
     def parse_file(self, file_path: str) -> 'DeserializeFile':
         """Parses a file and returns a Parsely instance for the file."""
-        # from pyonir.parser import Parsely
-        from pyonir.models.page import DeserializeFile
+        from pyonir.models.parser import DeserializeFile
         return DeserializeFile(file_path, app_ctx=self.app_ctx)
 
     def apply_virtual_routes(self, pyonir_request: 'BaseRequest') -> 'Parsely':
@@ -417,7 +416,6 @@ class BaseApp(Base):
             'pyformat': self.parse_pyformat,
             'md': parse_markdown
         }
-        self.domain
 
     @property
     def env(self) -> EnvConfig: return self._env

@@ -1,11 +1,11 @@
 {
   "auth_from": "basic",
   "avatar": "/user/files/media/avatar.jpg?t=1757343865",
-  "email": "pyonir@site.com",
   "file_dirpath": "/pyonir/pyonir/tests/contents/test_user.json",
   "file_path": "/pyonir/pyonir/tests/contents/test_user.json",
-  "id": "com_pyonir@site",
+  "uid": "com_pyonir@site",
   "meta": {
+    "email": "pyonir@site.com",
     "first_name": "Test",
     "last_name": "User",
     "phone": "1234567890",

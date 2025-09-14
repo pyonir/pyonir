@@ -3,7 +3,7 @@ import sqlite3
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Optional, Type, Iterable, Callable, Union, Iterator, Generator
+from typing import Any, Dict, Optional, Type, Union, Iterator, Generator
 
 from sortedcontainers import SortedList
 
@@ -336,7 +336,8 @@ def query_fs(abs_dirpath: str,
                 force_all: bool = True) -> Generator:
     """Returns a generator of files from a directory path"""
     from pathlib import Path
-    from pyonir.models.page import BasePage, DeserializeFile
+    from pyonir.models.page import BasePage
+    from pyonir.models.parser import DeserializeFile
     from pyonir.models.media import BaseMedia
 
     # results = []

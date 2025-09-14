@@ -155,8 +155,7 @@ class Base:
 
     def parse_file(self, file_path: str) -> 'DeserializeFile':
         """Parses a file and returns a Parsely instance for the file."""
-        # from pyonir.parser import Parsely
-        from pyonir.models.page import DeserializeFile
+        from pyonir.models.parser import DeserializeFile
         return DeserializeFile(file_path, app_ctx=self.app_ctx)
 
     def apply_virtual_routes(self, pyonir_request: 'BaseRequest') -> 'Parsely':
@@ -417,7 +416,6 @@ class BaseApp(Base):
             'pyformat': self.parse_pyformat,
             'md': parse_markdown
         }
-        self.domain
 
     @property
     def env(self) -> EnvConfig: return self._env
@@ -434,7 +432,9 @@ class BaseApp(Base):
         return getattr(self.env, 'APP_ENV') == DEV_ENV and not self.SSG_IN_PROGRESS
 
     @property
-    def host(self) -> str: return '0.0.0.0' if self.is_dev else '127.0.0.1'
+    def host(self) -> str:
+        dev_host = get_attr(self.env, 'app.localdomain', f"localhost")
+        return dev_host if self.is_dev else '0.0.0.0'
 
     @property
     def port(self) -> int:
@@ -454,7 +454,7 @@ class BaseApp(Base):
 
     @property
     def domain(self) -> str:
-        host = f"localhost:{self.port}" if self.is_dev else self.domain_name
+        host = f"{self.host}:{self.port}" if self.is_dev else self.domain_name
         return f"{self.protocol}://{host}"
 
     @property

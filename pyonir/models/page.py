@@ -1,13 +1,6 @@
-import base64
-import re
 from datetime import datetime
 import os, pytz
-from pathlib import Path
-from typing import Any, Union, Optional
-
-from pyonir.models.database import BasePagination
-from pyonir.models.parser import DeserializeFile
-from pyonir.utilities import get_attr
+from typing import Any
 
 IMG_FILENAME_DELIM = '::'  # delimits the file name and description
 
@@ -66,14 +59,9 @@ class BaseFile:
 class BasePage:
     """Represents a single page returned from a web request"""
     _orm_options = {"mapper": {'created_on': 'file_created_on', 'modified_on': 'file_modified_on'}}
-    # url: str = ''
-    # slug: str = ''
-    # title: str = ''
-    # content: str = ''
     template: str = 'pages.html'
     created_on: datetime = None
     modified_on: datetime = None
-    # entries: BasePagination = None
 
     def __lt__(self, other) -> bool:
         """Compares two BasePage instances based on their created_on attribute."""

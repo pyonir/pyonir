@@ -5,14 +5,15 @@ from typing import Type, TypeVar, Dict, Iterable, Any
 from sqlmodel import SQLModel
 from sqlmodel.main import SQLModelMetaclass
 
-from pyonir.utilities import deserialize_datestr
-
 T = TypeVar("T")
 class SchemaTable(SQLModelMetaclass):
     def __new__(cls, name, bases, namespace, **kwargs):
         # Grab frozen option (default False)
         is_frozen = kwargs.pop("frozen", None)
         is_frozen = is_frozen if is_frozen is not None else False
+        private_keys = kwargs.pop("private_keys", None)
+        if private_keys and "_private_keys" not in namespace:
+            namespace["_private_keys"] = private_keys
 
         # Build default model_config
         default_config = {
@@ -30,6 +31,8 @@ class SchemaTable(SQLModelMetaclass):
 
         # Attach the merged config
         setattr(new_cls, "model_config", merged_config)
+        print(f"Created SchemaTable: {name}, private_keys={private_keys or getattr(new_cls, '_private_keys', None)}")
+        # setattr(new_cls, "_private_keys", private_keys)
 
         return new_cls
 
@@ -109,6 +112,7 @@ class BaseSchema(SQLModel, metaclass=SchemaTable):
 
     @staticmethod
     def generate_date(date_value: str = None) -> datetime:
+        from pyonir.models.utils import deserialize_datestr
         return deserialize_datestr(date_value or datetime.now())
 
     @staticmethod

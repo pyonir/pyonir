@@ -17,16 +17,16 @@ class Address:
         self.zip_code = zip_code
 
 class User:
-    id: int
+    uid: int
     name: str
     email: Optional[str]
     address: Optional[Address]
     tags: List[str]
     meta: Dict[str, Union[str, int]]
 
-    def __init__(self, id: int, name: str, email: Optional[str],
+    def __init__(self, uid: int, name: str, email: Optional[str],
                  address: Optional[Address], tags: List[str], meta: Dict[str, Union[str, int]]):
-        self.id = id
+        self.uid = uid
         self.name = name
         self.email = email
         self.address = address
@@ -68,10 +68,10 @@ def test_no_hint_mapping():
     assert genmodel.url == '/foo'
 
 def test_scalar_mapping():
-    obj = {"id": "123", "name": "Alice", "email": None, "address": None, "tags": [], "meta": {}}
+    obj = {"uid": "123", "name": "Alice", "email": None, "address": None, "tags": [], "meta": {}}
     user = cls_mapper(obj, User)
-    assert isinstance(user.id, int)
-    assert user.id == 123
+    assert isinstance(user.uid, int)
+    assert user.uid == 123
     assert user.name == "Alice"
     assert user.email is None
 
@@ -85,7 +85,7 @@ def test_optional_mapping():
 
 def test_nested_object():
     obj = {
-        "id": 10, "name": "Diana", "email": "diana@test.com",
+        "uid": 10, "name": "Diana", "email": "diana@test.com",
         "address": {"street": "Main St", "zip_code": "90210"},
         "tags": ["admin", "staff"],
         "meta": {"age": "30", "score": 95}
@@ -100,7 +100,7 @@ def test_nested_object():
 
 def test_list_mapping():
     obj = {
-        "id": 20, "name": "Eva", "email": None,
+        "uid": 20, "name": "Eva", "email": None,
         "address": None,
         "tags": ["one", "two"],
         "meta": {}
@@ -111,7 +111,7 @@ def test_list_mapping():
 
 def test_dict_mapping_with_union():
     obj = {
-        "id": 30, "name": "Frank", "email": None,
+        "uid": 30, "name": "Frank", "email": None,
         "address": None,
         "tags": [],
         "meta": {"age": 42, "nickname": "franky"}

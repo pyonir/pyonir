@@ -12,7 +12,7 @@ def test_from_file():
     user = User.from_file(test_user_file)
 
     assert isinstance(user, User)
-    assert user.email == "pyonir@site.com"
+    assert user.meta.email == "pyonir@site.com"
     assert user.name == "PyonirUserName"
     assert isinstance(user.meta, UserMeta)
     assert user.meta.first_name == "Test"

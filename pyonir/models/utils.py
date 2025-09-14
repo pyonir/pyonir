@@ -3,8 +3,12 @@ from datetime import datetime
 from collections.abc import Generator
 from typing import Optional, Union
 
-from pyonir.models.mapper import cls_mapper
 
+def parse_url_params(param_str: str) -> dict:
+    """Parses a URL query string into a dictionary"""
+    from urllib.parse import parse_qs
+    parsed = parse_qs(param_str)
+    return {k: v[0] if len(v) == 1 else v for k, v in parsed.items()}
 
 def process_contents(path, app_ctx=None, file_model: any = None) -> object:
     """Deserializes all files within the contents directory"""

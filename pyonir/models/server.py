@@ -1,7 +1,7 @@
 from __future__ import annotations
 import os
 from dataclasses import dataclass, field
-from typing import Optional, Union, Tuple, Callable, get_type_hints, OrderedDict, TYPE_CHECKING, Any
+from typing import Optional, Union, Tuple, Callable, get_type_hints, OrderedDict, Any
 
 from starlette.applications import Starlette
 from starlette.requests import Request as StarletteRequest

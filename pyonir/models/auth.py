@@ -68,44 +68,12 @@ class UserCredentials:
             pass
         return cls(email=username, password=password, has_session=True) if username and password else None
 
-
-# def auth_required(role: Role = None, perms: PermissionLevel = None):
-#     """
-#     Decorator for Auth methods to ensure the instance model is valid
-#     before executing the method.
-#     Raises ValueError if validation fails.
-#     """
-#     from functools import wraps
-#
-#     def decorator(func):
-#         @wraps(func)
-#         async def wrapper(*args, **kwargs):
-#             from pyonir import Site
-#             import inspect
-#             is_async = inspect.iscoroutinefunction(func)
-#
-#             authorizer = Auth(request=Site.server.request, app=Site)
-#             if not authorizer.user:
-#                 formatted_msg = authorizer.responses.UNAUTHORIZED.message.format(
-#                     user=authorizer.user_creds,
-#                     request=authorizer.request
-#                 )
-#                 authorizer.response = authorizer.responses.UNAUTHORIZED.response(message=formatted_msg)
-#                 # authorizer.response.data = authorizer.user_creds._errors
-#                 return authorizer.response
-#             return await func(*args, **kwargs) if is_async else func(*args, **kwargs)
-#         return wrapper
-#
-#     return decorator
-
-def generate_id(from_email=None) -> str:
-    """Generates a unique identifier based on the from_email address."""
-    import uuid
-    if from_email is None:
-        return str(uuid.uuid1())
-    (name, domain) = from_email.strip().split('@') if '@' in from_email else (from_email, 'no_domain_specified')
-    ext = domain.split('.').pop()
-    return f"{ext}_{name}@{domain.replace('.' + ext, '')}"
+def generate_id(from_email: str, salt: str, length: int = 16) -> str:
+    """Encodes the user ID (email) to a fixed-length string."""
+    import hashlib, base64
+    hash_email = hashlib.sha256((salt + from_email).encode()).hexdigest()
+    urlemail = base64.urlsafe_b64encode(hash_email.encode()).decode()
+    return urlemail[:length]
 
 def hash_password(password_str: str) -> str:
     """Hashes a password string using Argon2."""
@@ -420,7 +388,7 @@ class Auth:
         exp_time = exp_time or self.LOCKOUT_TIME
         exp_in = (datetime.datetime.now() + datetime.timedelta(minutes=exp_time)).timestamp()
         user_jwt = {
-            "sub": user_id or self.user.id,
+            "sub": user_id or self.user.uid,
             "role": user_role or self.user.role,
             "remember_for": exp_time,
                 "iat": datetime.datetime.now(),
@@ -454,7 +422,7 @@ class Auth:
         if user:
             if user.auth_from == 'oauth2':
                 # TODO: handle checking oauth
-                user_jwt = self.create_jwt(user.id, user.role)
+                user_jwt = self.create_jwt(user.uid, user.role)
                 self.log_user_location(user)
                 user.save_to_file(user.file_path)
                 user.save_to_session(self.request, value=user_jwt)
@@ -465,7 +433,7 @@ class Auth:
                 requested_passw = Auth.harden_password(salt, self.user_creds.password, user.auth_token)
                 has_valid_creds = Auth.verify_password(user.password, requested_passw)
                 if has_valid_creds:
-                    user_jwt = self.create_jwt(user.id, user.role)
+                    user_jwt = self.create_jwt(user.uid, user.role)
                     # update csrf token after successful login for better security
                     user.auth_token = csrf_token(self.request.server_request)
                     user.password = self.hash_password(self.user_creds.password, with_token=user.auth_token)
@@ -516,25 +484,25 @@ class Auth:
         user_token = csrf_token(self.request.server_request)
         if not user:
             hashed_password = self.hash_password(self.user_creds.password, with_token=user_token)
-            user = User(email=self.user_creds.email, password=hashed_password, auth_token=user_token)
-        uid = generate_id(user.email)
-        user_account_path = os.path.join(self.app.contents_dirpath, 'users', uid, 'profile.json')
-        user.id = uid
-        user.file_path = user_account_path
-        user.file_dirpath = os.path.dirname(user_account_path)
-        if os.path.exists(user_account_path):
+            user = User(name=self.user_creds.email.split('@')[0], password=hashed_password, auth_token=user_token, meta={'email': self.user_creds.email})
+        uid = generate_id(from_email=user.meta.email, salt=self.app.salt)
+        user_profile_path = os.path.join(self.app.contents_dirpath, 'users', uid, 'profile.json')
+        user.uid = uid
+        user.file_path = user_profile_path
+        user.file_dirpath = os.path.dirname(user_profile_path)
+        if os.path.exists(user_profile_path):
             self.response = self.responses.ACCOUNT_EXISTS
             return False
 
         self.log_user_location(user)
 
-        created = user.save_to_file(user_account_path)
+        created = user.save_to_file(user_profile_path)
         if created:
             formated_msg = self.responses.SUCCESS.message.format(user=user, request=self.request)
             self.response = self.responses.SUCCESS.response(formated_msg)
         else:
             self.response = self.responses.SOMETHING_WENT_WRONG
-            print(f"Failed to create user account at {user_account_path}")
+            print(f"Failed to create user account at {user_profile_path}")
         return created
 
     def signin_has_exceeded(self):
@@ -583,14 +551,14 @@ class Auth:
             self.session.clear()
             return None
         # update jwt expiration time
-        user.save_to_session(self.request, value=self.create_jwt(user.id, user.role))
+        user.save_to_session(self.request, value=self.create_jwt(user.uid, user.role))
         self.response = self.responses.ACTIVE_SESSION
         return user
 
 
     def query_account(self, user_email: str = None) -> User:
         """Queries the user account based on the provided credentials."""
-        uid =  generate_id(self.user_creds.email) if not self.user_creds.has_session else user_email or self.user_creds.email
+        uid =  generate_id(from_email=self.user_creds.email, salt=self.app.salt) if not self.user_creds.has_session else user_email or self.user_creds.email
         user_account_path = os.path.join(self.app.contents_dirpath, 'users', uid or '', 'profile.json')
         user_account = self.user_model.from_file(user_account_path, app_ctx=self.app.app_ctx) if os.path.exists(user_account_path) else None
         return user_account

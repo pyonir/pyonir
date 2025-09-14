@@ -1,9 +1,12 @@
 from __future__ import annotations
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
 
+from sqlmodel import Field
+
 from pyonir.core import PyonirSchema
-from pyonir.pyonir_types import PyonirRequest
+from pyonir.models.schemas import BaseSchema
+from pyonir.models.server import BaseRequest
 
 
 class PermissionLevel(str):
@@ -114,7 +117,8 @@ class UserSignIn(PyonirSchema):
             self._errors.append("Password must be at least 6 characters long")
 
 class UserMeta(PyonirSchema):
-    """Represents details about a user"""
+    """Represents personal details about a user"""
+    email: Optional[str] = ''
     first_name: Optional[str] = ''
     last_name: Optional[str] = ''
     gender: Optional[str] = ''
@@ -124,11 +128,27 @@ class UserMeta(PyonirSchema):
     phone: Optional[str] = ''
     about_you: Optional[str] = ''
 
+class Location(BaseSchema):
+    """Represents a user's location information."""
+    ip: Optional[str]
+    city: Optional[str]
+    region: Optional[str]
+    country_name: Optional[str]
+    postal: Optional[str]
+    latitude: Optional[float]
+    longitude: Optional[float]
+    signin_count: Optional[int] = 0
+    device: Optional[str] = ''
+    file_path: Optional[str] = ''
+    file_dirpath: Optional[str] = ''
+
 class User(PyonirSchema):
     """Represents an app user"""
+    _private_keys: list[str] = ['id', 'password', 'auth_token']
+    """List of private keys that should not be included in JSON serialization"""
 
     # user signup fields
-    email: str
+    # email: str
     """User's email address is required for signup"""
     password: str = ''
     """User's password to authenticate"""
@@ -139,7 +159,7 @@ class User(PyonirSchema):
     meta: UserMeta = UserMeta()
 
     # system specific fields
-    id: str = ''
+    uid: str = ''
     """Unique identifier for the user"""
     role: str = Roles.NONE.name
     """Role assigned to the user, defaults to 'none'"""
@@ -151,12 +171,14 @@ class User(PyonirSchema):
     """Directory path for user-specific files"""
     auth_from: Optional[str] = 'basic'
     """Authentication method used by the user (e.g., 'google', 'email')"""
-    signin_locations: Optional[list] = []
+    signin_locations: Optional[list[Location]] = []
     """Locations capture during signin"""
     auth_token: Optional[str] = ''
     """Authentication token verifying the user"""
-    _private_keys: list[str] = ['id', 'password', 'auth_token']
-    """List of private keys that should not be included in JSON serialization"""
+
+    @property
+    def email(self) -> str:
+        return self.meta.email or ''
 
     @property
     def perms(self) -> list[PermissionLevel]:
@@ -173,7 +195,7 @@ class User(PyonirSchema):
     def has_perms(self, actions: list[PermissionLevel]) -> bool:
         return any([self.has_perm(action) for action in actions])
 
-    def save_to_session(self, request: PyonirRequest,key = None, value = None) -> None:
+    def save_to_session(self, request: BaseRequest, key = None, value = None) -> None:
         """Convert instance to a serializable dict."""
         request.server_request.session[key or 'user'] = value or self.id
 

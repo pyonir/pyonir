@@ -3,6 +3,7 @@ import os
 from dataclasses import dataclass, field
 from typing import Optional, Union, Tuple, Callable, get_type_hints, OrderedDict, Any
 
+from pyonir.models.utils import get_attr
 from starlette.applications import Starlette
 from starlette.requests import Request as StarletteRequest
 
@@ -75,7 +76,7 @@ class BaseRequest:
 
     @property
     def previous_url(self) -> str:
-        return self.server_request.session.pop('previous_url')
+        return self.server_request.session.pop('previous_url') or '/'
 
     @property
     def redirect_to(self):
@@ -481,31 +482,28 @@ class BaseServer(Starlette):
         from pyonir.models.auth import Auth
         from pyonir.models.mapper import cls_mapper
 
-        # star_req = pyonir_request.server_request
-        Site.server.request = pyonir_request
         default_system_router = dec_func.__name__ == 'pyonir_index'
-        # Serve static urls
-        if default_system_router and pyonir_request.is_static:
-            return Site.server.resolve_static(Site, pyonir_request)
+        Site.server.request = pyonir_request
 
-        # Update template globals
-        Site.TemplateEnvironment.globals['request'] = pyonir_request
+        # Init Web response object
+        pyonir_response = BaseRestResponse(status_code=pyonir_request.status_code)
 
         # Preprocess request form data
         await pyonir_request.process_request_data()
+
         # Init Auth handler
         pyonir_request.auth = Auth(pyonir_request, Site)
-        pyonir_response = BaseRestResponse(status_code=pyonir_request.status_code)
 
-        # Process request context i.e plugin vs app
+        # Update template globals for request
+        Site.TemplateEnvironment.globals['request'] = pyonir_request
+
+        # File processing for request
         pyonir_request.set_context()
-        # Process file associated with request
         app_ctx, req_file = pyonir_request.resolve_request_to_file(pyonir_request.app_ctx_ref)
         pyonir_request.file = req_file
-
-        # Preprocess routes or resolver endpoint from file
         app_ctx.apply_virtual_routes(pyonir_request)
         resolver = pyonir_request.process_resolver(pyonir_request)
+        custom_response_headers = get_attr(pyonir_request.file.data, '@response.headers', {})
 
         route_func = dec_func if not callable(resolver) else resolver
 
@@ -517,16 +515,12 @@ class BaseServer(Starlette):
         # Get router endpoint from map
         if callable(route_func):
             is_async = inspect.iscoroutinefunction(route_func)
-
             default_args = dict(get_type_hints(route_func))
             default_args.update(**pyonir_request.path_params.__dict__)
             default_args.update(**pyonir_request.query_params.__dict__)
             default_args.update(**pyonir_request.form)
             args = cls_mapper(default_args, route_func, from_request=pyonir_request)
-
-            # Resolve route decorator methods
             pyonir_request.server_response = await route_func(**args) if is_async else route_func(**args)
-
         else:
             pyonir_request.server_response = req_file.resolver or req_file.data
 
@@ -535,7 +529,8 @@ class BaseServer(Starlette):
             return Site.server.serve_redirect(pyonir_request.redirect_to)
 
         # Derive status code
-        pyonir_request.derive_status_code(Site.server.url_map.get(route_func.__name__ if route_func else '') and not default_system_router)
+        is_router = Site.server.url_map.get(route_func.__name__ if route_func else '') and not default_system_router
+        pyonir_request.derive_status_code(is_router_method=is_router)
 
         # Execute plugins hooks initial request
         await Site.run_async_plugins(PyonirHooks.ON_REQUEST, pyonir_request)
@@ -543,6 +538,9 @@ class BaseServer(Starlette):
         # Finalize response output
         if isinstance(pyonir_request.server_response, BaseRestResponse):
             pyonir_response = pyonir_request.server_response
+        elif pyonir_request.is_static:
+            static_res = Site.server.resolve_static(Site, pyonir_request) if default_system_router else None
+            pyonir_response.set_file_response(static_res or pyonir_request.server_response)
         else:
             if pyonir_request.type == JSON_RES:
                 pyonir_response.set_json(pyonir_request.server_response or pyonir_request.file.data)
@@ -552,18 +550,16 @@ class BaseServer(Starlette):
                 print(f'{pyonir_request.type} doesnt have a handler')
 
         # Set headers
+        if custom_response_headers:
+            pyonir_response.set_headers_from_dict(custom_response_headers)
         pyonir_response.set_media(pyonir_request.type)
         pyonir_response.set_header('Server', 'Pyonir Web Framework')
         pyonir_response.set_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
         pyonir_response.set_header("Pragma", "no-cache")
         pyonir_response.set_header("Expires", "0")
 
-        if pyonir_request.is_static:
-            return pyonir_request.server_response
-
         # Generate response
-        pyonir_response.set_server_response()
-        return pyonir_response.render()
+        return pyonir_response.build()
 
     @staticmethod
     def matching_route(route_path: str, regex_path: str) -> Optional[dict]:
@@ -576,7 +572,7 @@ class BaseServer(Starlette):
             return trail_match.groupdict()
 
     @staticmethod
-    def resolve_static(app: BaseApp, request: BaseRequest):
+    def resolve_static(app: BaseApp, request: BaseRequest) -> Union['FileResponse', 'PlainTextResponse']:
         from_frontend = request.path.startswith(app.frontend_assets_route)
         from_public = request.path.startswith(app.public_assets_route)
         base_path = app.frontend_assets_dirpath if from_frontend else app.public_assets_dirpath if from_public else ''
@@ -586,9 +582,14 @@ class BaseServer(Starlette):
         return BaseServer.serve_static(path)
 
     @staticmethod
-    def serve_static(path: str):
+    def serve_static(path: str) -> Union['FileResponse', 'PlainTextResponse']:
         from starlette.responses import FileResponse, PlainTextResponse
-        return FileResponse(path, 200) if os.path.exists(path) else PlainTextResponse(f"{os.path.basename(path)} not found", status_code=404)
+        has_path = os.path.exists(path)
+        res = FileResponse(path, 200) if has_path else PlainTextResponse(f"{os.path.basename(path)} not found", status_code=404)
+        if has_path and path.endswith('.js'):
+            res.headers["Cross-Origin-Opener-Policy"] = "same-origin"
+            res.headers["Cross-Origin-Embedder-Policy"] = "require-corp"
+        return res
 
     @staticmethod
     def response_renderer(value, media_type):
@@ -610,6 +611,7 @@ class BaseServer(Starlette):
     def generate_nginx_conf(app: BaseApp) -> bool:
         """Generates a NGINX conf file based on App configurations"""
         from pyonir.utilities import get_attr, create_file
+        nginx_app_baseurl = get_attr(app.env, "nginx.baseurl")
         nginx_conf = app.TemplateEnvironment.get_template("nginx.jinja.conf") \
             .render(
             app_name=app.name,
@@ -651,9 +653,33 @@ class BaseRestResponse:
     _cookies: list = field(default_factory=list)
     _html: str = None
     _stream: any = None
+    _file_response: any = None
     _media_type: str = None
     _server_response: object = None
     _headers: dict = field(default_factory=dict)
+
+    @property
+    def headers(self): return self._headers
+
+    @property
+    def content(self) -> 'Response':
+        from starlette.responses import Response, StreamingResponse
+        content = ''
+        media_type = self._media_type
+        if self._file_response:
+            self._media_type = self._file_response.media_type
+            return self._file_response
+        if self._stream:
+            media_type = EVENT_RES
+            content = StreamingResponse(content=self._stream, media_type=EVENT_RES)
+        if self._html:
+            media_type = TEXT_RES
+            content = self._html
+        if self.data:
+            media_type = JSON_RES
+            content = self.to_json()
+        self._media_type = media_type
+        return Response(content=content, media_type=media_type)
 
     def to_dict(self) -> dict:
         return {
@@ -674,15 +700,25 @@ class BaseRestResponse:
     def set_header(self, key, value):
         """Sets header values"""
         self._headers[key] = value
+        return self
 
     def set_json(self, value: dict):
         # json = request.file.output_json()
         self.data = value
+        return self
 
     def set_html(self, value: str):
         """Sets the html response value"""
-        # html = request.file.output_html(request)
         self._html = value
+        return self
+
+    def set_file_response(self, value: any):
+        """Sets the file response value"""
+        self._file_response = value
+
+    def build(self):
+        """Builds the response object"""
+        return self.content
 
     def set_server_response(self):
         """Renders the starlette web response"""
@@ -712,6 +748,11 @@ class BaseRestResponse:
         :return:
         """
         self._cookies.append(cookie)
+
+    def set_headers_from_dict(self, headers: dict):
+        """Sets multiple header values from a dictionary"""
+        if headers:
+            self._headers.update(headers)
 
 
 

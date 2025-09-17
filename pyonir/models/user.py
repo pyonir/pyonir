@@ -155,7 +155,7 @@ class User(PyonirSchema):
 
     # configurable user details
     name: str = ''
-    avatar: str = '/public/images/default-avatar.png'
+    avatar: Optional[str] = ''
     meta: UserMeta = UserMeta()
 
     # system specific fields

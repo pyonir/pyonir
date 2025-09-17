@@ -48,6 +48,48 @@ class ImageFormat(Enum):
     def __str__(self):
         return self.value
 
+
+def rotate_image_from_exif(image):
+    from PIL import ExifTags
+    try:
+        # image = Image.open(image_path)
+        # Get EXIF data
+        exif = image.getexif()
+
+        # Find the Orientation tag
+        orientation_tag = None
+        for tag_id, tag_name in ExifTags.TAGS.items():
+            if tag_name == 'Orientation':
+                orientation_tag = tag_id
+                break
+
+        if orientation_tag in exif:
+            orientation = exif[orientation_tag]
+            # Rotate the image based on EXIF orientation
+            if orientation == 3:
+                image = image.rotate(180, expand=True)
+            elif orientation == 6:
+                image = image.rotate(270, expand=True)
+            elif orientation == 8:
+                image = image.rotate(90, expand=True)
+
+            # Remove the orientation tag to prevent double rotation by other viewers
+            if orientation_tag in image.info:
+                del image.info[orientation_tag]
+            if "exif" in image.info:
+                image.info["exif"] = None # Clear EXIF data related to orientation
+
+        return image
+
+    except Exception as e:
+        print(f"Error processing image: {e}")
+        return None
+
+    # Example usage:
+    # rotated_image = rotate_image_from_exif("path/to/your/mobile_upload.jpg")
+    # if rotated_image:
+    #     rotated_image.save("path/to/save/rotated_image.jpg")
+
 class BaseMedia:
     """Represents an image file and its details."""
 
@@ -119,7 +161,6 @@ class BaseMedia:
 
     def compress(self, quality: int = 85) -> None:
         """Compress image file in place."""
-        # output_path = self.file_path if quality == 85 else os.path.join(self.file_dirpath, f"{self.file_name}_{quality}{self.file_ext}")
         self.compress_image(self.file_path, self.file_path, quality=quality)
 
     def rename_media_file(self, file_name: str = None) -> None:
@@ -244,6 +285,7 @@ class BaseMedia:
             return
         img = Image.open(input_path)
         fmt = img.format.upper()  # e.g. "JPEG", "PNG", "WEBP"
+        img = rotate_image_from_exif(img)
 
         if fmt in ("JPEG", "JPG"):
             # JPEG: lossy compression
@@ -264,7 +306,7 @@ class BaseMedia:
         print(f"Compressed {input_path} ({fmt}) → {output_path}")
 
     @staticmethod
-    def media_type(ext: str) -> Optional[str]:
+    def media_type(ext: str) -> str:
         """Return the media type based on file extension."""
         ext = ext.lstrip('.').lower()
 
@@ -274,7 +316,7 @@ class BaseMedia:
             return "video"
         elif ext in (f.value for f in ImageFormat):
             return "image"
-        return None
+        return "document"
 
 @dataclass
 class UploadOptions:
@@ -368,7 +410,7 @@ class MediaManager:
             if limit and series_index > limit: break
             if file_name:
                 file.filename = f"{file_name}_{series_index}" if as_series else file_name
-            directory_name = directory_name or BaseMedia.media_type(file.filename.split('.').pop())
+            # directory_name = directory_name or BaseMedia.media_type(file.filename.split('.').pop())
             media_file: str = await self._upload_bytes(file, directory_name=directory_name)
             if media_file:
                 file_media = BaseMedia(path=media_file)
@@ -384,7 +426,7 @@ class MediaManager:
         from pathlib import Path
         filename = file.filename
         if not filename: return None
-        resource_id = [directory_name, filename]
+        resource_id = [directory_name, filename] if directory_name else [filename]
         path = os.path.join(self.storage_dirpath, *resource_id)
         Path(os.path.dirname(path)).mkdir(parents=True, exist_ok=True)
         with open(path, "wb") as buffer:

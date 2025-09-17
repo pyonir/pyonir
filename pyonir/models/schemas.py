@@ -20,6 +20,7 @@ class SchemaTable(SQLModelMetaclass):
             "frozen": is_frozen,
             "from_attributes": False if is_frozen else True,
             "extra": "forbid" if is_frozen else "allow",
+            "arbitrary_types_allowed": True,
         }
 
         # Allow per-model override via namespace or kwargs

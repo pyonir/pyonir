@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import os
+import os, re
 from dataclasses import dataclass
 from typing import Optional, Union, Generator
 from starlette.datastructures import UploadFile
@@ -48,6 +48,29 @@ class ImageFormat(Enum):
     def __str__(self):
         return self.value
 
+def sanitize_filename(filename: str) -> str:
+    """
+    Sanitize a file name by removing spaces, extra dots, and unsafe characters.
+    Keeps the file extension if present.
+
+    Example:
+        cmd: sanitize_filename("my file.name.txt")
+
+        output: 'my_filename.txt'
+    """
+    # Split into name and extension
+    name, ext = os.path.splitext(filename)
+
+    # Replace spaces with underscores
+    name = name.replace(" ", "_")
+
+    # Remove dots and any characters not alphanumeric, underscore, or hyphen
+    name = re.sub(r"[^A-Za-z0-9_-]", "", name)
+
+    # Collapse multiple underscores
+    name = re.sub(r"_+", "_", name).strip("_")
+
+    return f"{name}{ext}"
 
 def rotate_image_from_exif(image):
     from PIL import ExifTags
@@ -85,10 +108,6 @@ def rotate_image_from_exif(image):
         print(f"Error processing image: {e}")
         return None
 
-    # Example usage:
-    # rotated_image = rotate_image_from_exif("path/to/your/mobile_upload.jpg")
-    # if rotated_image:
-    #     rotated_image.save("path/to/save/rotated_image.jpg")
 
 class BaseMedia:
     """Represents an image file and its details."""
@@ -424,7 +443,7 @@ class MediaManager:
         or upload a video to Cloudflare R2 and return the object key.
         """
         from pathlib import Path
-        filename = file.filename
+        filename = sanitize_filename(file.filename)
         if not filename: return None
         resource_id = [directory_name, filename] if directory_name else [filename]
         path = os.path.join(self.storage_dirpath, *resource_id)

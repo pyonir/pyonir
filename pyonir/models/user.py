@@ -2,8 +2,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
-from sqlmodel import Field
-
 from pyonir.core import PyonirSchema
 from pyonir.models.schemas import BaseSchema
 from pyonir.models.server import BaseRequest
@@ -171,7 +169,7 @@ class User(PyonirSchema):
     """Directory path for user-specific files"""
     auth_from: Optional[str] = 'basic'
     """Authentication method used by the user (e.g., 'google', 'email')"""
-    signin_locations: Optional[list[Location]] = []
+    signin_locations: Optional[list[Location]] = None
     """Locations capture during signin"""
     auth_token: Optional[str] = ''
     """Authentication token verifying the user"""

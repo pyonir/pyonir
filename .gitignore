@@ -50,7 +50,7 @@ coverage.xml
 # System-specific files
 .DS_Store
 Thumbs.db
-
+*.db
 # Python lock files
 poetry.lock
 Pipfile.lock

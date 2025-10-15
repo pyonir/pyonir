@@ -23,7 +23,10 @@ RouteFunction = Callable
 RouteMethods = List[str]
 """HTTP methods supported by a route (e.g., ['GET', 'POST'])."""
 
-PyonirRoute = Tuple[RoutePath, RouteFunction, RouteMethods]
+RouteOptions = Optional[dict]
+"""Additional options for a route, such as authentication requirements."""
+
+PyonirRoute = Tuple[RoutePath, RouteFunction, RouteMethods, RouteOptions]
 """A single route entry containing the path, its handler function, and allowed HTTP methods."""
 
 PyonirRouters = List[Tuple[RoutePath, List[PyonirRoute]]]
@@ -414,6 +417,7 @@ class PyonirApp(PyonirBase):
     server: PyonirServer
     plugins_installed: dict[str, callable]
     plugins_activated: dict[str, callable]
+    datastore_dirpath: str
 
     def subscribe_hook(self, caller:callable, hook:str): pass
 

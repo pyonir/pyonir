@@ -422,32 +422,32 @@ def delete_file(full_filepath):
     return False
 
 
-def create_file(file_abspath: str, data: any = None, is_json: bool = False, mode='w') -> bool:
-    """Creates a new file based on provided data
-    Args:
-        file_abspath: str = path to proposed file
-        data: any = contents to write into file
-        is_json: bool = strict json file
-        mode: str = write mode for file w|w+|a
-    Returns:
-        bool: The return value if file was created successfully
-    """
-    def write_file(file_abspath, data, is_json=False, mode='w'):
-        with open(file_abspath, mode, encoding="utf-8") as f:
-            if is_json:
-                json.dump(data, f, indent=2, sort_keys=True, default=json_serial)
-            else:
-                f.write(data)
-
-    if not os.path.exists(os.path.dirname(file_abspath)):
-        os.makedirs(os.path.dirname(file_abspath))
-    try:
-        is_json = is_json or file_abspath.endswith('.json')
-        write_file(file_abspath, data, is_json=is_json, mode=mode)
-        return True
-    except Exception as e:
-        print(f"Error create_file method: {str(e)}")
-        return False
+# def create_file(file_abspath: str, data: any = None, is_json: bool = False, mode='w') -> bool:
+#     """Creates a new file based on provided data
+#     Args:
+#         file_abspath: str = path to proposed file
+#         data: any = contents to write into file
+#         is_json: bool = strict json file
+#         mode: str = write mode for file w|w+|a
+#     Returns:
+#         bool: The return value if file was created successfully
+#     """
+#     def write_file(file_abspath, data, is_json=False, mode='w'):
+#         with open(file_abspath, mode, encoding="utf-8") as f:
+#             if is_json:
+#                 json.dump(data, f, indent=2, sort_keys=True, default=json_serial)
+#             else:
+#                 f.write(data)
+#
+#     if not os.path.exists(os.path.dirname(file_abspath)):
+#         os.makedirs(os.path.dirname(file_abspath))
+#     try:
+#         is_json = is_json or file_abspath.endswith('.json')
+#         write_file(file_abspath, data, is_json=is_json, mode=mode)
+#         return True
+#     except Exception as e:
+#         print(f"Error create_file method: {str(e)}")
+#         return False
 
 
 def copy_assets(src: str, dst: str, purge: bool = True):

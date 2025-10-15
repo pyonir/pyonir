@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import inspect, os
-from pyonir.utilities import create_file
+from pyonir.models.utils import create_file
 
 gen_template = """\
 @resolvers:

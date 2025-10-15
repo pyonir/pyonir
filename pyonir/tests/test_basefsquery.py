@@ -8,7 +8,7 @@ test_files_dir = '/Users/hypermac/dev/pyonir/pyonir/tests/contents/pages'
 query = BaseFSQuery(test_files_dir)
 
 def test_init():
-    assert query.sort_by == 'file_created_on'
+    assert query.order_by == 'file_created_on'
     assert query.limit == 0
     assert query.max_count == 0
     assert query.curr_page == 0
@@ -18,13 +18,13 @@ def test_init():
 
 def test_set_params():
     params = {
-        'sort_by': 'file_name',
+        'order_by': 'file_name',
         'limit': '10',
         'curr_page': '1',
         'max_count': '100'
     }
     query.set_params(params)
-    assert query.sort_by == 'file_name'
+    assert query.order_by == 'file_name'
     assert query.limit == 10
     assert query.curr_page == 1
     assert query.max_count == 100

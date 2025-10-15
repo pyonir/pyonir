@@ -1,11 +1,16 @@
-import json
 import os
 import re
-from typing import Tuple
+from dataclasses import dataclass
+from typing import Tuple, Dict, List, Any, Optional, Union
+from functools import lru_cache
 
-REG_ILN_LIST = r'([-$@\s*=\w.]+)(\:-)(.*)'
-REG_MAP_LST = r'(^[-$@\s*=\w.]+)(\:[`:`-]?)(.*)'
-REG_METH_ARGS = r"\(([^)]*)\)"
+# Pre-compile regular expressions for better performance
+_RE_ILN_LIST = re.compile(r'([-$@\s*=\w.]+)(\:-)(.*)')
+_RE_MAP_LST = re.compile(r'(^[-$@\s*=\w.]+)(\:[`:`-]?)(.*)')
+_RE_METH_ARGS = re.compile(r"\(([^)]*)\)")
+_RE_LEADING_SPACES = re.compile(r'^\s+')
+
+# Constants
 DICT_DELIM = ": "
 LST_DLM = ":-"
 LST_DICT_DLM = "-"
@@ -20,31 +25,25 @@ LOOKUP_EMBED_PREFIX = '$'
 LOOKUP_DIR_PREFIX = '$dir'
 LOOKUP_DATA_PREFIX = '$data'
 FILTER_KEY = '@filter'
-EmbeddedTypes = dict()
 
+# Global cache
+EmbeddedTypes: Dict[str, Any] = {}
 
-# app_ctx = file.app_ctx
-# file_contents_dirpath = file.file_contents_dirpath
-# file_name = file.file_name + file.file_ext
-dstr = """
-name: MyApp
-version: 1.0.0
-config:
-    host: localhost
-    port: 8000
-    debug: true
-    database:-
-        url: postgresql://localhost/db
-        pool_size: 10
-"""
-lines = dstr.splitlines()
-data = {}
+@dataclass
+class ParselyFile:
+    """Context for parsely file processing"""
+    file_name: str = ''
+    file_contents_dirpath: str = ''
+    app_ctx: 'AppCtx' = None
+    is_virtual_route: bool = False
+    data: dict = None
 
-def count_tabs(str_value: str, tab_width: int = 4):
-    """Returns number of tabs for provided string"""
+def count_tabs(str_value: str, tab_width: int = 4) -> int:
+    """Returns number of tabs for provided string using cached regex"""
     try:
-        return round(len(re.match(r'^\s+', str_value.replace('\n', '')).group()) / tab_width)
-    except Exception as e:
+        match = _RE_LEADING_SPACES.match(str_value.replace('\n', ''))
+        return round(len(match.group()) / tab_width) if match else 0
+    except Exception:
         return 0
 
 def update_nested(attr_path, data_src: dict, data_merge=None, data_update=None, find=None) -> tuple[bool, dict]:
@@ -193,7 +192,11 @@ def serializer(json_map: dict, namespace: list = [], inline_mode: bool = False, 
         [lines.append(f"{mlk}\n{mlv}") for mlk, mlv in multi_line_keys]
     return "\n".join(lines)
 
-def process_lookups(value_str: str, app_ctx: list = None, file_contents_dirpath: str = None, file_name: str = None):
+def process_lookups(value_str: str, file_ctx: ParselyFile = None) -> Optional[Union[str, dict, list]]:
+    """Process $dir and $data lookups in the value string"""
+    app_ctx: list = file_ctx.app_ctx
+    file_contents_dirpath: str = file_ctx.file_contents_dirpath
+    file_name: str = file_ctx.file_name
 
     def parse_ref_to_files(filepath, as_dir=0):
         from pyonir.models.database import BaseFSQuery, DeserializeFile
@@ -249,7 +252,7 @@ def process_lookups(value_str: str, app_ctx: list = None, file_contents_dirpath:
         return parse_ref_to_files(lookup_fpath, os.path.isdir(lookup_fpath))
     return value_str
 
-def deserialize_line(line_value: str, container_type: any = None):
+def deserialize_line(line_value: str, container_type: Any = None, file_ctx: ParselyFile = None) -> Any:
     """Deserialize string value to appropriate object type"""
 
     if not isinstance(line_value, str):
@@ -276,16 +279,20 @@ def deserialize_line(line_value: str, container_type: any = None):
     is_num = is_num(line_value)
     if is_num != 'NAN':
         return is_num
-    if line_value.strip().lower() == "false":
+    if line_value.lower() == "false":
         return False
-    elif line_value.strip().lower() == "true":
+    elif line_value.lower() == "true":
         return True
     elif isinstance(container_type, list):
-        return [deserialize_line(v)  for v in line_value.split(', ')]
-    # elif line_value.strip().startswith('$'):
-    #     if '{' in line_value:
-    #         line_value = file.process_site_filter('pyformat', (line_value if line_value.startswith((LOOKUP_DIR_PREFIX, LOOKUP_DATA_PREFIX)) else line_value[1:]), file.__dict__)
-    #     return process_lookups(line_value)
+        return [deserialize_line(v, file_ctx=file_ctx)  for v in line_value.split(', ')]
+    elif line_value.startswith((LOOKUP_DIR_PREFIX, LOOKUP_DATA_PREFIX)):
+        # if file_ctx and file_ctx.is_virtual_route:
+        #     return line_value
+        if '{' in line_value:
+            line_value = file_ctx.process_site_filter('pyformat', line_value, file_ctx.__dict__)
+        return process_lookups(line_value, file_ctx=file_ctx)
+    elif line_value.startswith('$'):
+        line_value = file_ctx.process_site_filter("pyformat", line_value[1:], file_ctx.__dict__)
     return line_value.lstrip('$')
 
 def get_container_type(delim):
@@ -296,12 +303,12 @@ def get_container_type(delim):
     else:
         return str()
 
-def parse_line(line: str, from_block_str: bool = False) -> tuple:
+def parse_line(line: str, from_block_str: bool = False, file_ctx: Any = None) -> tuple:
     """partition key value pairs"""
 
     try:
         start_fence_block = line.startswith((BLOCK_CODE_FENCE, BLOCK_PREFIX_STR))
-        is_end_fence = line.strip().endswith(BLOCK_CODE_FENCE) or (start_fence_block and from_block_str)
+        is_end_fence = from_block_str and (start_fence_block or line.strip().endswith((BLOCK_CODE_FENCE, BLOCK_DELIM)))
         if is_end_fence:
             return count_tabs(line), None, None, None, None
         iln_delim = None
@@ -327,64 +334,37 @@ def parse_line(line: str, from_block_str: bool = False) -> tuple:
             is_parent = True
         if not from_block_str:
             key = key.strip() if key else None
-            value = deserialize_line(value, container_type=line_type) if value else None
+            value = deserialize_line(value, container_type=line_type, file_ctx=file_ctx) if value else None
         elif value:
             value += '\n'
         return count_tabs(line), key, line_type, value or None, (is_str_block, is_parent)
     except Exception as e:
-        return None, None, line.strip(), None, None
+        raise e
+        # return None, None, line.strip(), None, None
 
-def collect_block_lines(lines: list, curr_tabs: int, is_str_block: tuple[bool, bool] = None, parent_container: any = None) -> Tuple[list, int]:
-    """Collects lines until stop string is found"""
-    collected_lines = []
-    cursor = 0
-    is_list_dict = False
-    pis_str_block, pis_parent = is_str_block or (False, False)
-    while cursor < len(lines):
-        ln = lines[cursor]
-        lt, lk, ld, lv, lb = parse_line(ln, from_block_str=pis_str_block)
-        if lb is None:
-            break
-        lis_block_str, lis_parent = lb
-        is_nested = lt > curr_tabs
-        end_data_block = not is_nested and not pis_str_block
-        end_nested_str_block = (curr_tabs > 0 and pis_str_block) and not is_nested
-        if end_nested_str_block or end_data_block: break
-
-        if not is_list_dict:
-            is_list_dict = lv==LST_DICT_DLM and not ld
-        if lis_parent:
-            lv, _curs = collect_block_lines(lines[cursor+1:], curr_tabs=lt, is_str_block=lb, parent_container=ld)
-            cursor = cursor + _curs
-        cursor += 1
-        collected_lines.append((lt, lk, ld, lv, lb))
-
-    # Finalize block collection
-    if is_list_dict:
-        collected_lines = group_tuples_to_objects(collected_lines)
-    elif parent_container is not None:
-        collected_lines = group_tuples_to_objects(collected_lines, parent_container=parent_container, compress_strings=curr_tabs>0)
-    return collected_lines, cursor
-
-def group_tuples_to_objects(items: list[tuple], parent_container: any = None, use_grouped: bool = False, compress_strings: bool = False) -> list[dict]:
+def group_tuples_to_objects(items: list[tuple],
+                            parent_container: any = None,
+                            use_grouped: bool = False,
+                            file_ctx: ParselyFile = None,
+                            compress_strings: bool = False) -> list[dict]:
     """Groups list of tuples into list of objects or other container types """
 
     grouped = []
     current = {}
-    is_str = isinstance(parent_container, str)
-    is_list = isinstance(parent_container, list)
-    is_dict = isinstance(parent_container, dict)
+    is_str = isinstance(parent_container, str) and not use_grouped
+    is_list = isinstance(parent_container, list) and not use_grouped
+    is_dict = isinstance(parent_container, dict) and not use_grouped
     for tab_count, key, data_type, value, is_string_block in items:
         if is_str:
             parent_container += value.strip() if compress_strings else value or ''
             continue
         elif is_list:
-            value = {key: deserialize_line(value)} if isinstance(data_type, dict) else deserialize_line(value)
+            v = deserialize_line(value, file_ctx=file_ctx)
+            value = {key: v} if isinstance(data_type, dict) else v
             parent_container.append(value)
             continue
         elif is_dict:
-            # parent_container[key] = value
-            update_nested(key, data_src=parent_container, data_merge=value)
+            update_nested(key, data_src=parent_container, data_merge=deserialize_line(value, file_ctx=file_ctx))
             continue
         if value == LST_DICT_DLM:  # separator → start a new object
             if current:
@@ -396,7 +376,7 @@ def group_tuples_to_objects(items: list[tuple], parent_container: any = None, us
         if isinstance(value, list) and all(isinstance(v, tuple) for v in value):
             value = group_tuples_to_objects(value, parent_container=data_type)
 
-        current[key] = value
+        current[key] = deserialize_line(value, file_ctx=file_ctx)
 
     # append last object if not empty
     if current:
@@ -404,27 +384,121 @@ def group_tuples_to_objects(items: list[tuple], parent_container: any = None, us
 
     return grouped or parent_container
 
-def process_lines(file_lines, cursor: int = 0, data_container: any = None):
-    """Process single line"""
-    if not len(file_lines): return data_container
-    line = file_lines.pop(0)
-    if line.startswith((SINGLE_LN_COMMENT, MULTI_LN_COMMENT)):
+def is_comment(line: str) -> bool:
+    """Fast comment check using tuple unpacking"""
+    return line.startswith((SINGLE_LN_COMMENT, MULTI_LN_COMMENT))
+
+def collect_block_lines(lines: list, curr_tabs: int, is_str_block: tuple[bool, bool] = None, parent_container: Any = None, file_ctx: ParselyFile = None) -> Tuple[list, int]:
+    """Collects lines until stop string is found"""
+    collected_lines = []
+    cursor = 0
+    is_list_dict = False
+    pis_str_block, pis_parent = is_str_block or (False, False)
+    is_virtual = file_ctx and file_ctx.is_virtual_route
+    max = len(lines)
+    while cursor < max:
+        ln = lines[cursor]
+        lt, lk, ld, lv, lb = parse_line(ln, from_block_str=pis_str_block, file_ctx=file_ctx)
+        if lb is None:
+            if cursor == max - 1:
+                cursor += 1
+            break
+        lis_block_str, lis_parent = lb
+        is_nested = lt > curr_tabs
+        end_data_block = not is_nested and not pis_str_block
+        end_nested_str_block = (curr_tabs > 0 and pis_str_block) and not is_nested
+        if end_nested_str_block or end_data_block: break
+
+        if not is_list_dict:
+            is_list_dict = lv==LST_DICT_DLM and not ld
+        if lis_parent:
+            lv, _curs = collect_block_lines(lines[cursor+1:], curr_tabs=lt, is_str_block=lb, parent_container=ld, file_ctx=file_ctx)
+            cursor = cursor + _curs
         cursor += 1
-    else:
-        line_tabs, line_key, line_type, line_value, is_str_block = parse_line(line)
+        collected_lines.append((lt, lk, ld, lv, lb))
+
+    # Finalize block collection
+    compress_strings = curr_tabs > 0 and pis_str_block
+    collected_lines = group_tuples_to_objects(collected_lines,
+                                                  use_grouped=is_list_dict,
+                                                  parent_container=parent_container,
+                                                  file_ctx=file_ctx,
+                                                  compress_strings=compress_strings)
+    return collected_lines, cursor
+
+def process_lines(file_lines: list[str], cursor: int = 0, data_container: Dict[str, Any] = None, file_ctx: ParselyFile = None) -> Dict[str, Any]:
+    """Process lines iteratively instead of recursively"""
+
+    if data_container is None:
+        data_container = {}
+
+    line_count = len(file_lines)
+    while cursor < line_count:
+        line = file_lines[cursor]
+
+        if not line:
+            cursor += 1
+            continue
+
+        if is_comment(line):
+            cursor += 1
+            continue
+
+        line_tabs, line_key, line_type, line_value, is_str_block = parse_line(line, file_ctx=file_ctx)
         if line_value is None:
-            line_value, _cursor = collect_block_lines(file_lines, curr_tabs=line_tabs, is_str_block=is_str_block, parent_container=line_type)
-            cursor = (_cursor + cursor + 1) if line_tabs else _cursor
-            file_lines = file_lines[cursor:]
+            line_value, _cursor = collect_block_lines(
+                file_lines[cursor+1:],
+                curr_tabs=line_tabs,
+                is_str_block=is_str_block,
+                parent_container=line_type,
+                file_ctx=file_ctx
+            )
+            cursor = (_cursor + cursor) + 1 #if line_tabs else _cursor
         else:
             cursor += 1
-        update_nested(line_key, data_container, data_merge=line_value)
 
-        if line_key and line_key.startswith('$'): # commit embedded types to cache
+        if not line_tabs:
+            update_nested(line_key, data_container, data_merge=line_value)
+
+        # Cache the $ check
+        if line_key and line_key[0] == '$':
             EmbeddedTypes[line_key] = line_value
+    return data_container
 
-    return process_lines(file_lines, cursor=cursor, data_container=data_container)
+if __name__ == "__main__":
+    f = ParselyFile(is_virtual_route=False)
+    dstr = """
+@filter.md:- hero.caption, content
+title: Meet The Owner
+subtitle: **Herbalist | Crafter | Creator**
+menu.group: main
+menu.name: Meet the Creator
+menu.rank: 3
+hero:
+    title: Brittney Reynolds
+    caption:|
+        I believe healing is sacred — and crafting with intention is my way of offering love back to the world.
+        </br>
+        — With warmth and reverence,
+        **Brittney**
+    card.image: /public/images/brittney_reynolds.jpg
 
+````md content
 
-t = process_lines(lines, cursor=0, data_container=data)
-print(t)
+As the founder of Be-U-Tea-Full, I pour my heart into every soap, salve, and steeped blend with one prayer in mind: 
+
+> that it brings you the comfort, clarity, and care you deserve.
+
+Rooted in intuition and guided by plant wisdom, this work is my daily ritual — a way to nurture not just skin, but spirit.
+
+Thank you for allowing me to be a small part of your healing journey. It is my deepest joy to share these offerings with you.
+
+— With warmth and reverence,
+Brittney
+````
+    """
+    lines = dstr.strip().splitlines()
+    data = {}
+    t = process_lines(lines, cursor=0, data_container=data, file_ctx=f)
+    exp = {'name': 'MyApp', 'version': '1.0.0', 'config': {'host': 'localhost', 'port': 8000, 'debug': True, 'database': [{'url': 'postgresql://localhost/db', 'pool_size': 10}, {'this': 'that', 'one': 'two'}]}}
+    print(t)

@@ -24,7 +24,8 @@ def is_mappable_type(tp):
     return isinstance(origin, type) and issubclass(origin, ABCMapping)
 
 def is_scalar_type(tp):
-    return tp in (int, float, str, bool)
+    sclrs = (int, float, str, bool)
+    return tp in sclrs or (isinstance(tp, type) and issubclass(tp, sclrs))
 
 def is_custom_class(tp):
     return isinstance(tp, type) and not tp.__module__ == "builtins"
@@ -72,17 +73,6 @@ def collect_type_hints(t):
         pass
     return hints
 
-# def add_props_to_object(res, data: dict, file_src: object =None, attrs: list = None):
-#     """Add all properties from data and file_src to res object"""
-#     itr = [*data.keys(), *(attrs or [])]
-#     for key in itr:
-#         if key[0] == '_': continue
-#         # if frozen and not hasattr(res, key): continue
-#         # if isinstance(val, property): continue
-#         value = get_attr(data, key) or get_attr(file_src, key)
-#         setattr(res, key, value)
-#     return res
-
 def required_parameters(cls):
     import inspect
     sig = inspect.signature(cls.__init__)
@@ -100,11 +90,49 @@ def set_attr(target: object, attr: str, value: Any):
     else:
         setattr(target, attr, value)
 
-def func_request_mapper(func: Callable, data: object) -> dict: pass
+def func_request_mapper(func: Callable, pyonir_request: 'BaseRequest') -> dict:
+    """Map request data to function parameters"""
+    from pyonir.core import PyonirRequest
+    from pyonir import PyonirApp
+    from pyonir.models import Auth
+    import inspect
+    # param_type_map = collect_type_hints(func)
+    default_args = {}
+    default_args.update(**pyonir_request.path_params.__dict__)
+    default_args.update(**pyonir_request.query_params.__dict__)
+    default_args.update(**pyonir_request.form)
+    cls_args = {}
+
+
+    sig = inspect.signature(func)
+    hints = get_type_hints(func)
+    params_info = {}
+
+    for name, param in sig.parameters.items():
+        param_type = hints.get(name, Any)
+        param_value = default_args.get(name)
+        default = (
+            param.default if param.default is not inspect.Parameter.empty else None
+        )
+        if param_type in (PyonirApp, PyonirRequest):
+            # from pyonir import Site
+            param_value = pyonir_request.app if param_type == PyonirApp else pyonir_request
+            # set_attr(cls_args, name, value)
+            # continue
+        elif issubclass(param_type, Auth):
+            param_value = param_type(pyonir_request, pyonir_request.app)
+            # set_attr(cls_args, name, auth_instance)
+            # continue
+
+        set_attr(cls_args, name, param_value or default)
+        params_info[name] = {"type": param_type, "default": param_value or default}
+
+    return cls_args
 
 def cls_mapper(file_obj: object, cls: Union[type, list[type]], from_request=None):
     """Recursively map dict-like input into `cls` with type-safe field mapping."""
-    from pyonir.core import PyonirRequest, PyonirApp
+    # from pyonir.core import PyonirRequest, PyonirApp
+    # from pyonir.models import Auth
 
     if hasattr(cls, '__skip_parsely_deserialization__'):
         return file_obj
@@ -141,7 +169,7 @@ def cls_mapper(file_obj: object, cls: Union[type, list[type]], from_request=None
     if nested_value:
         data.update(**nested_value)
 
-    cls_args = {} if from_request or is_dclass else cls()
+    cls_args = {} if is_dclass else cls()
     for name, hint in param_type_map.items():
         mapper_name = get_attr(mapper_keys, name, None) #or name
         if name.startswith("_") or name == "return":
@@ -157,14 +185,14 @@ def cls_mapper(file_obj: object, cls: Union[type, list[type]], from_request=None
             set_attr(cls_args, name, value)
             continue
         # Handle Special Pyonir objects
-        if from_request and hint in (PyonirApp, PyonirRequest):
-            from pyonir import Site
-            value = Site if hint == PyonirApp else from_request
-            set_attr(cls_args, name, value)
-            continue
-        if from_request and hint == value:
-            set_attr(cls_args, name, None)
-            continue
+        # if from_request and hint in (PyonirApp, PyonirRequest):
+        #     from pyonir import Site
+        #     value = Site if hint == PyonirApp else from_request
+        #     set_attr(cls_args, name, value)
+        #     continue
+        # if from_request and hint == value:
+        #     set_attr(cls_args, name, None)
+        #     continue
 
         # Handle containers
         custom_mapper_fn = getattr(cls, f'map_to_{name}', None)

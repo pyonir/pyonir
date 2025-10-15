@@ -1,11 +1,13 @@
 from __future__ import annotations
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import Optional
 
 from pyonir.core import PyonirSchema
 from pyonir.models.schemas import BaseSchema
 from pyonir.models.server import BaseRequest
 
+# from pyonir.models import TaskAuthority
 
 class PermissionLevel(str):
     NONE = 'none'
@@ -32,6 +34,9 @@ class Role:
     """Defines the permissions for each role"""
     name: str
     perms: list[str]
+
+    def to_dict(self, **kwargs) -> str:
+        return self.name
 
     @classmethod
     def from_string(cls, role_name: str) -> "Role":
@@ -83,10 +88,6 @@ class Roles:
         PermissionLevel.READ
     ])
     """Contributor user with permissions to contribute content"""
-    NONE = Role(name='none', perms=[
-        PermissionLevel.NONE
-    ])
-    """No permissions assigned"""
 
     @classmethod
     def all_roles(cls):
@@ -159,7 +160,7 @@ class User(PyonirSchema):
     # system specific fields
     uid: str = ''
     """Unique identifier for the user"""
-    role: str = Roles.NONE.name
+    role: Role = Roles.GUEST
     """Role assigned to the user, defaults to 'none'"""
     verified_email: bool = False
     """Flag indicating if the user's email is verified"""
@@ -169,8 +170,8 @@ class User(PyonirSchema):
     """Directory path for user-specific files"""
     auth_from: Optional[str] = 'basic'
     """Authentication method used by the user (e.g., 'google', 'email')"""
-    signin_locations: Optional[list[Location]] = None
-    """Locations capture during signin"""
+    # signin_locations: Optional[list[Location]] = None
+    # """Locations capture during signin"""
     auth_token: Optional[str] = ''
     """Authentication token verifying the user"""
 
@@ -181,12 +182,17 @@ class User(PyonirSchema):
     @property
     def perms(self) -> list[PermissionLevel]:
         """Returns the permissions for the user based on their role"""
-        user_role = getattr(Roles, self.role.upper()) or Roles.NONE
-        return user_role.perms
+        user_role = getattr(Roles, self.role.name.upper())
+        return user_role.perms if user_role else []
+
+    def has_authority(self, authority: 'TaskAuthority') -> bool:
+        """Checks if the user has a specific authority based on their role"""
+        is_allowed = self.role in authority.roles
+        return is_allowed
 
     def has_perm(self, action: PermissionLevel) -> bool:
         """Checks if the user has a specific permission based on their role"""
-        user_role = getattr(Roles, self.role.upper(), Roles.NONE)
+        user_role = getattr(Roles, self.role.name.upper(), Roles.GUEST)
         is_allowed = action in user_role.perms
         return is_allowed
 
@@ -197,3 +203,8 @@ class User(PyonirSchema):
         """Convert instance to a serializable dict."""
         request.server_request.session[key or 'user'] = value or self.id
 
+    @staticmethod
+    def map_to_role(role_value: str) -> 'Role':
+        """Maps a string role value to a Role instance"""
+        r = getattr(Roles, role_value.upper(), None)
+        return Role(name=role_value, perms=[]) if r is None else r

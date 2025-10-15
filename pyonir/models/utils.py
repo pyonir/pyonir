@@ -3,6 +3,22 @@ from datetime import datetime
 from collections.abc import Generator
 from typing import Optional, Union
 
+def get_version(toml_file: str) -> str:
+    import re
+    from pathlib import Path
+    try:
+        # Try using installed metadata first
+        from importlib.metadata import version
+        return version("pyonir")
+    except Exception:
+        pass
+
+    try:
+        content = Path(toml_file).read_text()
+        return re.search(r'^version\s*=\s*["\']([^"\']+)["\']', content, re.MULTILINE).group(1)
+    except Exception as e:
+        print('Error: unable to parse pyonir version from project toml',e, toml_file)
+        return 'UNKNOWN'
 
 def parse_url_params(param_str: str) -> dict:
     """Parses a URL query string into a dictionary"""
@@ -110,34 +126,30 @@ def deserialize_datestr(
     # Localize to input zone, then convert to UTC
     return tz.localize(dt).astimezone(pytz.utc)
 
-def get_attr(rowObj, attrPath=None, default=None, rtn_none=True):
+def get_attr(row_obj, attr_path=None, default=None, rtn_none=True):
     """
     Resolves nested attribute or dictionary key paths.
 
-    Args:
-        obj: the root object
-        attr_path: dot-separated string or list for nested access
-        default: fallback value if the target is None or missing
-        return_none: if True, returns `None` on missing keys/attrs instead of the original object
-
-    Returns:
-        The nested value, or `default`, or `obj` based on fallback rules.
+    :param row_obj: deserialized object
+    :param attr_path: dot-separated string or list for nested access
+    :param default: fallback value if the target is None or missing
+    :param rtn_none: if True, returns `None` on missing keys/attrs instead of the original object
     """
-    if attrPath == None: return rowObj
-    attrPath = attrPath if isinstance(attrPath, list) else attrPath.split('.')
+    if attr_path == None: return row_obj
+    attr_path = attr_path if isinstance(attr_path, list) else attr_path.split('.')
     targetObj = None
-    for key in attrPath:
+    for key in attr_path:
         try:
             if targetObj:
                 targetObj = targetObj[key]
             else:
-                targetObj = rowObj.get(key)
+                targetObj = row_obj.get(key)
             pass
         except (KeyError, AttributeError, TypeError) as e:
             if targetObj:
                 targetObj = getattr(targetObj, key, None)
             else:
-                targetObj = getattr(rowObj, key, None)
+                targetObj = getattr(row_obj, key, None)
             pass
     if targetObj is None and rtn_none:
         return default or None

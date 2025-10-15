@@ -1,8 +1,10 @@
-import timeit
+from memory_profiler import memory_usage
 import json
 import yaml
 import toml
 from pyonir.models.parser import DeserializeFile, serializer
+from pyonir.models.parsely import process_lines
+import time
 
 data = {
     "name": "MyApp",
@@ -20,21 +22,49 @@ data = {
 
 # PARSELY
 data_str = DeserializeFile.loads(data)
-parsely_time = timeit.timeit(lambda: DeserializeFile.load(data_str), number=10000)
 
 # JSON
 json_str = json.dumps(data)
-json_time = timeit.timeit(lambda: json.loads(json_str), number=10000)
 
-# # YAML
-# yaml_str = yaml.dump(data)
-# yaml_time = timeit.timeit(lambda: yaml.safe_load(yaml_str), number=10000)
-#
-# # TOML
-# toml_str = toml.dumps(data)
-# toml_time = timeit.timeit(lambda: toml.loads(toml_str), number=10000)
+# YAML
+yaml_str = yaml.dump(data)
 
-print(f"JSON:  {json_time:.4f}s")  # ~0.05s
-print(f"PARSELY:  {parsely_time:.4f}s")  # ~0.30s
-# print(f"TOML:  {toml_time:.4f}s")  # ~0.15s
-# print(f"YAML:  {yaml_time:.4f}s")  # ~0.50s
+# TOML
+toml_str = toml.dumps(data)
+
+dlines = data_str.strip().splitlines()
+COUNT = 10000
+
+def parsely_loop():
+    for _ in range(COUNT):
+        process_lines(dlines, cursor=0, data_container={})
+
+def toml_loop():
+    for _ in range(COUNT):
+        toml.load(yaml_str)
+
+def yaml_loop():
+    for _ in range(COUNT):
+        yaml.safe_load(yaml_str)
+
+def deser_loop():
+    for _ in range(COUNT):
+        DeserializeFile.load(data_str)
+
+def json_loop():
+    for _ in range(COUNT):
+        json.loads(json_str)
+
+def print_metrics(func):
+    name = func.__name__
+    start = time.time()
+    mem_usage = memory_usage((func,))
+    end = time.time()
+    print(f"{name} execution time: {end - start:.4f} seconds")
+    print(f"{name} peak memory usage: {max(mem_usage):.2f} MiB\n\n")
+
+if __name__ == "__main__":
+    print_metrics(parsely_loop)
+    # print_metrics(deser_loop)
+    print_metrics(json_loop)
+    print_metrics(yaml_loop)

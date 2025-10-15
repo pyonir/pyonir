@@ -7,6 +7,9 @@ parselyFile = DeserializeFile(os.path.join(os.path.dirname(__file__),'contents',
 
 
 # test cases for DeserializeFile
+def test_nested_blocks():
+    data = parselyFile.data
+    pass
 
 def test_url():
     obj = "/"

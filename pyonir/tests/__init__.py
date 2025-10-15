@@ -3,7 +3,7 @@ import textwrap
 
 from pyonir.models.parser import DeserializeFile
 from pyonir.tests.backend.demo_controller import DemoService
-from pyonir import init
+from pyonir import Pyonir
 
 def generate_dataclass_from_class(cls, output_dir="types"):
     from typing import get_type_hints
@@ -51,7 +51,7 @@ def generate_py_tests(parsely: DeserializeFile):
 
 if __name__=='__main__':
     app_dirpath = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'libs', 'app_setup')
-    App = init(os.path.join(app_dirpath,'main.py'), use_themes=False)
+    App = Pyonir(os.path.join(app_dirpath,'main.py'), use_themes=False)
     file = DeserializeFile(os.path.join(os.path.dirname(__file__),'contents','test.md'))
     # generate_parsely_tests(file)
     generate_py_tests(file)

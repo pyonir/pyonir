@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import os
+import sys
 from collections import OrderedDict
-from typing import Optional, Generator
+from typing import Optional, Generator, List
 
 from pyonir.utilities import get_attr, load_env, generate_id
 
-from pyonir.pyonir_types import PyonirThemes, EnvConfig, PyonirHooks, Parsely
+from pyonir.pyonir_types import PyonirThemes, EnvConfig, PyonirHooks, Parsely, PyonirRoute, PyonirRouters
 
 
 class Base:
@@ -41,7 +42,7 @@ class Base:
     # FIELDS
     @property
     def app_ctx(self):
-        return self.name, self.endpoint, self.contents_dirpath, self.ssg_dirpath
+        return self.name, self.endpoint, self.contents_dirpath, self.ssg_dirpath, self.datastore_dirpath
 
     @property
     def settings(self) -> object:
@@ -72,10 +73,15 @@ class Base:
     @property
     def virtual_routes_filepath(self) -> Optional[str]:
         """The context virtual routes file"""
-        routes_file = os.path.join(self.pages_dirpath, ".routes.md")
+        routes_file = os.path.join(self.pages_dirpath, '.virtual_route.md')
         return routes_file if os.path.exists(routes_file) else None
 
     # DIRECTORIES
+    @property
+    def datastore_dirpath(self) -> str:
+        """Directory path for file system data storage"""
+        return os.path.join(self.app_dirpath, self.DATA_DIRNAME)
+
     @property
     def frontend_assets_dirpath(self) -> str:
         """Directory location for template related assets"""
@@ -158,28 +164,32 @@ class Base:
         from pyonir.models.parser import DeserializeFile
         return DeserializeFile(file_path, app_ctx=self.app_ctx)
 
-    def apply_virtual_routes(self, pyonir_request: 'BaseRequest') -> 'Parsely':
-        """Reads and applies virtual .routes.md file specs onto or updates the request file"""
-        from pyonir.models.parser import DeserializeFile, FileStatuses
-        server = pyonir_request.app.server
-        virtual_route_url, virtual_route_data, virtual_path_params = server.get_virtual(pyonir_request.path)
-        if virtual_route_data:
-            rfile: DeserializeFile = pyonir_request.file
-            pyonir_request.path_params.update(virtual_path_params)
-            if rfile.file_exists:
-                rfile.data.update(virtual_route_data)
-                rfile.apply_filters()
-            if not rfile.file_exists and not pyonir_request.is_api:
-                # replace 404page with the virtual file as the page
-                request_ctx = pyonir_request.app_ctx_ref
-                vfile = self.parse_file(request_ctx.virtual_routes_filepath)
-                vurl_data = vfile.data.get(virtual_route_url) or {}
-                vurl_data.update(**{'url': pyonir_request.path, 'slug': pyonir_request.slug})
-                vfile.data = vurl_data
-                vfile.status = FileStatuses.PUBLIC
-                # vfile.file_ssg_html_dirpath = vfile.file_ssg_html_dirpath.replace(vfile.file_name, pyonir_request.slug)
-                # vfile.file_ssg_api_dirpath = vfile.file_ssg_api_dirpath.replace(vfile.file_name, pyonir_request.slug)
-                pyonir_request.file = vfile
+    # def apply_virtual_routes(self, pyonir_request: 'BaseRequest') -> 'Parsely':
+    #     """Reads and applies virtual .routes.md file specs onto or updates the request file"""
+    #     from pyonir.models.parser import DeserializeFile, FileStatuses
+    #     server = pyonir_request.app.server
+    #     # if hasattr(pyonir_request.query_params,'rr'):
+    #     #     pyonir_request.app.collect_virtual_routes()
+    #     pth = pyonir_request.path.replace(self.API_ROUTE,'') if pyonir_request.is_api else pyonir_request.path
+    #     virtual_route_url, virtual_route_data, virtual_path_params = server.get_virtual(pth)
+    #     if virtual_route_data:
+    #         rfile: DeserializeFile = pyonir_request.file
+    #         pyonir_request.path_params.update(virtual_path_params)
+    #         if rfile.file_exists:
+    #             rfile.data.update(virtual_route_data)
+    #             rfile.apply_filters()
+    #         if not rfile.file_exists:
+    #             # replace 404page with the virtual file as the page
+    #             request_ctx = pyonir_request.app_ctx_ref
+    #             vfile = self.parse_file(request_ctx.virtual_routes_filepath)
+    #             vurl_data = vfile.data.get(virtual_route_url) or {}
+    #             vurl_data.update(**{'url': pyonir_request.path, 'slug': pyonir_request.slug})
+    #             vfile.data = vurl_data
+    #             vfile.status = FileStatuses.PUBLIC
+    #             vfile.apply_filters()
+    #             # vfile.file_ssg_html_dirpath = vfile.file_ssg_html_dirpath.replace(vfile.file_name, pyonir_request.slug)
+    #             # vfile.file_ssg_api_dirpath = vfile.file_ssg_api_dirpath.replace(vfile.file_name, pyonir_request.slug)
+    #             pyonir_request.file = vfile
 
     def register_resolver(self, name: str, cls_or_path, args=(), kwargs=None, hot_reload=False):
         import inspect
@@ -204,30 +214,37 @@ class Base:
             "hot_reload": hot_reload
         }
 
+    @staticmethod
+    def reload_module(func: callable, reload: bool = True) -> callable:
+        """Reload a func if hot_reload is enabled"""
+        import importlib, sys
+        module_path = func.__module__
+        if reload and module_path in sys.modules:
+            importlib.reload(sys.modules[module_path])
+        else:
+            importlib.import_module(module_path)
+        mod = sys.modules[module_path]
+        cls = getattr(mod, func.__name__, None)
+        return cls or func
+
     def reload_resolver(self, name) -> Optional[callable]:
         """
         Instantiate the registered class.
         Reload if hot_reload is enabled and class was registered by path.
         """
-        import importlib, sys
         from pyonir.utilities import get_attr
         from pyonir.models.loaders import load_resolver
 
         cls_path, meth_name = name.rsplit(".", 1)
         is_pyonir = name.startswith('pyonir')
-        entry = get_attr(self._resolvers, cls_path)
+        res_entry = get_attr(self._resolvers, cls_path)
 
         # access module instance
-        if entry:
-            module_path, cls_name = entry["class_path"].rsplit(".", 1)
-
-            if entry["hot_reload"] and module_path in sys.modules:
-                importlib.reload(sys.modules[module_path])
-            elif module_path not in sys.modules:
-                importlib.import_module(module_path)
-
-            cls = getattr(sys.modules[module_path], cls_name)
-            new_instance = cls(*entry["args"], **entry["kwargs"])
+        if res_entry:
+            module_path, cls_name = res_entry["class_path"].rsplit(".", 1)
+            cls = self.reload_module(module_path, reload=res_entry["hot_reload"])
+            # cls = getattr(mod, cls_name)
+            new_instance = cls(*res_entry["args"], **res_entry["kwargs"])
             return getattr(new_instance, meth_name)
 
         # access constant value or methods on application instance
@@ -237,8 +254,8 @@ class Base:
         if not resolver:
             from pyonir import PYONIR_DIRPATH
             resolver = load_resolver(name,
-                                          base_path=PYONIR_DIRPATH if is_pyonir else self.app_dirpath,
-                                          from_system=is_pyonir)
+                                  base_path=PYONIR_DIRPATH if is_pyonir else self.app_dirpath,
+                                  from_system=is_pyonir)
         if not resolver:
             print(f"Unable to load {name}")
 
@@ -248,7 +265,7 @@ class Base:
     def generate_resolvers(cls: callable, output_dirpath: str, namespace: str = ''):
         """Automatically generate api endpoints from service class or module."""
         import textwrap, inspect
-        from pyonir.utilities import create_file
+        from pyonir.models.utils import create_file
 
         def process_docs(meth: callable):
             docs = meth.__doc__
@@ -296,11 +313,15 @@ class Base:
             create_file(file_path, m_temp)
             print(f"\t{meth_name} at {file_path}")
 
+    def query_fs(self, dir_path: str, model_type: any = None, app_ctx = None) -> BaseFSQuery:
+        """Query files in a directory and return instances of the specified model type."""
+        from pyonir.models.database import BaseFSQuery
+        return BaseFSQuery(dir_path, app_ctx=app_ctx or self.app_ctx, model=model_type, exclude_names=None, force_all=True)
+
     @staticmethod
     def query_files(dir_path: str, app_ctx: tuple, model_type: any = None) -> object:
         from pyonir.utilities import process_contents
         return process_contents(dir_path, app_ctx, model_type)
-
 
 
 class BasePlugin(Base):
@@ -313,7 +334,7 @@ class BasePlugin(Base):
     @property
     def app_ctx(self):
         """plugins app context is relative to the application context"""
-        return self.name, self.endpoint, self.contents_dirpath, os.path.join(self.app.ssg_dirpath, self.endpoint)
+        return self.name, self.endpoint, self.contents_dirpath, os.path.join(self.app.ssg_dirpath, self.endpoint), self.app.datastore_dirpath
 
     @property
     def request_paths(self):
@@ -324,6 +345,11 @@ class BasePlugin(Base):
     def endpoint(self):
         """Customer facing url address to access the store pages"""
         return self.settings.url if hasattr(self.settings, 'url') else None
+
+    @property
+    def datastore_dirpath(self) -> str:
+        """Child Directory path for file system data storage within parent application datastore path"""
+        return os.path.join(self.app.datastore_dirpath, self.name)
 
     @property
     def contents_dirpath(self) -> str:
@@ -388,7 +414,7 @@ class BaseApp(Base):
         from pyonir.models.templating import TemplateEnvironment
         from pyonir.core import PyonirServer
         from pyonir.models.parser import parse_markdown, DeserializeFile
-        from pyonir import __version__
+        from pyonir import __version__, Site
         DeserializeFile._routes_dirname = self.PAGES_DIRNAME
         self.VERSION = __version__
         self.SECRET_SAUCE = generate_id()
@@ -404,6 +430,7 @@ class BaseApp(Base):
         self._resolvers = {}
         self._settings: object = None
         self._env: EnvConfig = load_env(os.path.join(self.app_dirpath, '.env'))
+        self._static_paths = set()
         self.use_themes = use_themes
         """Serve frontend files from the frontend directory for HTML requests"""
         self.TemplateEnvironment = TemplateEnvironment(self)
@@ -413,9 +440,17 @@ class BaseApp(Base):
 
         self.Parsely_Filters = {
             'jinja': self.parse_jinja,
-            'pyformat': self.parse_pyformat,
+            'pyformat': self.pyformatter,
             'md': parse_markdown
         }
+
+        # global Site
+        # # Set Global Site instance
+        # sys.path.insert(0, os.path.dirname(os.path.dirname(app_entrypoint)))
+        # Site = self
+        # self.process_configs()
+        # if use_themes:
+        #     self.configure_themes()
 
     @property
     def env(self) -> EnvConfig: return self._env
@@ -502,6 +537,12 @@ class BaseApp(Base):
         theme_assets_dirpath = self.themes.active_theme.static_dirpath if self.themes else None
         return theme_assets_dirpath or os.path.join(self.frontend_dirpath, self.FRONTEND_ASSETS_DIRNAME)
 
+    @property
+    def static_paths(self) -> set:
+        """Set of all static file paths to be served by the application"""
+        paths = {(self.public_assets_route, self.public_assets_dirpath), (self.frontend_assets_route, self.frontend_assets_dirpath), (self.uploads_route, self.uploads_dirpath)}
+        return paths.union(self._static_paths)
+
     # SETUP
     def install_sys_plugins(self):
         """Install pyonir system plugins"""
@@ -528,21 +569,30 @@ class BaseApp(Base):
         # Load theme templates
         self.TemplateEnvironment.load_template_path(app_active_theme.jinja_template_path)
 
-    def collect_virtual_routes(self) -> None:
-        """Sets a map on server instance for all virtual routes from application and plugin contexts"""
-        virtual_routes = OrderedDict()
-        site_routes = self.parse_file(self.virtual_routes_filepath).data
-        for plg in self.activated_plugins:
-            if not hasattr(plg, 'parse_file'): continue
-            vroute = plg.parse_file(plg.virtual_routes_filepath).data
-            virtual_routes.update(vroute)
-        virtual_routes.update(site_routes)
-        self.server.virtual_routes = virtual_routes
+    # def collect_virtual_routes(self) -> None:
+    #     """Sets a map on server instance for all virtual routes from application and plugin contexts"""
+    #     virtual_routes = OrderedDict()
+    #     site_routes = self.parse_file(self.virtual_routes_filepath).data
+    #     for plg in self.activated_plugins:
+    #         if not hasattr(plg, 'parse_file'): continue
+    #         vroute = plg.parse_file(plg.virtual_routes_filepath).data
+    #         virtual_routes.update(vroute)
+    #     virtual_routes.update(site_routes)
+    #     self.server.virtual_routes = virtual_routes
 
     # RUNTIME
-    def load_routers(self, routers: list):
+    def load_static_path(self,url: str, path: str) -> None:
+        """Loads a static file path into the application server"""
+        if os.path.exists(path):
+            self._static_paths.add((url, path))
+
+    def load_routes(self, routes: List[PyonirRoute], endpoint: str = '') -> None:
+        """Loads a list of routes into the application server"""
+        self.server.init_app_routes(routes, endpoint)
+
+    def load_routers(self, routers: PyonirRouters):
         """Loads a list of routers into the application server"""
-        self.server.init_app_endpoints(routers)
+        self.server.init_app_router(routers)
 
     def apply_globals(self, global_vars: dict = None):
         """Updates the jinja global variables dictionary"""
@@ -611,32 +661,32 @@ class BaseApp(Base):
 
     def parse_jinja(self, string, context=None) -> str:
         """Render jinja template fragments"""
-        if not context: context = {}
         if not self.TemplateEnvironment or not string: return string
+        if not context: context = {}
         try:
             return self.TemplateEnvironment.from_string(string).render(configs=self.settings, **context)
         except Exception as e:
             raise
 
-    def parse_pyformat(self, string, context=None) -> str:
+    def pyformatter(self, string, context=None) -> str:
         """Formats python template string"""
-        if not context: context = {}
+        context = {} or dict(context)
         if self.TemplateEnvironment:
             context.update(self.TemplateEnvironment.globals)
         try:
             return string.format(**context)
         except Exception as e:
-            print('parse_pyformat', e, string)
+            print('pyformatter', e, string)
             return string
 
-    def run(self, uvicorn_options: list = None):
+    def run(self, uvicorn_options: dict = None):
         """Runs the Uvicorn webserver"""
 
         self.apply_globals()
         # Initialize Application settings and templates
         self.install_sys_plugins()
         self.activate_plugins()
-        self.collect_virtual_routes()
+        # self.collect_virtual_routes()
 
         self.server.generate_nginx_conf(self)
         # Run uvicorn server

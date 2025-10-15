@@ -1,4 +1,7 @@
 import os
+
+from pyonir.models.auth import TaskAuthorities
+
 from pyonir.models.user import User, UserMeta, Roles, UserSignIn
 
 test_user_file = os.path.join(os.path.dirname(__file__), 'contents', 'test_user.json')
@@ -6,6 +9,8 @@ valid_credentials = {
     "email": "test@example.com",
     "password": "secure123"
 }
+admin = User(role=Roles.ADMIN)
+TaskAuthorities.MOCK_ACTION = TaskAuthorities.create_authority("MOCK_ACTION", [Roles.ADMIN, Roles.SUPER])
 
 def test_from_file():
     # Test loading user from file
@@ -17,7 +22,7 @@ def test_from_file():
     assert isinstance(user.meta, UserMeta)
     assert user.meta.first_name == "Test"
     assert user.meta.last_name == "User"
-    assert user.role == "contributor"
+    assert user.role.name == "contributor"
 
 def test_permissions_after_load():
     from pyonir.models.user import PermissionLevel
@@ -37,6 +42,9 @@ def test_private_keys_excluded():
     assert 'auth_token' not in serialized
     assert 'id' not in serialized
 
+def test_task_authorities():
+    # Test CREATE_REGISTERS authority
+    assert admin.has_authority(TaskAuthorities.MOCK_ACTION)
 
 # UserSignIn tests
 

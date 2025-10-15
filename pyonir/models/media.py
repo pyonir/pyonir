@@ -350,6 +350,7 @@ class UploadOptions:
     """If true, appends an index to the file name for multiple uploads."""
     compress_quality: int = 55
     """Quality for image compression (1-100)."""
+    dimensions: tuple = (256, 256)
 
 class MediaManager:
     """Manage audio, video, and image documents."""

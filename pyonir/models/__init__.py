@@ -1,3 +1,3 @@
 from __future__ import annotations
-from .user import User, Roles, PermissionLevel, Role, UserMeta
-from .auth import Auth
+from .auth import Auth, TaskAuthorities, TaskAuthority
+from .user import User, Roles, PermissionLevel, Role, UserMeta, UserSignIn

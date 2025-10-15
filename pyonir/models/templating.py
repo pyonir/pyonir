@@ -35,7 +35,15 @@ class TemplateEnvironment(Environment):
         self.globals['url_for'] = url_for
         self.globals['request'] = None
         self.globals['user'] = None
+        self.globals['get_request'] = lambda: app.server.request
+        self.globals['get_active_user'] = lambda: app.server.request.auth.user
+        self.globals["render_component"] = self.render_component
 
+    def render_component(self, name: str, *args, **kwargs) -> str:
+        """Render a macro from components.jinja with full Jinja context."""
+        tmpl = self.get_template("components.jinja")
+        macro = getattr(tmpl.module, name)
+        return macro(*args, **kwargs)
 
     def load_template_path(self, template_path: str):
         """Adds template path to file loader"""

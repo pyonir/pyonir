@@ -2,19 +2,17 @@ from __future__ import annotations
 
 import os, time
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
 from typing import Tuple, Any, Dict, Optional
 
 from starlette_wtf import csrf_token
 
-# from pyonir import BaseApp
+from pyonir.core import PyonirSchema
 from pyonir.models.server import BaseRequest, BaseApp
 from pyonir.models.user import User, Role, PermissionLevel, Roles, UserSignIn
 from pyonir.pyonir_types import PyonirRequest, PyonirRestResponse
 
 
-@dataclass
-class UserCredentials:
+class UserCredentials(PyonirSchema):
     """Represents user credentials for login"""
     email: str
     """User's email address is required for login"""
@@ -31,19 +29,34 @@ class UserCredentials:
     token: str = ''
     """User auth token"""
 
+    def validate_email(self):
+        """Validates the email format"""
+        import re
+        if not self.email:
+            self._errors.append("Email cannot be empty")
+        if not re.match(r"[^@]+@[^@]+\.[^@]+", self.email):
+            self._errors.append(f"Invalid email address: {self.email}")
+
+    def validate_password(self):
+        """Validates the password for login"""
+        if not self.password:
+            self._errors.append("Password cannot be empty")
+        elif len(self.password) < 6:
+            self._errors.append("Password must be at least 6 characters long")
+
     @classmethod
     def from_request(cls, request: PyonirRequest) -> 'UserCredentials':
         """New sign in user"""
         email = request.form.get('email')
         password = request.form.get('password')
-        remember_me = request.form.get('remember_me')
+        remember_me = request.form.get('remember_me', False)
         if not email and not password: return cls(email='***')
         return cls(email=email, password=password, remember_me=remember_me)
 
     @classmethod
     def from_session(cls, session_data: dict) -> 'UserCredentials':
         """Create an instance from session data."""
-        uid = session_data.get('user')
+        uid = session_data.get('sub')
         return cls(email='***', has_session=bool(uid), token=uid) if uid else None
 
     @classmethod
@@ -130,7 +143,7 @@ def client_location(request: PyonirRequest) -> Optional[dict]:
     if not ip: return None
     location = get_geolocation(ip)
     location['device'] = request.headers.get('user-agent', 'UNKNOWN')
-    return location
+    return location if not location.get('error') else None
 
 def jwt_decoder(jwt_token: str, salt: str)-> dict:
     """Returns decoded jwt object"""
@@ -279,10 +292,14 @@ class TaskAuthorities:
             roles = [Role.from_string(r) for r in res_obj.get("roles", [])]
             setattr(self, key.upper(), TaskAuthority(name=name, roles=roles))
 
+    @staticmethod
+    def create_authority(name: str, roles: Optional[Any] = None) -> TaskAuthority:
+        """Creates a new TaskAuthority instance."""
+        return TaskAuthority(name=name, roles=roles)
 
 
 class AuthSecurity:
-    """Handles authentication security settings for a web request."""
+    """Verifies if a route requires authentication and if the user is authorized."""
 
     def __init__(self, authorizer: "Auth") -> None:
         self._is_authorized = None
@@ -367,6 +384,10 @@ class Auth:
 
         self.app.TemplateEnvironment.globals['user'] = self.user
 
+    @property
+    def users_accounts_dirpath(self):
+        """Directory path to users profiles"""
+        return self.app.datastore_dirpath
 
     @property
     def security(self) -> AuthSecurity:
@@ -388,12 +409,12 @@ class Auth:
         exp_time = exp_time or self.LOCKOUT_TIME
         exp_in = (datetime.datetime.now() + datetime.timedelta(minutes=exp_time)).timestamp()
         user_jwt = {
-            "sub": user_id or self.user.uid,
-            "role": user_role or self.user.role,
+            "sub": user_id,
+            "role": user_role,
             "remember_for": exp_time,
-                "iat": datetime.datetime.now(),
-                "iss": self.app.domain,
-                "exp": exp_in
+            "iat": datetime.datetime.now(),
+            "iss": self.app.domain,
+            "exp": exp_in
             }
         jwt_token = self._encode_jwt(user_jwt)
         return jwt_token
@@ -422,8 +443,8 @@ class Auth:
         if user:
             if user.auth_from == 'oauth2':
                 # TODO: handle checking oauth
-                user_jwt = self.create_jwt(user.uid, user.role)
-                self.log_user_location(user)
+                user_jwt = self.create_jwt(user.uid, user.role.name)
+                # self.log_user_location(user)
                 user.save_to_file(user.file_path)
                 user.save_to_session(self.request, value=user_jwt)
                 pass
@@ -433,19 +454,18 @@ class Auth:
                 requested_passw = Auth.harden_password(salt, self.user_creds.password, user.auth_token)
                 has_valid_creds = Auth.verify_password(user.password, requested_passw)
                 if has_valid_creds:
-                    user_jwt = self.create_jwt(user.uid, user.role)
+                    user_jwt = self.create_jwt(user.uid, user.role.name)
                     # update csrf token after successful login for better security
                     user.auth_token = csrf_token(self.request.server_request)
                     user.password = self.hash_password(self.user_creds.password, with_token=user.auth_token)
-                    user.save_to_session(self.request, key='csrf_token', value=user.auth_token)
+                    # user.save_to_session(self.request, key='csrf_token', value=user.auth_token)
                     user.save_to_session(self.request, value=user_jwt)
-                    self.log_user_location(user)
+                    # self.log_user_location(user)
                     user.save_to_file(user.file_path)
 
-
                     self.response = self.responses.SUCCESS
-                    self.response.data['auth_token'] = user_jwt
-                    self.response.data['access_token'] = user.auth_token
+                    self.response.data['access_token'] = user_jwt
+                    # self.response.data['access_token'] = user.auth_token
                 else:
                     self.response = self.responses.INVALID_CREDENTIALS
 
@@ -470,9 +490,8 @@ class Auth:
             locations.append(new_location)
         user.signin_locations = locations
 
-
     def refresh(self) -> bool:
-        new_jwt = self.create_jwt()
+        new_jwt = self.create_jwt(self.user.uid, self.user.role.name)
         self.user.save_to_session(self.request, value=new_jwt)
 
     def create_profile(self, user: User = None) -> bool:
@@ -486,15 +505,13 @@ class Auth:
             hashed_password = self.hash_password(self.user_creds.password, with_token=user_token)
             user = User(name=self.user_creds.email.split('@')[0], password=hashed_password, auth_token=user_token, meta={'email': self.user_creds.email})
         uid = generate_id(from_email=user.meta.email, salt=self.app.salt)
-        user_profile_path = os.path.join(self.app.contents_dirpath, 'users', uid, 'profile.json')
+        user_profile_path = os.path.join(self.app.datastore_dirpath, 'users', uid, 'profile.json')
         user.uid = uid
         user.file_path = user_profile_path
         user.file_dirpath = os.path.dirname(user_profile_path)
         if os.path.exists(user_profile_path):
             self.response = self.responses.ACCOUNT_EXISTS
             return False
-
-        self.log_user_location(user)
 
         created = user.save_to_file(user_profile_path)
         if created:
@@ -551,15 +568,15 @@ class Auth:
             self.session.clear()
             return None
         # update jwt expiration time
-        user.save_to_session(self.request, value=self.create_jwt(user.uid, user.role))
+        user.save_to_session(self.request, value=self.create_jwt(user.uid, user.role.name))
         self.response = self.responses.ACTIVE_SESSION
         return user
 
 
     def query_account(self, user_email: str = None) -> User:
         """Queries the user account based on the provided credentials."""
-        uid =  generate_id(from_email=self.user_creds.email, salt=self.app.salt) if not self.user_creds.has_session else user_email or self.user_creds.email
-        user_account_path = os.path.join(self.app.contents_dirpath, 'users', uid or '', 'profile.json')
+        uid =  generate_id(from_email=self.user_creds.email, salt=self.app.salt) if not self.user_creds.has_session and not user_email else user_email or self.user_creds.email
+        user_account_path = os.path.join(self.app.datastore_dirpath, 'users', uid or '', 'profile.json')
         user_account = self.user_model.from_file(user_account_path, app_ctx=self.app.app_ctx) if os.path.exists(user_account_path) else None
         return user_account
 
@@ -575,7 +592,7 @@ class Auth:
         elif auth_type and auth_type.startswith('Bearer'):
             # Handle Bearer token if needed
             user_creds = self.decode_jwt(auth_token)
-            email, _ = user_creds.get('username')
+            email, _ = user_creds.get('username') if user_creds else None, None
         elif auth_type and auth_type.startswith('Basic'):
             import base64
             decoded = base64.b64decode(auth_token).decode('utf-8')
@@ -625,6 +642,14 @@ class Auth:
         if not site_salt or not password or not token:
             raise ValueError("site_salt, password, and token must be provided")
         return f"{site_salt}${password}${token}"
+
+
+    @staticmethod
+    def set_user_model(user_model: User):
+        """Sets the user model for authentication."""
+        if not issubclass(user_model, User):
+            raise ValueError("user_model must be a subclass of User")
+        Auth.user_model = user_model
 
 
 class AuthService(ABC):

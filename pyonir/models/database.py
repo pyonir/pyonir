@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Type, Union, Iterator, Generator
 
 from sortedcontainers import SortedList
+from sqlalchemy.engine import cursor
 
 from pyonir.models.mapper import cls_mapper
 from pyonir.models.parser import DeserializeFile
@@ -33,11 +34,11 @@ class DatabaseService(ABC):
         # Base config from environment
         from pyonir.utilities import get_attr
         self.app = app
-        self.db_name: str = db_name
         self.connection: Optional[sqlite3.Connection] = None
+        self._db_name: str = db_name
         self._config: object = get_attr(app.env, 'database')
         self._database: str = '' # the db address or name. path/to/directory, path/to/sqlite.db
-        self._driver: str = '' #the db context fs, sqlite, mysql, pgresql, oracle
+        self._driver: str = 'sqlite' #the db context fs, sqlite, mysql, pgresql, oracle
         self._host: str = ''
         self._port: int = 0
         self._username: str = ''
@@ -46,7 +47,11 @@ class DatabaseService(ABC):
     @property
     def datastore_path(self):
         """Path to the app datastore directory"""
-        return os.path.join(self.app.datastore_dirpath, self.db_name)
+        return self.app.datastore_dirpath
+
+    @property
+    def db_name(self) -> str:
+        return self._db_name
 
     @property
     def driver(self) -> Optional[str]:
@@ -70,8 +75,6 @@ class DatabaseService(ABC):
 
     @property
     def database(self) -> Optional[str]:
-        if self.driver.startswith('sqlite') or self.driver == 'fs':
-            return self.datastore_path
         return self._database
 
     # --- Builder pattern overrides ---
@@ -79,8 +82,11 @@ class DatabaseService(ABC):
         self._driver = driver
         return self
 
-    def set_database(self, database: str) -> "DatabaseService":
-        self._database = database
+    def set_database(self, database_dirpath: str = None) -> "DatabaseService":
+        if self.driver.startswith('sqlite') or self.driver == 'fs':
+            assert self.db_name is not None
+            database_dirpath = os.path.join(database_dirpath or self.datastore_path, self.db_name)
+        self._database = database_dirpath
         return self
 
     def set_host(self, host: str) -> "DatabaseService":
@@ -99,7 +105,19 @@ class DatabaseService(ABC):
         self._password = password
         return self
 
+    def set_db_name(self, name: str):
+        self._db_name = name
+        return self
+
     # --- Database operations ---
+    def has_table(self, table_name: str) -> bool:
+        """checks if table exists"""
+        if not self.connection:
+            raise RuntimeError('Database service has not been initialized')
+        cursor = self.connection.cursor()
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table_name,))
+        return bool(cursor.fetchone())
+
     @abstractmethod
     def destroy(self):
         """Destroy the database or datastore."""
@@ -120,6 +138,8 @@ class DatabaseService(ABC):
             raise NotImplementedError("Create operation is only implemented for SQLite in this stub.")
         if not self.connection:
             raise ValueError("Database connection is not established.")
+        if self.has_table(sql_create):
+            raise RuntimeError(f"Table {sql_create} already exists.")
         cursor = self.connection.cursor()
         cursor.execute(sql_create)
         return self
@@ -147,8 +167,9 @@ class DatabaseService(ABC):
             self.connection = None
 
     @abstractmethod
-    def insert(self, table: str, entity: Type[BaseSchema]) -> Any:
+    def insert(self, table: str, entity: BaseSchema) -> Any:
         """Insert entity into backend."""
+        import json
         table = table or entity.__class__.__name__.lower()
         data = entity if isinstance(entity, dict) else entity.to_dict()
 
@@ -156,8 +177,9 @@ class DatabaseService(ABC):
             keys = ', '.join(data.keys())
             placeholders = ', '.join('?' for _ in data)
             query = f"INSERT INTO {table} ({keys}) VALUES ({placeholders})"
+            values = tuple(json.dumps(v) if isinstance(v,(dict, list, tuple, set)) else v for v in data.values())
             cursor = self.connection.cursor()
-            cursor.execute(query, tuple(data.values()))
+            cursor.execute(query, values)
             self.connection.commit()
             return cursor.lastrowid
 
@@ -167,8 +189,7 @@ class DatabaseService(ABC):
             return os.path.exists(entity.file_path)
 
     @abstractmethod
-    def find(self, entity_cls: Type[BaseSchema], filter: Dict = None) -> Any:
-        table = entity_cls.__name__.lower()
+    def find(self, table: str, filter: Dict = None) -> Any:
         results = []
 
         if self.driver == "sqlite":

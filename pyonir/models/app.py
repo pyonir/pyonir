@@ -159,10 +159,10 @@ class Base:
         from pyonir.models.utils import process_contents
         self._settings = process_contents(self.configs_dirpath, app_ctx=self.app_ctx)
 
-    def parse_file(self, file_path: str) -> 'DeserializeFile':
+    def parse_file(self, file_path: str, model: any = None) -> 'DeserializeFile':
         """Parses a file and returns a Parsely instance for the file."""
         from pyonir.models.parser import DeserializeFile
-        return DeserializeFile(file_path, app_ctx=self.app_ctx)
+        return DeserializeFile(file_path, app_ctx=self.app_ctx, model=model)
 
     # def apply_virtual_routes(self, pyonir_request: 'BaseRequest') -> 'Parsely':
     #     """Reads and applies virtual .routes.md file specs onto or updates the request file"""

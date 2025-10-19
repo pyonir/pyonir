@@ -315,7 +315,7 @@ class BaseServer(Starlette):
         self.ws_routes = []
         self.sse_routes = []
         self.auth_routes = []
-        self.endpoints = []
+        self.endpoints = set()
         self.url_map = {} # named reference to routes by function name
         self.route_map = {} # named reference to routes by path
         self.resolvers = {}
@@ -402,10 +402,10 @@ class BaseServer(Starlette):
     def create_route(self, dec_func: Optional[Callable],
                 path: str = '',
                 methods=None,
+                static_path: str = None,
                 auth: bool = None,
                 ws: bool = None,
                 sse: bool = None,
-                static_path: str = None,
                 **options: dict) -> Optional[Callable]:
         """A mapping of an HTTP method and an endpoint to a handler function."""
         import inspect
@@ -434,12 +434,12 @@ class BaseServer(Starlette):
         new_route = {
             "doc": docs,
             "endpoint": endpoint_route,
-            "params": get_type_hints(dec_func) if dec_func else None,
+            # "params": get_type_hints(dec_func) if dec_func else None,
             "route": path,  # has regex pattern
             "path": route_path,
             "methods": methods,
             "name": name,
-            "auth": auth,
+            "auth": auth or options.pop('@auth', None),
             "sse": sse,
             "ws": ws,
             "async": is_async,
@@ -447,7 +447,7 @@ class BaseServer(Starlette):
             "func": dec_func
         }
         # Add route path into categories
-        self.endpoints.append(f"{endpoint_route}{route_path}")
+        self.endpoints.add(f"{endpoint_route}{route_path}")
         self.url_map[name] = new_route
         self.route_map[path] = new_route
         if sse:
@@ -520,7 +520,6 @@ class BaseServer(Starlette):
         Site.TemplateEnvironment.globals['request'] = pyonir_request
 
         # File processing for request
-        # if not pyonir_request.is_static:
         pyonir_request.set_app_context()
         req_file = pyonir_request.resolve_request_to_file(pyonir_request.app_ctx_ref)
         pyonir_request.file = req_file
@@ -537,10 +536,6 @@ class BaseServer(Starlette):
 
         # Get router endpoint from map
         is_async = inspect.iscoroutinefunction(route_func)
-        default_args = dict(get_type_hints(route_func))
-        default_args.update(**pyonir_request.path_params.__dict__)
-        default_args.update(**pyonir_request.query_params.__dict__)
-        default_args.update(**pyonir_request.form)
         args = func_request_mapper(route_func, pyonir_request)
         if not pyonir_request.is_static:
             if callable(route_func):
@@ -557,7 +552,7 @@ class BaseServer(Starlette):
         pyonir_request.derive_status_code(is_router_method=is_router)
 
         # Execute plugins hooks initial request
-        # await Site.run_async_plugins(PyonirHooks.ON_REQUEST, pyonir_request)
+        await Site.run_async_plugins(PyonirHooks.ON_REQUEST, pyonir_request)
 
         # Finalize response output
         if isinstance(pyonir_request.server_response, BaseRestResponse):

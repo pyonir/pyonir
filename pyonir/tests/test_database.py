@@ -22,8 +22,8 @@ class MockDataService(DatabaseService):
     version = "0.1.0"
     endpoint = "/testdata"
 
-    def create_table(self, schema: BaseSchema) -> 'DatabaseService':
-        return super().create_table(schema)
+    def create_table(self, sql_create: str) -> 'DatabaseService':
+        return super().create_table(sql_create)
 
     def destroy(self):
         super().destroy()
@@ -62,40 +62,41 @@ class MockDataService(DatabaseService):
 
 app = PyonirApp(__file__, False)  # Placeholder for PyonirApp instance
 db = (MockDataService(app, "pyonir_test.db")
-        .set_driver("sqlite"))
+        .set_driver("sqlite").set_database())
 
 def test_crud_operations():
     # Create
     db.connect()
     user = User(username="testuser", email="test@example.com")
-    db.create_table(user.generate_sql(db.driver))
-    user_id = db.insert("user", user)
+    table_name = User.__tablename__
+    db.create_table(user.generate_sql())
+    user_id = db.insert(table_name, user)
     assert user_id
 
     # Read
-    results = db.find(User, {"id": user_id})
+    results = db.find(table_name, {"id": user_id})
     assert (len(results) == 1)
     assert (results[0]["username"] == "testuser")
     assert (results[0]["email"] == "test@example.com")
 
     # Update
-    updated = db.update("user", user_id, {
+    updated = db.update(table_name, user_id, {
         "username": "newusername",
         "email": "newemail@example.com"
     })
     assert updated
 
     # Verify update
-    results = db.find(User, {"id": user_id})
+    results = db.find(table_name, {"id": user_id})
     assert (results[0]["username"] == "newusername")
     assert (results[0]["email"] == "newemail@example.com")
 
     # Delete
-    deleted = db.delete("user", user_id)
+    deleted = db.delete(table_name, user_id)
     assert (deleted)
 
     # Verify deletion
-    results = db.find(User, {"id": user_id})
+    results = db.find(table_name, {"id": user_id})
     assert (len(results) == 0)
 
     db.disconnect()

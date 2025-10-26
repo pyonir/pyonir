@@ -6,7 +6,7 @@ from collections.abc import Iterable as ABCIterable, Mapping as ABCMapping, Gene
 
 from sqlmodel import SQLModel
 
-from pyonir.utilities import get_attr
+from pyonir.models.utils import get_attr, deserialize_datestr
 
 
 def is_iterable(tp):
@@ -148,12 +148,13 @@ def cls_mapper(file_obj: object, cls: Union[type, list[type]], from_request=None
         return _value
 
     # datetime passthrough
-    if cls == datetime:
-        return file_obj
+    if cls == datetime and isinstance(file_obj, str):
+        return deserialize_datestr(file_obj)
 
     # Scalars just wrap
     if is_scalar_type(cls):
         return cls(file_obj)
+    is_sqlmodel_field = lambda t: callable(getattr(value,'default_factory', None))
     is_sqlmodel = lambda t: isinstance(t, type) and issubclass(t, SQLModel)
     is_dclass = is_dataclass(cls) or len(required_parameters(cls)) > 0
     is_generic_type = cls.__name__ == 'GenericQueryModel'
@@ -200,6 +201,8 @@ def cls_mapper(file_obj: object, cls: Union[type, list[type]], from_request=None
             value = custom_mapper_fn(value)
         elif is_sqlmodel(hint):
             value = cls_mapper(value, hint) if isinstance(value, dict) else value
+        elif is_sqlmodel_field(value):
+            value = value.default_factory()
         elif is_scalar_type(actual_type):
             value = actual_type(value)
         elif is_callable_type(actual_type) or callable(value):

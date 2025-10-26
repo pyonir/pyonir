@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Type, Union, Iterator, Generator
 
 from sortedcontainers import SortedList
-from sqlalchemy.engine import cursor
 
 from pyonir.models.mapper import cls_mapper
 from pyonir.models.parser import DeserializeFile
@@ -110,6 +109,60 @@ class DatabaseService(ABC):
         return self
 
     # --- Database operations ---
+    def get_existing_columns(self, table_name: str) -> Dict[str, str]:
+        cursor = self.connection.cursor()
+        cursor.execute(f"PRAGMA table_info({table_name});")
+        return {row[1]: row[2] for row in cursor.fetchall()}
+
+    def get_pk(self, table: str, with_columns: bool = False):
+        cursor = self.connection.cursor()
+        cursor.execute(f"PRAGMA table_info('{table}')")
+        pk = "id"
+        columns = {}
+        for col in cursor.fetchall():
+            cid, name, type_, notnull, dflt_value, pk = col
+            columns[name] = type_
+            if pk == 1:
+                pk = name
+                if not with_columns: break
+        columns.update({"__pk__": pk})
+        return pk if not with_columns else columns
+
+    def rename_table_columns(self, table_name: str, rename_map: dict):
+        """
+        Renames columns in database schema table
+        :param table_name: database table
+        :param rename_map: dict with key as existing column name and value as the new name
+        :return:
+        """
+        cursor = self.connection.cursor()
+        existing_cols = self.get_existing_columns(table_name)
+
+        for old_name, new_name in rename_map.items():
+            if old_name in existing_cols and new_name not in existing_cols:
+                sql = f"ALTER TABLE {table_name} RENAME COLUMN {old_name} TO {new_name};"
+                cursor.execute(sql)
+                print(f"[RENAME] {old_name} → {new_name}")
+        self.connection.commit()
+
+    def add_table_columns(self, table_name: str, column_map: dict):
+        """
+        Adds new table column in database schema table
+        :param table_name: database table
+        :param column_map: dict with key as column name and value as the type
+        :return:
+        """
+        cursor = self.connection.cursor()
+        existing_cols = self.get_existing_columns(table_name)
+
+        for col, dtype in column_map.items():
+            if col not in existing_cols:
+                sql = f"ALTER TABLE {table_name} ADD COLUMN {col} {dtype};"
+                cursor.execute(sql)
+                print(f"[ADD] Column '{col}' added ({dtype})")
+        self.connection.commit()
+
+
     def has_table(self, table_name: str) -> bool:
         """checks if table exists"""
         if not self.connection:
@@ -130,6 +183,12 @@ class DatabaseService(ABC):
             print(f"[DEBUG] File system datastore at {self.database} has been deleted.")
         else:
             raise ValueError(f"Cannot destroy unknown driver or non-existent database: {self.driver}:{self.database}")
+
+    @abstractmethod
+    def create_table_from_model(self, model: BaseSchema) -> 'DatabaseService':
+        sql = model.generate_sql_table(self.driver)
+        self.create_table(sql)
+        return self
 
     @abstractmethod
     def create_table(self, sql_create: str) -> 'DatabaseService':
@@ -170,7 +229,6 @@ class DatabaseService(ABC):
     def insert(self, table: str, entity: BaseSchema) -> Any:
         """Insert entity into backend."""
         import json
-        table = table or entity.__class__.__name__.lower()
         data = entity if isinstance(entity, dict) else entity.to_dict()
 
         if self.driver == "sqlite":
@@ -181,7 +239,7 @@ class DatabaseService(ABC):
             cursor = self.connection.cursor()
             cursor.execute(query, values)
             self.connection.commit()
-            return cursor.lastrowid
+            return getattr(entity, entity.__primary_key__) or cursor.lastrowid
 
         elif self.driver == "fs":
             # Save JSON file per record

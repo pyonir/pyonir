@@ -19,7 +19,7 @@ class MetaSchema(SQLModelMetaclass):
         table_name = kwargs.pop("table_name", None)
 
         if isinstance(table_name, str):
-            namespace["__tablename__"] = table_name
+            namespace["__table_name__"] = table_name
             # kwargs["table"] = True
         if isinstance(private_keys, (list, tuple)) and "_private_keys" not in namespace:
             namespace["_private_keys"] = private_keys + ['file_path', 'file_dirpath']
@@ -108,11 +108,11 @@ class BaseModel:
     def generate_id() -> str:
         return uuid.uuid4().hex
 
-class xBaseSchema(BaseModel):
+class BaseSchema(BaseModel):
     """
     Interface for immutable dataclass models with CRUD and session support.
     """
-    __table_name__ = str()
+    __tablename__ = str()
     __fields__ = set()
     _sql_create_table: Optional[str] = None
 
@@ -120,22 +120,23 @@ class xBaseSchema(BaseModel):
         table_name = kwargs.get("table_name")
         primary_key = kwargs.get("primary_key")
         dialect = kwargs.get("dialect")
-        if primary_key:
-            setattr(cls, "__primary_key__", primary_key)
         if table_name:
             setattr(cls, "__table_name__", table_name)
         print(f'init_subclass for {cls.__name__}')
         model_fields = set((name, typ)  for name, typ in cls.__annotations__.items())
         setattr(cls, "__fields__", model_fields)
+        setattr(cls, "__primary_key__", primary_key or "id")
         cls.generate_sql_table(dialect)
 
     def __init__(self, **data):
         # Get field defaults from the class and apply them if not provided
         # This ensures default_factory fields are called when value is None
         for field_name, field_info in self.__fields__:
-            value = data.get(field_name)
-            if field_name in data and value is not None:
-                setattr(self, field_name, value)
+            value = data.get(field_name) or getattr(self, field_name, None)
+            if field_name in data and value is None: continue
+            if hasattr(value,'default_factory') and value.default_factory is not None:
+                value = value.default_factory()
+            setattr(self, field_name, value)
 
     @classmethod
     def generate_sql_table(cls, dialect: str = None) -> str:
@@ -184,7 +185,7 @@ class xBaseSchema(BaseModel):
         return cls._sql_create_table
 
 
-class BaseSchema(SQLModel, metaclass=MetaSchema):
+class xBaseSchema(SQLModel, metaclass=MetaSchema):
     """
     Interface for immutable dataclass models with CRUD and session support.
     """

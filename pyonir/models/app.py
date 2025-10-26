@@ -444,14 +444,6 @@ class BaseApp(Base):
             'md': parse_markdown
         }
 
-        # global Site
-        # # Set Global Site instance
-        # sys.path.insert(0, os.path.dirname(os.path.dirname(app_entrypoint)))
-        # Site = self
-        # self.process_configs()
-        # if use_themes:
-        #     self.configure_themes()
-
     @property
     def env(self) -> EnvConfig: return self._env
 
@@ -568,17 +560,6 @@ class BaseApp(Base):
 
         # Load theme templates
         self.TemplateEnvironment.load_template_path(app_active_theme.jinja_template_path)
-
-    # def collect_virtual_routes(self) -> None:
-    #     """Sets a map on server instance for all virtual routes from application and plugin contexts"""
-    #     virtual_routes = OrderedDict()
-    #     site_routes = self.parse_file(self.virtual_routes_filepath).data
-    #     for plg in self.activated_plugins:
-    #         if not hasattr(plg, 'parse_file'): continue
-    #         vroute = plg.parse_file(plg.virtual_routes_filepath).data
-    #         virtual_routes.update(vroute)
-    #     virtual_routes.update(site_routes)
-    #     self.server.virtual_routes = virtual_routes
 
     # RUNTIME
     def load_static_path(self,url: str, path: str) -> None:

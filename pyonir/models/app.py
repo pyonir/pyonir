@@ -502,6 +502,7 @@ class BaseApp(Base):
     @property
     def nginx_config_filepath(self):
         default = os.path.join(self.app_dirpath, self.name + '.conf')
+        if self.is_dev: return default
         return get_attr(self.env, 'app.nginx_conf_dirpath') or default
 
     @property

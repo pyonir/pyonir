@@ -41,7 +41,7 @@ class TemplateEnvironment(Environment):
 
     def render_component(self, name: str, *args, **kwargs) -> str:
         """Render a macro from components.jinja with full Jinja context."""
-        tmpl = self.get_template("components.jinja")
+        tmpl = self.get_template("components.jinja.html")
         macro = getattr(tmpl.module, name)
         return macro(*args, **kwargs)
 

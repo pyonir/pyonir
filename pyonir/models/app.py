@@ -657,7 +657,7 @@ class BaseApp(Base):
         try:
             return string.format(**context)
         except Exception as e:
-            print('pyformatter', e, string)
+            print('[pyformatter]', e, string)
             return string
 
     def run(self, uvicorn_options: dict = None):

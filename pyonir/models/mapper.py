@@ -115,16 +115,12 @@ def func_request_mapper(func: Callable, pyonir_request: 'BaseRequest') -> dict:
             param.default if param.default is not inspect.Parameter.empty else None
         )
         if param_type in (PyonirApp, PyonirRequest):
-            # from pyonir import Site
             param_value = pyonir_request.app if param_type == PyonirApp else pyonir_request
-            # set_attr(cls_args, name, value)
-            # continue
         elif issubclass(param_type, Auth):
             param_value = param_type(pyonir_request, pyonir_request.app)
-            # set_attr(cls_args, name, auth_instance)
-            # continue
-
-        set_attr(cls_args, name, param_value or default)
+        else:
+            param_value = cls_mapper(param_value, param_type) if param_value else default
+        set_attr(cls_args, name, param_value)
         params_info[name] = {"type": param_type, "default": param_value or default}
 
     return cls_args

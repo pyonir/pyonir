@@ -33,11 +33,11 @@ class DatabaseService(ABC):
         # Base config from environment
         from pyonir.utilities import get_attr
         self.app = app
-        self.db_name: str = db_name
         self.connection: Optional[sqlite3.Connection] = None
+        self._db_name: str = db_name
         self._config: object = get_attr(app.env, 'database')
         self._database: str = '' # the db address or name. path/to/directory, path/to/sqlite.db
-        self._driver: str = '' #the db context fs, sqlite, mysql, pgresql, oracle
+        self._driver: str = 'sqlite' #the db context fs, sqlite, mysql, pgresql, oracle
         self._host: str = ''
         self._port: int = 0
         self._username: str = ''
@@ -46,7 +46,11 @@ class DatabaseService(ABC):
     @property
     def datastore_path(self):
         """Path to the app datastore directory"""
-        return os.path.join(self.app.datastore_dirpath, self.db_name)
+        return self.app.datastore_dirpath
+
+    @property
+    def db_name(self) -> str:
+        return self._db_name
 
     @property
     def driver(self) -> Optional[str]:
@@ -70,8 +74,6 @@ class DatabaseService(ABC):
 
     @property
     def database(self) -> Optional[str]:
-        if self.driver.startswith('sqlite') or self.driver == 'fs':
-            return self.datastore_path
         return self._database
 
     # --- Builder pattern overrides ---
@@ -79,8 +81,11 @@ class DatabaseService(ABC):
         self._driver = driver
         return self
 
-    def set_database(self, database: str) -> "DatabaseService":
-        self._database = database
+    def set_database(self, database_dirpath: str = None) -> "DatabaseService":
+        if self.driver.startswith('sqlite') or self.driver == 'fs':
+            assert self.db_name is not None
+            database_dirpath = os.path.join(database_dirpath or self.datastore_path, self.db_name)
+        self._database = database_dirpath
         return self
 
     def set_host(self, host: str) -> "DatabaseService":
@@ -99,7 +104,73 @@ class DatabaseService(ABC):
         self._password = password
         return self
 
+    def set_db_name(self, name: str):
+        self._db_name = name
+        return self
+
     # --- Database operations ---
+    def get_existing_columns(self, table_name: str) -> Dict[str, str]:
+        cursor = self.connection.cursor()
+        cursor.execute(f"PRAGMA table_info({table_name});")
+        return {row[1]: row[2] for row in cursor.fetchall()}
+
+    def get_pk(self, table: str, with_columns: bool = False):
+        cursor = self.connection.cursor()
+        cursor.execute(f"PRAGMA table_info('{table}')")
+        pk = "id"
+        columns = {}
+        for col in cursor.fetchall():
+            cid, name, type_, notnull, dflt_value, pk = col
+            columns[name] = type_
+            if pk == 1:
+                pk = name
+                if not with_columns: break
+        columns.update({"__pk__": pk})
+        return pk if not with_columns else columns
+
+    def rename_table_columns(self, table_name: str, rename_map: dict):
+        """
+        Renames columns in database schema table
+        :param table_name: database table
+        :param rename_map: dict with key as existing column name and value as the new name
+        :return:
+        """
+        cursor = self.connection.cursor()
+        existing_cols = self.get_existing_columns(table_name)
+
+        for old_name, new_name in rename_map.items():
+            if old_name in existing_cols and new_name not in existing_cols:
+                sql = f"ALTER TABLE {table_name} RENAME COLUMN {old_name} TO {new_name};"
+                cursor.execute(sql)
+                print(f"[RENAME] {old_name} → {new_name}")
+        self.connection.commit()
+
+    def add_table_columns(self, table_name: str, column_map: dict):
+        """
+        Adds new table column in database schema table
+        :param table_name: database table
+        :param column_map: dict with key as column name and value as the type
+        :return:
+        """
+        cursor = self.connection.cursor()
+        existing_cols = self.get_existing_columns(table_name)
+
+        for col, dtype in column_map.items():
+            if col not in existing_cols:
+                sql = f"ALTER TABLE {table_name} ADD COLUMN {col} {dtype};"
+                cursor.execute(sql)
+                print(f"[ADD] Column '{col}' added ({dtype})")
+        self.connection.commit()
+
+
+    def has_table(self, table_name: str) -> bool:
+        """checks if table exists"""
+        if not self.connection:
+            raise RuntimeError('Database service has not been initialized')
+        cursor = self.connection.cursor()
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table_name,))
+        return bool(cursor.fetchone())
+
     @abstractmethod
     def destroy(self):
         """Destroy the database or datastore."""
@@ -114,12 +185,20 @@ class DatabaseService(ABC):
             raise ValueError(f"Cannot destroy unknown driver or non-existent database: {self.driver}:{self.database}")
 
     @abstractmethod
+    def create_table_from_model(self, model: BaseSchema) -> 'DatabaseService':
+        sql = model.generate_sql_table(self.driver)
+        self.create_table(sql)
+        return self
+
+    @abstractmethod
     def create_table(self, sql_create: str) -> 'DatabaseService':
         """Create a table in the database."""
         if self.driver != "sqlite":
             raise NotImplementedError("Create operation is only implemented for SQLite in this stub.")
         if not self.connection:
             raise ValueError("Database connection is not established.")
+        if self.has_table(sql_create):
+            raise RuntimeError(f"Table {sql_create} already exists.")
         cursor = self.connection.cursor()
         cursor.execute(sql_create)
         return self
@@ -147,19 +226,20 @@ class DatabaseService(ABC):
             self.connection = None
 
     @abstractmethod
-    def insert(self, table: str, entity: Type[BaseSchema]) -> Any:
+    def insert(self, table: str, entity: BaseSchema) -> Any:
         """Insert entity into backend."""
-        table = table or entity.__class__.__name__.lower()
+        import json
         data = entity if isinstance(entity, dict) else entity.to_dict()
 
         if self.driver == "sqlite":
             keys = ', '.join(data.keys())
             placeholders = ', '.join('?' for _ in data)
             query = f"INSERT INTO {table} ({keys}) VALUES ({placeholders})"
+            values = tuple(json.dumps(v) if isinstance(v,(dict, list, tuple, set)) else v for v in data.values())
             cursor = self.connection.cursor()
-            cursor.execute(query, tuple(data.values()))
+            cursor.execute(query, values)
             self.connection.commit()
-            return cursor.lastrowid
+            return getattr(entity, entity.__primary_key__) or cursor.lastrowid
 
         elif self.driver == "fs":
             # Save JSON file per record
@@ -167,8 +247,7 @@ class DatabaseService(ABC):
             return os.path.exists(entity.file_path)
 
     @abstractmethod
-    def find(self, entity_cls: Type[BaseSchema], filter: Dict = None) -> Any:
-        table = entity_cls.__name__.lower()
+    def find(self, table: str, filter: Dict = None) -> Any:
         results = []
 
         if self.driver == "sqlite":

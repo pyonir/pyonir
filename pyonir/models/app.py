@@ -159,10 +159,10 @@ class Base:
         from pyonir.models.utils import process_contents
         self._settings = process_contents(self.configs_dirpath, app_ctx=self.app_ctx)
 
-    def parse_file(self, file_path: str) -> 'DeserializeFile':
+    def parse_file(self, file_path: str, model: any = None) -> 'DeserializeFile':
         """Parses a file and returns a Parsely instance for the file."""
         from pyonir.models.parser import DeserializeFile
-        return DeserializeFile(file_path, app_ctx=self.app_ctx)
+        return DeserializeFile(file_path, app_ctx=self.app_ctx, model=model)
 
     # def apply_virtual_routes(self, pyonir_request: 'BaseRequest') -> 'Parsely':
     #     """Reads and applies virtual .routes.md file specs onto or updates the request file"""
@@ -444,14 +444,6 @@ class BaseApp(Base):
             'md': parse_markdown
         }
 
-        # global Site
-        # # Set Global Site instance
-        # sys.path.insert(0, os.path.dirname(os.path.dirname(app_entrypoint)))
-        # Site = self
-        # self.process_configs()
-        # if use_themes:
-        #     self.configure_themes()
-
     @property
     def env(self) -> EnvConfig: return self._env
 
@@ -569,17 +561,6 @@ class BaseApp(Base):
         # Load theme templates
         self.TemplateEnvironment.load_template_path(app_active_theme.jinja_template_path)
 
-    # def collect_virtual_routes(self) -> None:
-    #     """Sets a map on server instance for all virtual routes from application and plugin contexts"""
-    #     virtual_routes = OrderedDict()
-    #     site_routes = self.parse_file(self.virtual_routes_filepath).data
-    #     for plg in self.activated_plugins:
-    #         if not hasattr(plg, 'parse_file'): continue
-    #         vroute = plg.parse_file(plg.virtual_routes_filepath).data
-    #         virtual_routes.update(vroute)
-    #     virtual_routes.update(site_routes)
-    #     self.server.virtual_routes = virtual_routes
-
     # RUNTIME
     def load_static_path(self,url: str, path: str) -> None:
         """Loads a static file path into the application server"""
@@ -676,7 +657,7 @@ class BaseApp(Base):
         try:
             return string.format(**context)
         except Exception as e:
-            print('pyformatter', e, string)
+            print('[pyformatter]', e, string)
             return string
 
     def run(self, uvicorn_options: dict = None):

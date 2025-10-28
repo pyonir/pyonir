@@ -14,7 +14,7 @@ from pyonir.pyonir_types import PyonirRequest, PyonirRestResponse
 
 class UserCredentials(PyonirSchema):
     """Represents user credentials for login"""
-    email: str
+    email: str = ''
     """User's email address is required for login"""
 
     password: str = ''
@@ -494,11 +494,11 @@ class Auth:
         new_jwt = self.create_jwt(self.user.uid, self.user.role.name)
         self.user.save_to_session(self.request, value=new_jwt)
 
-    def create_profile(self, user: User = None) -> bool:
+    def create_profile(self, user: User = None) -> Optional[User]:
         """Creates a user profile and saves it to the filesystem."""
         if self.user:
             self.response = self.responses.ACTIVE_SESSION
-            return False
+            return None
 
         user_token = csrf_token(self.request.server_request)
         if not user:
@@ -511,7 +511,7 @@ class Auth:
         user.file_dirpath = os.path.dirname(user_profile_path)
         if os.path.exists(user_profile_path):
             self.response = self.responses.ACCOUNT_EXISTS
-            return False
+            return None
 
         created = user.save_to_file(user_profile_path)
         if created:
@@ -520,7 +520,7 @@ class Auth:
         else:
             self.response = self.responses.SOMETHING_WENT_WRONG
             print(f"Failed to create user account at {user_profile_path}")
-        return created
+        return user
 
     def signin_has_exceeded(self):
         """Logs a user login attempt."""
@@ -601,7 +601,7 @@ class Auth:
         else:
             return UserCredentials.from_request(self.request)
 
-        return UserCredentials(email=username, has_session=True)
+        return UserCredentials(email=username or '', has_session=True)
 
 
     def send_email(self):

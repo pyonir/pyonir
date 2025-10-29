@@ -12,8 +12,8 @@ from pyonir.models.database import DatabaseService
 class MockUser(BaseSchema, table_name='pyonir_users', primary_key='uid'):
     username: str
     email: str
-    created_at: datetime = datetime.now()
-    uid: str = Field(default_factory=BaseSchema.generate_id, primary_key=False)
+    created_at: datetime = datetime.now
+    uid: str = BaseSchema.generate_id
 
 
 class MockDataService(DatabaseService):

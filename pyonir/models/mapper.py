@@ -4,6 +4,7 @@ from typing import get_type_hints, Any
 from typing import get_origin, get_args, Union, Callable, Mapping, Iterable, Generator
 from collections.abc import Iterable as ABCIterable, Mapping as ABCMapping, Generator as ABCGenerator
 
+# from pyonir.models.schemas import BaseSchema
 from sqlmodel import SQLModel
 
 from pyonir.models.utils import get_attr, deserialize_datestr
@@ -63,15 +64,16 @@ def coerce_union(t, v):
         print(f"failed to coerce {v} into {t}")
         return None
 
-def collect_type_hints(t):
+def collect_type_hints(t, public_only=True):
     hints = get_type_hints(t)
     try:
         init_hints = get_type_hints(t.__init__)
         hints.update(init_hints)
-        del hints['return']
+        if hints.get('return'):
+            del hints['return']
     except Exception as exc:
         pass
-    return hints
+    return {k:v for k,v in hints.items() if public_only and k[0]!='_'}
 
 def required_parameters(cls):
     import inspect
@@ -127,8 +129,8 @@ def func_request_mapper(func: Callable, pyonir_request: 'BaseRequest') -> dict:
 
 def cls_mapper(file_obj: object, cls: Union[type, list[type]], from_request=None):
     """Recursively map dict-like input into `cls` with type-safe field mapping."""
-    # from pyonir.core import PyonirRequest, PyonirApp
-    # from pyonir.models import Auth
+
+    from pyonir.models.schemas import BaseSchema
 
     if hasattr(cls, '__skip_parsely_deserialization__'):
         return file_obj
@@ -143,6 +145,9 @@ def cls_mapper(file_obj: object, cls: Union[type, list[type]], from_request=None
             _value = coerce_union(ct, file_obj)
         return _value
 
+    if is_optional_type(cls) or isinstance(file_obj, cls):
+        return file_obj
+
     # datetime passthrough
     if cls == datetime and isinstance(file_obj, str):
         return deserialize_datestr(file_obj)
@@ -154,7 +159,8 @@ def cls_mapper(file_obj: object, cls: Union[type, list[type]], from_request=None
     is_sqlmodel = lambda t: isinstance(t, type) and issubclass(t, SQLModel)
     is_dclass = is_dataclass(cls) or len(required_parameters(cls)) > 0
     is_generic_type = cls.__name__ == 'GenericQueryModel'
-    param_type_map =  {k: field.annotation for k, field in cls.model_fields.items()} if is_sqlmodel(cls) else collect_type_hints(cls)
+    is_pyonirschema = issubclass(cls, BaseSchema)
+    param_type_map =  {k: field.annotation for k, field in cls.model_fields.items()} if is_sqlmodel(cls) else dict(cls.__fields__) if is_pyonirschema else collect_type_hints(cls)
     data = get_attr(file_obj, 'data') or {}
 
     # Merge nested access if ORM opts define mapper_key
@@ -181,19 +187,12 @@ def cls_mapper(file_obj: object, cls: Union[type, list[type]], from_request=None
         if value is None:
             set_attr(cls_args, name, value)
             continue
-        # Handle Special Pyonir objects
-        # if from_request and hint in (PyonirApp, PyonirRequest):
-        #     from pyonir import Site
-        #     value = Site if hint == PyonirApp else from_request
-        #     set_attr(cls_args, name, value)
-        #     continue
-        # if from_request and hint == value:
-        #     set_attr(cls_args, name, None)
-        #     continue
 
         # Handle containers
         custom_mapper_fn = getattr(cls, f'map_to_{name}', None)
-        if custom_mapper_fn:
+        if isinstance(value, actual_type):
+            pass
+        elif custom_mapper_fn:
             value = custom_mapper_fn(value)
         elif is_sqlmodel(hint):
             value = cls_mapper(value, hint) if isinstance(value, dict) else value
@@ -211,8 +210,6 @@ def cls_mapper(file_obj: object, cls: Union[type, list[type]], from_request=None
             itypes = mapable[0] if len(mapable) == 1 else mapable
             itype = itypes[0] if itypes and len(itypes) == 1 else None
             value = [cls_mapper(v, itype) for v in value] if itype else value if isinstance(value, actual_type) else actual_type(value)
-        elif isinstance(value, actual_type):
-            pass
         elif is_custom_class(actual_type):
             value = cls_mapper(value, actual_type)
         else:

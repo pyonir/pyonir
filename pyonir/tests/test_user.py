@@ -12,6 +12,12 @@ valid_credentials = {
 admin = User(role=Roles.ADMIN)
 TaskAuthorities.MOCK_ACTION = TaskAuthorities.create_authority("MOCK_ACTION", [Roles.ADMIN, Roles.SUPER])
 
+def test_user_from_dict():
+    """Test loading user from dict"""
+    user = User(name="pythonista", password="1234", auth_token="user_token", meta={'email': 'devtest@pyonir.dev'})
+    assert user.email == "devtest@pyonir.dev"
+    assert isinstance(user.meta, UserMeta)
+
 def test_from_file():
     # Test loading user from file
     user = User.from_file(test_user_file)

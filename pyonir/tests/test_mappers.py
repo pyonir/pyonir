@@ -9,23 +9,22 @@ from pyonir.utilities import parse_query_model_to_object
 # ==== Sample classes to map into ====
 
 class Address:
-    street: str
-    zip_code: Optional[int]
 
-    def __init__(self, street: str, zip_code: Optional[int] = None):
+    def __init__(self,
+                 street: str,
+                 zip_code: Optional[int] = None):
         self.street = street
         self.zip_code = zip_code
 
 class User:
-    uid: int
-    name: str
-    email: Optional[str]
-    address: Optional[Address]
-    tags: List[str]
-    meta: Dict[str, Union[str, int]]
 
-    def __init__(self, uid: int, name: str, email: Optional[str],
-                 address: Optional[Address], tags: List[str], meta: Dict[str, Union[str, int]]):
+    def __init__(self,
+                 uid: int,
+                 name: str,
+                 email: Optional[str],
+                 address: Optional[Address],
+                 tags: List[str],
+                 meta: Dict[str, Union[str, int]]):
         self.uid = uid
         self.name = name
         self.email = email

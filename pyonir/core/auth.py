@@ -4,11 +4,11 @@ import os, time
 from abc import ABC, abstractmethod
 from typing import Tuple, Any, Dict, Optional
 
-from pyonir.models.schemas import BaseSchema
+from pyonir.core.schemas import BaseSchema
 from starlette_wtf import csrf_token
 
-from pyonir.models.server import BaseRequest, BaseApp
-from pyonir.models.user import User, Role, PermissionLevel, Roles, UserSignIn
+from pyonir.core.server import BaseRequest, BaseApp
+from pyonir.core.user import User, Role, PermissionLevel, Roles, UserSignIn
 from pyonir.pyonir_types import PyonirRequest, PyonirRestResponse
 
 
@@ -475,7 +475,7 @@ class Auth:
 
     def log_user_location(self, user: User):
         """logs user signin location"""
-        from pyonir.models.user import Location
+        from pyonir.core.user import Location
         new_location = client_location(self.request)
         if not new_location: return
         new_location = Location(**new_location)

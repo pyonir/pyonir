@@ -73,7 +73,7 @@ def parse_url_params(param_str: str) -> dict:
 
 def process_contents(path, app_ctx=None, file_model: any = None) -> object:
     """Deserializes all files within the contents directory"""
-    from pyonir.models.database import query_fs
+    from pyonir.core.database import query_fs
     key = os.path.basename(path)
     res = type(key, (object,), {"__name__": key})() # generic map
     pgs = query_fs(path, app_ctx=app_ctx, model=file_model)
@@ -367,7 +367,7 @@ def parse_query_model_to_object(model_fields: str) -> object:
 def load_env(path=".env") -> EnvConfig:
     import warnings
     from collections import defaultdict
-    from pyonir.models.server import DEV_ENV
+    from pyonir.core.server import DEV_ENV
 
     env = os.getenv('APP_ENV') or DEV_ENV
     env_data = defaultdict(dict)

@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from typing import Optional, Dict
 
 from jinja2 import Environment
-from pyonir.models.app import BaseApp
+from pyonir.core.app import BaseApp
 
 
 class TemplateEnvironment(Environment):
@@ -14,7 +14,7 @@ class TemplateEnvironment(Environment):
         from jinja2 import FileSystemLoader, ChoiceLoader
         from pyonir import PYONIR_JINJA_TEMPLATES_DIRPATH, PYONIR_JINJA_FILTERS_DIRPATH, PYONIR_JINJA_EXTS_DIRPATH
         from webassets.ext.jinja2 import AssetsExtension
-        from pyonir.models.utils import load_modules_from
+        from pyonir.core.utils import load_modules_from
 
         installed_extensions = load_modules_from(PYONIR_JINJA_EXTS_DIRPATH, True)
         app_extensions = [AssetsExtension, *installed_extensions]
@@ -99,7 +99,7 @@ class Theme:
     def readme(self):
         """Returns the theme's README.md file content if available"""
         from pyonir import Site
-        from pyonir.models.parser import DeserializeFile
+        from pyonir.core.parser import DeserializeFile
         theme_ctx = list(Site.app_ctx)
         theme_ctx[2] = Site.frontend_dirpath
         theme_readme = os.path.join(self.theme_dirpath,'README.md')
@@ -121,7 +121,7 @@ class PyonirThemes:
     @property
     def active_theme(self) -> Optional[Theme]:
         from pyonir import Site
-        from pyonir.models.utils import get_attr
+        from pyonir.core.utils import get_attr
         if not Site or not self.available_themes: return None
         site_theme = get_attr(Site.settings, 'app.theme_name')
         site_theme = self.available_themes.get(site_theme)

@@ -6,7 +6,7 @@ from typing import Optional, Union, Generator
 from starlette.datastructures import UploadFile
 
 from pyonir import PyonirRequest
-from pyonir.models.database import BaseFSQuery
+from pyonir.core.database import BaseFSQuery
 
 from enum import Enum, unique
 
@@ -172,7 +172,7 @@ class BaseMedia:
         """Collects thumbnails for the image"""
         if self.is_thumb: return None
         from pyonir import Site
-        from pyonir.models.database import query_fs
+        from pyonir.core.database import query_fs
         app_ctx = Site.app_ctx if Site else self._app_ctx
         thumbs_dir = os.path.join(self.file_dirpath, self.file_name)
         files = query_fs(str(thumbs_dir), model=BaseMedia, app_ctx=app_ctx)
@@ -227,7 +227,7 @@ class BaseMedia:
     @staticmethod
     def decode_filename(encoded_filename: str) -> Optional[dict]:
         """ Reverse of encode_filename. """
-        from pyonir.models.utils import parse_url_params
+        from pyonir.core.utils import parse_url_params
         import base64
 
         try:

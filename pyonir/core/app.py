@@ -5,7 +5,7 @@ import sys
 from collections import OrderedDict
 from typing import Optional, Generator, List
 
-from pyonir.models.utils import get_attr, load_env, generate_id
+from pyonir.core.utils import get_attr, load_env, generate_id
 
 from pyonir.pyonir_types import PyonirThemes, EnvConfig, PyonirHooks, Parsely, PyonirRoute, PyonirRouters
 
@@ -156,17 +156,17 @@ class Base:
     # RUNTIME
     def process_configs(self):
         """Processes all context settings"""
-        from pyonir.models.utils import process_contents
+        from pyonir.core.utils import process_contents
         self._settings = process_contents(self.configs_dirpath, app_ctx=self.app_ctx)
 
     def parse_file(self, file_path: str, model: any = None) -> 'DeserializeFile':
         """Parses a file and returns a Parsely instance for the file."""
-        from pyonir.models.parser import DeserializeFile
+        from pyonir.core.parser import DeserializeFile
         return DeserializeFile(file_path, app_ctx=self.app_ctx, model=model)
 
     # def apply_virtual_routes(self, pyonir_request: 'BaseRequest') -> 'Parsely':
     #     """Reads and applies virtual .routes.md file specs onto or updates the request file"""
-    #     from pyonir.models.parser import DeserializeFile, FileStatuses
+    #     from pyonir.core.parser import DeserializeFile, FileStatuses
     #     server = pyonir_request.app.server
     #     # if hasattr(pyonir_request.query_params,'rr'):
     #     #     pyonir_request.app.collect_virtual_routes()
@@ -232,8 +232,8 @@ class Base:
         Instantiate the registered class.
         Reload if hot_reload is enabled and class was registered by path.
         """
-        from pyonir.models.utils import get_attr
-        from pyonir.models.loaders import load_resolver
+        from pyonir.core.utils import get_attr
+        from pyonir.core.loaders import load_resolver
 
         cls_path, meth_name = name.rsplit(".", 1)
         is_pyonir = name.startswith('pyonir')
@@ -265,7 +265,7 @@ class Base:
     def generate_resolvers(cls: callable, output_dirpath: str, namespace: str = ''):
         """Automatically generate api endpoints from service class or module."""
         import textwrap, inspect
-        from pyonir.models.utils import create_file
+        from pyonir.core.utils import create_file
 
         def process_docs(meth: callable):
             docs = meth.__doc__
@@ -315,7 +315,7 @@ class Base:
 
     def query_fs(self, dir_path: str, model_type: any = None, app_ctx = None) -> BaseFSQuery:
         """Query files in a directory and return instances of the specified model type."""
-        from pyonir.models.database import BaseFSQuery
+        from pyonir.core.database import BaseFSQuery
         return BaseFSQuery(dir_path, app_ctx=app_ctx or self.app_ctx, model=model_type, exclude_names=None, force_all=True)
 
     @staticmethod
@@ -411,9 +411,9 @@ class BaseApp(Base):
     }
 
     def __init__(self, app_entrypoint: str, use_themes: bool = None):
-        from pyonir.models.templating import TemplateEnvironment
+        from pyonir.core.templating import TemplateEnvironment
         from pyonir import PyonirServer
-        from pyonir.models.parser import parse_markdown, DeserializeFile
+        from pyonir.core.parser import parse_markdown, DeserializeFile
         from pyonir import __version__, Site
         DeserializeFile._routes_dirname = self.PAGES_DIRNAME
         self.VERSION = __version__
@@ -455,7 +455,7 @@ class BaseApp(Base):
 
     @property
     def is_dev(self) -> bool:
-        from pyonir.models.server import DEV_ENV
+        from pyonir.core.server import DEV_ENV
         return getattr(self.env, 'APP_ENV') == DEV_ENV and not self.SSG_IN_PROGRESS
 
     @property
@@ -547,7 +547,7 @@ class BaseApp(Base):
         """The Configures themes for application"""
 
         from pyonir.utilities import get_attr
-        from pyonir.models.templating import PyonirThemes
+        from pyonir.core.templating import PyonirThemes
 
         themes_dir_path = os.path.join(self.frontend_dirpath, self.THEMES_DIRNAME)
         if not self.use_themes or not os.path.exists(themes_dir_path):
@@ -592,7 +592,7 @@ class BaseApp(Base):
 
     def activate_plugins(self):
         """Active plugins enabled based on settings"""
-        from pyonir.models.utils import get_attr
+        from pyonir.core.utils import get_attr
         has_plugin_configured = get_attr(self.settings, 'app.enabled_plugins', None)
         if not has_plugin_configured: return
         for plg_id, plugin in self.plugins_installed.items():
@@ -682,9 +682,9 @@ class BaseApp(Base):
         """Generates Static website"""
         import time
         from pyonir import utilities
-        from pyonir.models.server import BaseRequest
-        from pyonir.models.parser import DeserializeFile
-        from pyonir.models.database import query_fs
+        from pyonir.core.server import BaseRequest
+        from pyonir.core.parser import DeserializeFile
+        from pyonir.core.database import query_fs
         self.SSG_IN_PROGRESS = True
         count = 0
         print(f"{utilities.PrntColrs.OKBLUE}1. Coping Assets")

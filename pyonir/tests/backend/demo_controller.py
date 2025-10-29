@@ -116,7 +116,7 @@ async def pyonir_sse_handler(request: PyonirRequest) -> AsyncGenerator:
     """Handles sse web request by pyonir"""
     import asyncio
     from pyonir.utilities import generate_id, get_attr
-    from pyonir.models.server import EVENT_RES
+    from pyonir.core.server import EVENT_RES
     request.type = EVENT_RES  # assign the appropriate streaming headers
     # set sse client
     event = get_attr(request.query_params, 'event')

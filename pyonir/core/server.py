@@ -3,14 +3,14 @@ import os
 from dataclasses import dataclass, field
 from typing import Optional, Union, Tuple, Callable, get_type_hints, OrderedDict, Any, List
 
-from pyonir.models.utils import get_attr
+from pyonir.core.utils import get_attr
 from starlette.applications import Starlette
 from starlette.requests import Request as StarletteRequest
 
-from pyonir.models.app import BaseApp
-from pyonir.models.parser import DeserializeFile
+from pyonir.core.app import BaseApp
+from pyonir.core.parser import DeserializeFile
 from pyonir.pyonir_types import PyonirRouters, PyonirHooks, PyonirRoute
-from pyonir.models.utils import dict_to_class
+from pyonir.core.utils import dict_to_class
 
 TEXT_RES: str = 'text/html'
 JSON_RES: str = 'application/json'
@@ -28,8 +28,8 @@ class BaseRequest:
     PAGINATE_LIMIT: int = 6
 
     def __init__(self, server_request: Optional[StarletteRequest], app: BaseApp):
-        from pyonir.models.utils import get_attr
-        from pyonir.models.auth import Auth
+        from pyonir.core.utils import get_attr
+        from pyonir.core.auth import Auth
 
         self.server_response = None
         self.file: Optional[DeserializeFile] = None
@@ -119,7 +119,7 @@ class BaseRequest:
         """Get form data and file upload contents from request"""
 
         from pyonir import Site
-        from pyonir.models.utils import expand_dotted_keys
+        from pyonir.core.utils import expand_dotted_keys
         import json
 
         def secure_upload_filename(filename):
@@ -168,7 +168,7 @@ class BaseRequest:
 
     def derive_status_code(self, is_router_method: bool):
         """Create status code for web request based on a file's availability, status_code property"""
-        from pyonir.models.parser import FileStatuses
+        from pyonir.core.parser import FileStatuses
 
         code = 404
         if self.file.is_virtual_route:
@@ -224,8 +224,8 @@ class BaseRequest:
         application's file system. If no matching file or virtual route is found,
         a 404 page is returned.
         """
-        from pyonir.models.app import BaseApp
-        from pyonir.models.parser import DeserializeFile
+        from pyonir.core.app import BaseApp
+        from pyonir.core.parser import DeserializeFile
         path_str = path_str or self.path
         is_home = path_str == '/'
         ctx_route, ctx_paths = app.request_paths or ('', [])
@@ -280,8 +280,8 @@ class BaseRequest:
 
     @staticmethod
     def get_params(url, as_dict=False):
-        from pyonir.models.mapper import dict_to_class
-        from pyonir.models.utils import parse_url_params
+        from pyonir.core.mapper import dict_to_class
+        from pyonir.core.utils import parse_url_params
         args = parse_url_params(url)
         if args.get('model'): del args['model']
         return args if as_dict else dict_to_class(args, 'query_params')
@@ -289,7 +289,7 @@ class BaseRequest:
     def process_resolver(self, request: 'BaseRequest') -> Optional[Union[callable, Any]]:
         """Updates request data a callable method to execute during request."""
         from pyonir import Site
-        from pyonir.models.utils import get_attr
+        from pyonir.core.utils import get_attr
         resolver_obj = self.file.data.get('@resolvers', {})
         resolver_action = resolver_obj.get(request.method)
         if not resolver_action: return
@@ -499,8 +499,8 @@ class BaseServer(Starlette):
     async def build_response(pyonir_request: BaseRequest, dec_func: callable):
         import inspect
         from pyonir import Site
-        from pyonir.models.auth import Auth
-        from pyonir.models.mapper import cls_mapper, func_request_mapper
+        from pyonir.core.auth import Auth
+        from pyonir.core.mapper import cls_mapper, func_request_mapper
 
         default_system_router = dec_func.__name__ == 'pyonir_index' if dec_func else False
         Site.server.request = pyonir_request
@@ -630,7 +630,7 @@ class BaseServer(Starlette):
     @staticmethod
     def generate_nginx_conf(app: BaseApp) -> bool:
         """Generates a NGINX conf file based on App configurations"""
-        from pyonir.models.utils import get_attr, create_file
+        from pyonir.core.utils import get_attr, create_file
         nginx_app_baseurl = get_attr(app.env, "nginx.baseurl")
         nginx_conf = app.TemplateEnvironment.get_template("nginx.jinja.conf") \
             .render(

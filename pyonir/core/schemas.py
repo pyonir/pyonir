@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Type, TypeVar, Any, Optional
 
-from pyonir.models.mapper import collect_type_hints, cls_mapper
+from pyonir.core.mapper import collect_type_hints, cls_mapper
 
 
 T = TypeVar("T")
@@ -72,7 +72,7 @@ class BaseSchema:
 
     def save_to_file(self, file_path: str) -> bool:
         """Saves the user data to a file in JSON format"""
-        from pyonir.models.utils import create_file
+        from pyonir.core.utils import create_file
         return create_file(file_path, self.to_dict(obfuscate=False))
 
     def save_to_session(self, request: 'PyonirRequest', key: str = None, value: any = None) -> None:
@@ -103,8 +103,8 @@ class BaseSchema:
     @classmethod
     def from_file(cls: Type[T], file_path: str, app_ctx=None) -> T:
         """Create an instance from a file path."""
-        from pyonir.models.parser import DeserializeFile
-        from pyonir.models.mapper import cls_mapper
+        from pyonir.core.parser import DeserializeFile
+        from pyonir.core.mapper import cls_mapper
         prsfile = DeserializeFile(file_path, app_ctx=app_ctx)
         return cls_mapper(prsfile, cls)
 
@@ -156,7 +156,7 @@ class BaseSchema:
 
     @staticmethod
     def generate_date(date_value: str = None) -> datetime:
-        from pyonir.models.utils import deserialize_datestr
+        from pyonir.core.utils import deserialize_datestr
         return deserialize_datestr(date_value or datetime.now())
 
     @classmethod

@@ -8,11 +8,11 @@ from typing import Any, Dict, Optional, Type, Union, Iterator, Generator
 
 from sortedcontainers import SortedList
 
-from pyonir.models.mapper import cls_mapper
-from pyonir.models.parser import DeserializeFile
-from pyonir.models.schemas import BaseSchema
+from pyonir.core.mapper import cls_mapper
+from pyonir.core.parser import DeserializeFile
+from pyonir.core.schemas import BaseSchema
 from pyonir.pyonir_types import PyonirApp, AppCtx
-from pyonir.models.utils import get_attr
+from pyonir.core.utils import get_attr
 
 
 @dataclass
@@ -31,7 +31,7 @@ class DatabaseService(ABC):
 
     def __init__(self, app: PyonirApp, db_name: str = '') -> None:
         # Base config from environment
-        from pyonir.models.utils import get_attr
+        from pyonir.core.utils import get_attr
         self.app = app
         self.connection: Optional[sqlite3.Connection] = None
         self._db_name: str = db_name
@@ -395,7 +395,7 @@ class BaseFSQuery:
     @staticmethod
     def prev_next(input_file: 'DeserializeFile'):
         """Returns the previous and next files relative to the input file"""
-        from pyonir.models.mapper import dict_to_class
+        from pyonir.core.mapper import dict_to_class
         prv = None
         nxt = None
         pc = BaseFSQuery(input_file.file_dirpath)
@@ -415,7 +415,7 @@ class BaseFSQuery:
 
     def where(self, attr, op="=", value=None):
         """Returns a list of items where attr == value"""
-        from pyonir.models.utils import get_attr
+        from pyonir.core.utils import get_attr
 
         def match(item):
             actual = get_attr(item, attr)
@@ -488,9 +488,9 @@ def query_fs(abs_dirpath: str,
                 force_all: bool = True) -> Generator:
     """Returns a generator of files from a directory path"""
     from pathlib import Path
-    from pyonir.models.page import BasePage
-    from pyonir.models.parser import DeserializeFile
-    from pyonir.models.media import BaseMedia
+    from pyonir.core.page import BasePage
+    from pyonir.core.parser import DeserializeFile
+    from pyonir.core.media import BaseMedia
 
     # results = []
     hidden_file_prefixes = ('.', '_', '<', '>', '(', ')', '$', '!', '._')

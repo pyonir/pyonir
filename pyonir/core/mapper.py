@@ -4,10 +4,10 @@ from typing import get_type_hints, Any
 from typing import get_origin, get_args, Union, Callable, Mapping, Iterable, Generator
 from collections.abc import Iterable as ABCIterable, Mapping as ABCMapping, Generator as ABCGenerator
 
-# from pyonir.models.schemas import BaseSchema
+# from pyonir.core.schemas import BaseSchema
 from sqlmodel import SQLModel
 
-from pyonir.models.utils import get_attr, deserialize_datestr
+from pyonir.core.utils import get_attr, deserialize_datestr
 
 
 def is_iterable(tp):
@@ -96,7 +96,7 @@ def func_request_mapper(func: Callable, pyonir_request: 'BaseRequest') -> dict:
     """Map request data to function parameters"""
     from pyonir import PyonirRequest
     from pyonir import PyonirApp
-    from pyonir.models import Auth
+    from pyonir.core import Auth
     import inspect
     # param_type_map = collect_type_hints(func)
     default_args = {}
@@ -130,7 +130,7 @@ def func_request_mapper(func: Callable, pyonir_request: 'BaseRequest') -> dict:
 def cls_mapper(file_obj: object, cls: Union[type, list[type]], from_request=None):
     """Recursively map dict-like input into `cls` with type-safe field mapping."""
 
-    from pyonir.models.schemas import BaseSchema
+    from pyonir.core.schemas import BaseSchema
 
     if hasattr(cls, '__skip_parsely_deserialization__'):
         return file_obj

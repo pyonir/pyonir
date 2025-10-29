@@ -2,8 +2,8 @@ from memory_profiler import memory_usage
 import json
 import yaml
 import toml
-from pyonir.models.parser import DeserializeFile, serializer
-from pyonir.models.parsely import process_lines
+from pyonir.core.parser import DeserializeFile, serializer
+from pyonir.core.parsely import process_lines
 import time
 
 data = {

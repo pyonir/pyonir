@@ -5,8 +5,8 @@ from typing import Optional, Type
 from sqlmodel import Field
 
 from pyonir import PyonirApp
-from pyonir.models.schemas import BaseSchema
-from pyonir.models.database import DatabaseService
+from pyonir.core.schemas import BaseSchema
+from pyonir.core.database import DatabaseService
 
 
 class MockUser(BaseSchema, table_name='pyonir_users', primary_key='uid'):

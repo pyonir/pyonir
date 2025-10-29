@@ -1,6 +1,6 @@
 
 import pytest, os
-from pyonir.models.parser import DeserializeFile
+from pyonir.core.parser import DeserializeFile
 true = True
 false = False
 parselyFile = DeserializeFile(os.path.join(os.path.dirname(__file__),'contents', 'test.md'))

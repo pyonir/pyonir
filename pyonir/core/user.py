@@ -3,10 +3,10 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Optional
 
-from pyonir.models.schemas import BaseSchema
-from pyonir.models.server import BaseRequest
+from pyonir.core.schemas import BaseSchema
+from pyonir.core.server import BaseRequest
 
-# from pyonir.models import TaskAuthority
+# from pyonir.core import TaskAuthority
 
 class PermissionLevel(str):
     NONE = 'none'

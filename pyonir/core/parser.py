@@ -1,9 +1,9 @@
 import os, re, json
 from typing import Tuple, Dict, List, Any, Optional, Union
 
-from pyonir.models.mapper import cls_mapper
+from pyonir.core.mapper import cls_mapper
 
-from pyonir.models.utils import get_file_created, open_file, get_attr
+from pyonir.core.utils import get_file_created, open_file, get_attr
 
 # Pre-compile regular expressions for better performance
 _RE_LEADING_SPACES = re.compile(r'^\s+')
@@ -133,7 +133,7 @@ class DeserializeFile:
             self.file_lines = lines.strip().split("\n") if lines else []
             self.file_line_count = len(self.file_lines)
             if self.file_line_count > 0:
-                # from pyonir.models.parsely import process_lines
+                # from pyonir.core.parsely import process_lines
                 process_lines(self.file_lines, cursor=0, data_container=self.data, file_ctx=self)
         elif self.file_ext == ".json":
             self.data = open_file(self.file_path, rtn_as="json") or {}
@@ -202,7 +202,7 @@ class DeserializeFile:
         self.apply_filters()
 
     def prev_next(self):
-        from pyonir.models.database import BaseFSQuery
+        from pyonir.core.database import BaseFSQuery
 
         if self.file_dirname != "pages" or self.is_home:
             return None
@@ -233,9 +233,9 @@ class DeserializeFile:
     def output_html(self, req: "PyonirRequest") -> str:
         """Renders and html output"""
         from pyonir import Site
-        from pyonir.models.page import BasePage
+        from pyonir.core.page import BasePage
 
-        # from pyonir.models.mapper import add_props_to_object
+        # from pyonir.core.mapper import add_props_to_object
         # refresh_model = get_attr(req, 'query_params.rmodel')
         page = cls_mapper(self, self.schema or BasePage)
         Site.apply_globals({"prevNext": self.prev_next, "page": page})
@@ -471,8 +471,8 @@ def process_lookups(value_str: str, file_ctx: DeserializeFile = None) -> Optiona
     file_name: str = file_ctx.file_name
 
     def parse_ref_to_files(filepath, as_dir=0):
-        from pyonir.models.database import BaseFSQuery, DeserializeFile
-        from pyonir.models.utils import get_attr, import_module, parse_query_model_to_object
+        from pyonir.core.database import BaseFSQuery, DeserializeFile
+        from pyonir.core.utils import get_attr, import_module, parse_query_model_to_object
 
         if as_dir:
             # use proper app context for path reference outside of scope is always the root level
@@ -503,7 +503,7 @@ def process_lookups(value_str: str, file_ctx: DeserializeFile = None) -> Optiona
     has_lookup = value_str.startswith((LOOKUP_DIR_PREFIX, LOOKUP_DATA_PREFIX))
 
     if has_lookup:
-        from pyonir.models.utils import parse_url_params
+        from pyonir.core.utils import parse_url_params
         base_path = app_ctx[-1:][0] if value_str.startswith(LOOKUP_DATA_PREFIX) else file_contents_dirpath
         _query_params = value_str.split("?").pop() if "?" in value_str else False
         query_params = parse_url_params(_query_params) if _query_params else ''

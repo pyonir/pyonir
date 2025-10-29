@@ -65,7 +65,7 @@ class Navigation:
 
     def build_navigation(self, app: PyonirApp):
         # from pyonir.utilities import query_files
-        from pyonir.models.database import query_fs
+        from pyonir.core.database import query_fs
         from collections import defaultdict
         if app is None: return None
         assert hasattr(app, 'pages_dirpath'), "Get menus 'app' parameter does not have a pages dirpath property"

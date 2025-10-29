@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 import os, sys
-from pyonir.models.app import BaseApp, Optional
-from pyonir.models.utils import get_version
-from pyonir.models.app import BaseApp, BasePlugin
-from pyonir.models.database import BaseFSQuery
-from pyonir.models.schemas import BaseSchema
-from pyonir.models.server import BaseRequest, BaseServer
+from pyonir.core.app import BaseApp, Optional
+from pyonir.core.utils import get_version
+from pyonir.core.app import BaseApp, BasePlugin
+from pyonir.core.database import BaseFSQuery
+from pyonir.core.schemas import BaseSchema
+from pyonir.core.server import BaseRequest, BaseServer
 
 # Pyonir settings
 PYONIR_DIRPATH = os.path.abspath(os.path.dirname(__file__))

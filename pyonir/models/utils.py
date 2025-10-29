@@ -1,7 +1,52 @@
-import os
+import os, json
 from datetime import datetime
 from collections.abc import Generator
-from typing import Optional, Union
+from typing import Optional, Union, Callable, Any
+
+from pyonir.pyonir_types import EnvConfig
+
+
+# from pyonir.pyonir_types import EnvConfig
+
+
+def get_file_created(file_path: str, platform: str = 'ios') -> datetime:
+    from datetime import datetime
+    import pathlib
+
+    # create a file path
+    path = pathlib.Path(file_path)
+
+    if platform == 'ios':
+        # get modification time
+        timestamp = path.stat().st_mtime
+        # convert time to dd-mm-yyyy hh:mm:ss
+        m_time = datetime.fromtimestamp(timestamp)
+        # print(f'Modified Date/Time: {os.path.basename(file_path)}', m_time)
+        return m_time
+    if platform == 'windows':
+        # get creation time on windows
+        current_timestamp = path.stat().st_ctime
+        c_time = datetime.fromtimestamp(current_timestamp)
+        # print('Created Date/Time on:', c_time)
+        return c_time
+
+def open_file(file_path: str, rtn_as: str = "string"):
+    """Reads target file on file system"""
+
+    if not os.path.exists(file_path):
+        return None
+    with open(file_path, "r", encoding="utf-8") as target_file:
+        try:
+            if rtn_as == "list":
+                return target_file.readlines()
+            elif rtn_as == "json":
+                return json.load(target_file)
+            else:
+                return target_file.read()
+        except Exception as e:
+            return (
+                {"error": __file__, "message": str(e)} if rtn_as == "json" else []
+            )
 
 def get_version(toml_file: str) -> str:
     import re
@@ -156,6 +201,84 @@ def get_attr(row_obj, attr_path=None, default=None, rtn_none=True):
 
     return targetObj
 
+def expand_dotted_keys(flat_data: dict, return_as_dict: bool = False):
+    """
+    Convert a dict with dotted keys into a nested structure.
+
+    Args:
+        flat_data (dict): Input dictionary with dotted keys.
+        return_as_dict (bool): If True, return a nested dict.
+                               If False, return nested dynamic objects.
+    """
+
+    def make_object(name="Generic"):
+        return type(name, (object,), {"__name__": "generic"})()
+
+    root = {} if return_as_dict else make_object("Root")
+
+    for dotted_key, value in flat_data.items():
+        parts = dotted_key.split(".")
+        current = root
+
+        for i, part in enumerate(parts):
+            # Last part -> assign value
+            if i == len(parts) - 1:
+                if return_as_dict:
+                    current[part] = value
+                else:
+                    setattr(current, part, value)
+            else:
+                if return_as_dict:
+                    if part not in current:
+                        current[part] = {}
+                    current = current[part]
+                else:
+                    if not hasattr(current, part):
+                        setattr(current, part, make_object(part.capitalize()))
+                    current = getattr(current, part)
+
+    return root
+
+def import_module(pkg_path: str, callable_name: str) -> Callable:
+    """Imports a module and returns the callable by name"""
+    import importlib
+    mod_pkg = importlib.import_module(pkg_path)
+    importlib.reload(mod_pkg)
+    mod = get_attr(mod_pkg, callable_name, None)
+    return mod
+
+def get_module(pkg_path: str, callable_name: str) -> tuple[Any, Callable]:
+    import importlib
+    spec = importlib.util.spec_from_file_location(callable_name, pkg_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Could not load spec for {callable_name} from {pkg_path}")
+
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    func = get_attr(module, callable_name) or get_attr(module, module.__name__)
+    return module, func
+
+def load_modules_from(pkg_dirpath, as_list: bool = False, only_packages:bool = False)-> dict[Any, Any] | list[Any]:
+    loaded_mods = {} if not as_list else []
+    loaded_funcs = {} if not as_list else []
+    if not os.path.exists(pkg_dirpath): return loaded_funcs
+    for mod_file in os.listdir(pkg_dirpath):
+        name,_, ext = mod_file.partition('.')
+        if only_packages:
+            pkg_abspath = os.path.join(pkg_dirpath, mod_file, '__init__.py')
+            mod, func = get_module(pkg_abspath, name)
+        else:
+            if ext!='py': continue
+            mod_abspath = os.path.join(pkg_dirpath, name.strip())+'.py'
+            mod, func = get_module(mod_abspath, name)
+        if as_list:
+            loaded_funcs.append(func)
+        else:
+            loaded_mods[name] = mod
+            loaded_funcs[name] = func
+
+    return loaded_funcs
 
 def create_file(file_abspath: str, data: any = None, is_json: bool = False, mode='w') -> bool:
     """Creates a new file based on provided data
@@ -199,3 +322,83 @@ def copy_assets(src: str, dst: str, purge: bool = True):
             shutil.copytree(src, dst, ignore=ignore_patterns('__pycache__', '*.pyc', 'tmp*', 'node_modules', '.*'))
     except Exception as e:
         raise
+
+def generate_id():
+    import uuid
+    return str(uuid.uuid1())
+
+def dict_to_class(data: dict, name: Union[str, callable] = None, deep: bool = True) -> object:
+    """
+    Converts a dictionary into a class object with the given name.
+
+    Args:
+        data (dict): The dictionary to convert.
+        name (str): The name of the class.
+        deep (bool): If True, convert all dictionaries recursively.
+    Returns:
+        object: An instance of the dynamically created class with attributes from the dictionary.
+    """
+    # Dynamically create a new class
+    cls = type(name or 'T', (object,), {}) if not callable(name) and deep!='update' else name
+
+    # Create an instance of the class
+    instance = cls() if deep!='update' else cls
+    setattr(instance, 'update', lambda d: dict_to_class(d, instance, 'update') )
+    # Assign dictionary keys as attributes of the instance
+    for key, value in data.items():
+        if isinstance(getattr(cls, key, None), property): continue
+        if deep and isinstance(value, dict):
+            value = dict_to_class(value, key)
+        setattr(instance, key, value)
+
+    return instance
+
+def parse_query_model_to_object(model_fields: str) -> object:
+    if not model_fields: return None
+    mapper = {}
+    params = {"_orm_options": {'mapper': mapper},'file_created_on': None, 'file_name': None}
+    for k in model_fields.split(','):
+        if ':' in k:
+            k,_, src = k.partition(':')
+            mapper[k] = src
+        params[k] = None
+    return type('GenericQueryModel', (object,), params)
+
+def load_env(path=".env") -> EnvConfig:
+    import warnings
+    from collections import defaultdict
+    from pyonir.models.server import DEV_ENV
+
+    env = os.getenv('APP_ENV') or DEV_ENV
+    env_data = defaultdict(dict)
+    env_data['APP_ENV'] = env
+    if not env:
+        warnings.warn("APP_ENV not set. Defaulting to LOCAL mode. Expected one of DEV, TEST, PROD, LOCAL.", UserWarning)
+    if not os.path.exists(path): return dict_to_class(env_data, EnvConfig)
+
+    def set_nested(d, keys, value):
+        """Helper to set value in nested dictionary using dot-separated keys."""
+        for key in keys[:-1]:
+            d = d.setdefault(key, {})
+        d[keys[-1]] = value
+
+    with open(path) as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if "=" not in line:
+                continue
+
+            key, value = line.split("=", 1)
+            key = key.strip()
+            value = value.strip()
+
+            # Set in os.environ (flat)
+            os.environ.setdefault(key, value)
+
+            # Set in nested dict (structured)
+            keys = key.split(".")
+            set_nested(env_data, keys, value)
+
+    return dict_to_class(env_data, EnvConfig)

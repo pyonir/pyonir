@@ -12,7 +12,7 @@ from pyonir.models.mapper import cls_mapper
 from pyonir.models.parser import DeserializeFile
 from pyonir.models.schemas import BaseSchema
 from pyonir.pyonir_types import PyonirApp, AppCtx
-from pyonir.utilities import get_attr
+from pyonir.models.utils import get_attr
 
 
 @dataclass
@@ -31,7 +31,7 @@ class DatabaseService(ABC):
 
     def __init__(self, app: PyonirApp, db_name: str = '') -> None:
         # Base config from environment
-        from pyonir.utilities import get_attr
+        from pyonir.models.utils import get_attr
         self.app = app
         self.connection: Optional[sqlite3.Connection] = None
         self._db_name: str = db_name

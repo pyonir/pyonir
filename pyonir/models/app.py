@@ -5,7 +5,7 @@ import sys
 from collections import OrderedDict
 from typing import Optional, Generator, List
 
-from pyonir.utilities import get_attr, load_env, generate_id
+from pyonir.models.utils import get_attr, load_env, generate_id
 
 from pyonir.pyonir_types import PyonirThemes, EnvConfig, PyonirHooks, Parsely, PyonirRoute, PyonirRouters
 
@@ -232,7 +232,7 @@ class Base:
         Instantiate the registered class.
         Reload if hot_reload is enabled and class was registered by path.
         """
-        from pyonir.utilities import get_attr
+        from pyonir.models.utils import get_attr
         from pyonir.models.loaders import load_resolver
 
         cls_path, meth_name = name.rsplit(".", 1)
@@ -592,7 +592,7 @@ class BaseApp(Base):
 
     def activate_plugins(self):
         """Active plugins enabled based on settings"""
-        from pyonir.utilities import get_attr
+        from pyonir.models.utils import get_attr
         has_plugin_configured = get_attr(self.settings, 'app.enabled_plugins', None)
         if not has_plugin_configured: return
         for plg_id, plugin in self.plugins_installed.items():

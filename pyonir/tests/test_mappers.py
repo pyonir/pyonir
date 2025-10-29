@@ -3,7 +3,7 @@ from typing import Optional, Union, List, Dict
 
 from pyonir.models.mapper import cls_mapper
 from pyonir.models.parser import DeserializeFile
-from pyonir.utilities import parse_query_model_to_object
+from pyonir.models.utils import parse_query_model_to_object
 
 
 # ==== Sample classes to map into ====

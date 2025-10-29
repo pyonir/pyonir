@@ -10,7 +10,7 @@ from starlette.requests import Request as StarletteRequest
 from pyonir.models.app import BaseApp
 from pyonir.models.parser import DeserializeFile
 from pyonir.pyonir_types import PyonirRouters, PyonirHooks, PyonirRoute
-from pyonir.utilities import dict_to_class
+from pyonir.models.utils import dict_to_class
 
 TEXT_RES: str = 'text/html'
 JSON_RES: str = 'application/json'
@@ -28,7 +28,7 @@ class BaseRequest:
     PAGINATE_LIMIT: int = 6
 
     def __init__(self, server_request: Optional[StarletteRequest], app: BaseApp):
-        from pyonir.utilities import get_attr
+        from pyonir.models.utils import get_attr
         from pyonir.models.auth import Auth
 
         self.server_response = None
@@ -119,7 +119,7 @@ class BaseRequest:
         """Get form data and file upload contents from request"""
 
         from pyonir import Site
-        from pyonir.utilities import expand_dotted_keys
+        from pyonir.models.utils import expand_dotted_keys
         import json
 
         def secure_upload_filename(filename):

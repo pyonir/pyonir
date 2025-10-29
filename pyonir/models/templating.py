@@ -14,7 +14,7 @@ class TemplateEnvironment(Environment):
         from jinja2 import FileSystemLoader, ChoiceLoader
         from pyonir import PYONIR_JINJA_TEMPLATES_DIRPATH, PYONIR_JINJA_FILTERS_DIRPATH, PYONIR_JINJA_EXTS_DIRPATH
         from webassets.ext.jinja2 import AssetsExtension
-        from pyonir.utilities import load_modules_from
+        from pyonir.models.utils import load_modules_from
 
         installed_extensions = load_modules_from(PYONIR_JINJA_EXTS_DIRPATH, True)
         app_extensions = [AssetsExtension, *installed_extensions]

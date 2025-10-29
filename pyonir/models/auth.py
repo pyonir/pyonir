@@ -4,15 +4,16 @@ import os, time
 from abc import ABC, abstractmethod
 from typing import Tuple, Any, Dict, Optional
 
+from pyonir.models.schemas import BaseSchema
 from starlette_wtf import csrf_token
 
-from pyonir.core import PyonirSchema
+# from pyonir.core import PyonirSchema
 from pyonir.models.server import BaseRequest, BaseApp
 from pyonir.models.user import User, Role, PermissionLevel, Roles, UserSignIn
 from pyonir.pyonir_types import PyonirRequest, PyonirRestResponse
 
 
-class UserCredentials(PyonirSchema):
+class UserCredentials(BaseSchema):
     """Represents user credentials for login"""
     email: str = ''
     """User's email address is required for login"""

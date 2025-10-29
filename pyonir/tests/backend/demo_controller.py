@@ -1,6 +1,6 @@
 import json
 
-from pyonir.core import PyonirRequest, PyonirApp
+from pyonir import PyonirRequest, PyonirApp
 from pyonir.tests.backend.models.email_subscriber import EmailSubscriber
 from starlette.websockets import WebSocketState, WebSocket
 from typing import AsyncGenerator

@@ -327,7 +327,7 @@ class Base:
 class BasePlugin(Base):
 
     def __init__(self, app, parent):
-        from pyonir.core import PyonirApp
+        from pyonir import PyonirApp
         self.app: PyonirApp = app
         self.name: str = parent.__class__.__name__.lower()
 
@@ -412,7 +412,7 @@ class BaseApp(Base):
 
     def __init__(self, app_entrypoint: str, use_themes: bool = None):
         from pyonir.models.templating import TemplateEnvironment
-        from pyonir.core import PyonirServer
+        from pyonir import PyonirServer
         from pyonir.models.parser import parse_markdown, DeserializeFile
         from pyonir import __version__, Site
         DeserializeFile._routes_dirname = self.PAGES_DIRNAME

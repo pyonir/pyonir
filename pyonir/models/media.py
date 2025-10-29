@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import Optional, Union, Generator
 from starlette.datastructures import UploadFile
 
-from pyonir.core import PyonirRequest
+from pyonir import PyonirRequest
 from pyonir.models.database import BaseFSQuery
 
 from enum import Enum, unique

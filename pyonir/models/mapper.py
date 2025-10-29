@@ -94,7 +94,7 @@ def set_attr(target: object, attr: str, value: Any):
 
 def func_request_mapper(func: Callable, pyonir_request: 'BaseRequest') -> dict:
     """Map request data to function parameters"""
-    from pyonir.core import PyonirRequest
+    from pyonir import PyonirRequest
     from pyonir import PyonirApp
     from pyonir.models import Auth
     import inspect

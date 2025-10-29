@@ -7,7 +7,6 @@ from typing import Tuple, Any, Dict, Optional
 from pyonir.models.schemas import BaseSchema
 from starlette_wtf import csrf_token
 
-# from pyonir.core import PyonirSchema
 from pyonir.models.server import BaseRequest, BaseApp
 from pyonir.models.user import User, Role, PermissionLevel, Roles, UserSignIn
 from pyonir.pyonir_types import PyonirRequest, PyonirRestResponse

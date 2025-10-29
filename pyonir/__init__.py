@@ -1,8 +1,11 @@
 # -*- coding: utf-8 -*-
 import os, sys
 from pyonir.models.app import BaseApp, Optional
-from pyonir.core import PyonirApp
 from pyonir.models.utils import get_version
+from pyonir.models.app import BaseApp, BasePlugin
+from pyonir.models.database import BaseFSQuery
+from pyonir.models.schemas import BaseSchema
+from pyonir.models.server import BaseRequest, BaseServer
 
 # Pyonir settings
 PYONIR_DIRPATH = os.path.abspath(os.path.dirname(__file__))
@@ -17,6 +20,14 @@ PYONIR_JINJA_FILTERS_DIRPATH = os.path.join(PYONIR_JINJA_DIRPATH, "filters")
 
 __version__: str = get_version(PYONIR_TOML_FILE)
 Site: Optional[BaseApp] = None
+
+
+class PyonirApp(BaseApp):pass
+class PyonirServer(BaseServer): pass
+class PyonirRequest(BaseRequest): pass
+class PyonirCollection(BaseFSQuery): pass
+class PyonirSchema(BaseSchema): pass
+class PyonirPlugin(BasePlugin): pass
 
 class Pyonir(PyonirApp):
     """Pyonir Application"""

@@ -1,7 +1,7 @@
 import os
 from dataclasses import dataclass
 
-from pyonir.core import PyonirRequest, PyonirApp
+from pyonir import PyonirRequest, PyonirApp
 
 @dataclass
 class Menu:

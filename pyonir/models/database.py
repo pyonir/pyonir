@@ -239,7 +239,7 @@ class DatabaseService(ABC):
             cursor = self.connection.cursor()
             cursor.execute(query, values)
             self.connection.commit()
-            return getattr(entity, entity.__primary_key__) or cursor.lastrowid
+            return getattr(entity, entity.__primary_key__) if hasattr(entity,'__primary_key__') else cursor.lastrowid
 
         elif self.driver == "fs":
             # Save JSON file per record
@@ -330,10 +330,6 @@ class BaseFSQuery:
     def set_params(self, params: dict):
         for k in ['limit', 'curr_page','max_count','page_nums','order_by','order_dir','where_key']:
             if k in params:
-                # if k == 'where':
-                #     _w = self.parse_params(params[k])
-                #     setattr(self, 'where_key', _w)
-                #     continue
                 if k in ('limit', 'curr_page', 'max_count') and params[k]:
                     params[k] = int(params[k])
                 setattr(self, k, params[k])
@@ -420,10 +416,6 @@ class BaseFSQuery:
     def where(self, attr, op="=", value=None):
         """Returns a list of items where attr == value"""
         from pyonir.models.utils import get_attr
-        # if value is None:
-        #     # assume 'op' is actually the value if only two args were passed
-        #     value = op
-        #     op = "="
 
         def match(item):
             actual = get_attr(item, attr)

@@ -360,7 +360,7 @@ class Auth:
     LOCKOUT_TIME = 300
     """Time in seconds to lock the account after exceeding sign-in attempts."""
 
-    user_model = User
+    _user_model = User
     """User model used for authentication, defaults to User class."""
 
     def __init__(self, request: BaseRequest, app: BaseApp):
@@ -383,6 +383,10 @@ class Auth:
             self.user = self.get_auth_user()
 
         self.app.TemplateEnvironment.globals['user'] = self.user
+
+    @property
+    def user_model(self):
+        return self._user_model
 
     @property
     def users_accounts_dirpath(self):
@@ -503,7 +507,7 @@ class Auth:
         user_token = csrf_token(self.request.server_request)
         if not user:
             hashed_password = self.hash_password(self.user_creds.password, with_token=user_token)
-            user = User(name=self.user_creds.email.split('@')[0], password=hashed_password, auth_token=user_token, meta={'email': self.user_creds.email})
+            user = self.user_model(name=self.user_creds.email.split('@')[0], password=hashed_password, auth_token=user_token, meta={'email': self.user_creds.email})
         uid = generate_id(from_email=user.meta.email, salt=self.app.salt)
         user_profile_path = os.path.join(self.app.datastore_dirpath, 'users', uid, 'profile.json')
         user.uid = uid

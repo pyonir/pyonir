@@ -49,7 +49,7 @@ def pyonir_index(request: PyonirRequest):
 
 async def pyonir_ws_handler(websocket: WebSocket):
     """ws connection handler"""
-    from pyonir.utilities import generate_id
+    from pyonir.core.utils import generate_id
 
     async def get_data(ws: WebSocket):
         assert ws.application_state == WebSocketState.CONNECTED and ws.client_state == WebSocketState.CONNECTED
@@ -115,7 +115,7 @@ async def pyonir_docs_handler(request: PyonirRequest):
 async def pyonir_sse_handler(request: PyonirRequest) -> AsyncGenerator:
     """Handles sse web request by pyonir"""
     import asyncio
-    from pyonir.utilities import generate_id, get_attr
+    from pyonir.core.utils import generate_id, get_attr
     from pyonir.core.server import EVENT_RES
     request.type = EVENT_RES  # assign the appropriate streaming headers
     # set sse client

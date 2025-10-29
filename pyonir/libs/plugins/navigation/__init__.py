@@ -64,7 +64,7 @@ class Navigation:
                 pass
 
     def build_navigation(self, app: PyonirApp):
-        # from pyonir.utilities import query_files
+        # from pyonir.core.utils import query_files
         from pyonir.core.database import query_fs
         from collections import defaultdict
         if app is None: return None

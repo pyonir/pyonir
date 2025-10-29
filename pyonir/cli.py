@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os, sys
 import shutil
-from pyonir.utilities import copy_assets, PrntColrs
+from pyonir.core.utils import copy_assets, PrntColrs
 from pyonir import PYONIR_SETUPS_DIRPATH
 
 backend_dirpath = os.path.join(PYONIR_SETUPS_DIRPATH, 'backend')

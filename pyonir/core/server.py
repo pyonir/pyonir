@@ -710,7 +710,7 @@ class BaseRestResponse:
 
     def to_json(self) -> str:
         """Converts the response to a JSON serializable dictionary."""
-        from pyonir.utilities import json_serial
+        from pyonir.core.utils import json_serial
         import json
         return json.dumps(self.to_dict(), default=json_serial)
 

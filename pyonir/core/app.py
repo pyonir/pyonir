@@ -320,7 +320,7 @@ class Base:
 
     @staticmethod
     def query_files(dir_path: str, app_ctx: tuple, model_type: any = None) -> object:
-        from pyonir.utilities import process_contents
+        from pyonir.core.utils import process_contents
         return process_contents(dir_path, app_ctx, model_type)
 
 
@@ -546,7 +546,7 @@ class BaseApp(Base):
     def configure_themes(self):
         """The Configures themes for application"""
 
-        from pyonir.utilities import get_attr
+        from pyonir.core.utils import get_attr
         from pyonir.core.templating import PyonirThemes
 
         themes_dir_path = os.path.join(self.frontend_dirpath, self.THEMES_DIRNAME)

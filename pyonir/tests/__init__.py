@@ -1,7 +1,7 @@
 import os, json
 import textwrap
 
-from pyonir.models.parser import DeserializeFile
+from pyonir.core.parser import DeserializeFile
 from pyonir.tests.backend.demo_controller import DemoService
 from pyonir import Pyonir
 
@@ -21,14 +21,14 @@ def generate_dataclass_from_class(cls, output_dir="types"):
         f.write("\n".join(lines))
 
 def generate_py_tests(parsely: DeserializeFile):
-    from pyonir.models.utils import create_file
+    from pyonir.core.utils import create_file
     cases = []
     name = parsely.__class__.__name__
     # indent = " " * 4
     test_setup = textwrap.dedent(
         """        
         import pytest, os
-        from pyonir.models.parser import DeserializeFile
+        from pyonir.core.parser import DeserializeFile
         true = True
         false = False
         parselyFile = DeserializeFile(os.path.join(os.path.dirname(__file__),'contents', 'test.md'))\n\n

@@ -1,4 +1,4 @@
-from pyonir.core import PyonirSchema
+from pyonir import PyonirSchema
 
 class EmailSubscriber(PyonirSchema, table="email_subscribers", private_keys=["email"]):
     """ Represents an email subscriber """

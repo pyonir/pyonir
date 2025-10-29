@@ -1,7 +1,7 @@
 from abc import ABC
 from typing import Optional, get_type_hints
 
-from pyonir.core import PyonirApp
+from pyonir import PyonirApp
 
 class BaseService(ABC):
     """

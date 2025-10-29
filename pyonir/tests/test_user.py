@@ -1,8 +1,8 @@
 import os
 
-from pyonir.models.auth import TaskAuthorities
+from pyonir.core.auth import TaskAuthorities
 
-from pyonir.models.user import User, UserMeta, Roles, UserSignIn
+from pyonir.core.user import User, UserMeta, Roles, UserSignIn
 
 test_user_file = os.path.join(os.path.dirname(__file__), 'contents', 'test_user.json')
 valid_credentials = {
@@ -31,7 +31,7 @@ def test_from_file():
     assert user.role.name == "contributor"
 
 def test_permissions_after_load():
-    from pyonir.models.user import PermissionLevel
+    from pyonir.core.user import PermissionLevel
     user = User.from_file(test_user_file)
 
     # Test permissions based on role

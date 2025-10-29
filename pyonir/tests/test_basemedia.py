@@ -1,6 +1,6 @@
 import pytest
 import os
-from pyonir.models.media import BaseMedia, ImageFormat
+from pyonir.core.media import BaseMedia, ImageFormat
 from pathlib import Path
 
 frontend_path = Path(os.path.join(os.path.dirname(__file__), "frontend", "static"))

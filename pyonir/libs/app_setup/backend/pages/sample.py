@@ -1,4 +1,4 @@
-from pyonir.models.page import BasePage
+from pyonir.core.page import BasePage
 
 
 class Page(BasePage):

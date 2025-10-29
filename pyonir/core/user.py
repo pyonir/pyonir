@@ -3,11 +3,10 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Optional
 
-from pyonir.core import PyonirSchema
-from pyonir.models.schemas import BaseSchema
-from pyonir.models.server import BaseRequest
+from pyonir.core.schemas import BaseSchema
+from pyonir.core.server import BaseRequest
 
-# from pyonir.models import TaskAuthority
+# from pyonir.core import TaskAuthority
 
 class PermissionLevel(str):
     NONE = 'none'
@@ -94,7 +93,7 @@ class Roles:
         return [cls.SUPER, cls.ADMIN, cls.AUTHOR, cls.CONTRIBUTOR, cls.GUEST]
 
 @dataclass
-class UserSignIn(PyonirSchema):
+class UserSignIn(BaseSchema):
     """Represents a user sign in request"""
 
     email: str
@@ -115,7 +114,7 @@ class UserSignIn(PyonirSchema):
         elif len(self.password) < 6:
             self._errors.append("Password must be at least 6 characters long")
 
-class UserMeta(PyonirSchema):
+class UserMeta(BaseSchema):
     """Represents personal details about a user"""
     email: Optional[str] = ''
     first_name: Optional[str] = ''
@@ -141,7 +140,7 @@ class Location(BaseSchema):
     file_path: Optional[str] = ''
     file_dirpath: Optional[str] = ''
 
-class User(PyonirSchema):
+class User(BaseSchema):
     """Represents an app user"""
     _private_keys: list[str] = ['id', 'password', 'auth_token']
     """List of private keys that should not be included in JSON serialization"""

@@ -26,7 +26,7 @@ def load_modules_from(pkg_dirpath, as_list: bool = False, only_packages:bool = F
 
 def import_module(pkg_path: str, callable_name: str) -> Callable:
     """Imports a module and returns the callable by name"""
-    from pyonir.models.utils import get_attr
+    from pyonir.core.utils import get_attr
     import importlib
     mod_pkg = importlib.import_module(pkg_path)
     importlib.reload(mod_pkg)
@@ -35,7 +35,7 @@ def import_module(pkg_path: str, callable_name: str) -> Callable:
 
 def get_module(pkg_path: str, callable_name: str) -> tuple[Any, Callable]:
     import importlib
-    from pyonir.models.utils import get_attr
+    from pyonir.core.utils import get_attr
     spec = importlib.util.spec_from_file_location(callable_name, pkg_path)
     if spec is None or spec.loader is None:
         raise ImportError(f"Could not load spec for {callable_name} from {pkg_path}")
@@ -59,8 +59,8 @@ def get_version(toml_file: str) -> str:
 def load_env(path=".env") -> EnvConfig:
     import warnings
     from collections import defaultdict
-    from pyonir.models.server import DEV_ENV
-    from pyonir.models.mapper import dict_to_class
+    from pyonir.core.server import DEV_ENV
+    from pyonir.core.mapper import dict_to_class
 
     env = os.getenv('APP_ENV') or DEV_ENV
     env_data = defaultdict(dict)

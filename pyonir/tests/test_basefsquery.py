@@ -1,7 +1,7 @@
 import os
 
-from pyonir.models.database import BaseFSQuery, BasePagination
-from pyonir.models.parser import DeserializeFile
+from pyonir.core.database import BaseFSQuery, BasePagination
+from pyonir.core.parser import DeserializeFile
 
 
 test_files_dir = '/Users/hypermac/dev/pyonir/pyonir/tests/contents/pages'

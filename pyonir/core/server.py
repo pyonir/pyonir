@@ -268,7 +268,7 @@ class BaseRequest:
 
         errorpage = DeserializeFile('404_ERROR')
         errorpage.data = self.render_error()
-        return virtual_route if virtual_route.is_virtual_route else errorpage
+        return virtual_route if virtual_route and virtual_route.is_virtual_route else errorpage
 
     @staticmethod
     def process_header(headers):

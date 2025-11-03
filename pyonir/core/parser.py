@@ -1,8 +1,6 @@
 import os, re, json
 from typing import Tuple, Dict, List, Any, Optional, Union
 
-from pyonir.core.mapper import cls_mapper
-
 from pyonir.core.utils import get_file_created, open_file, get_attr
 
 # Pre-compile regular expressions for better performance
@@ -234,6 +232,8 @@ class DeserializeFile:
         """Renders and html output"""
         from pyonir import Site
         from pyonir.core.page import BasePage
+        from pyonir.core.mapper import cls_mapper
+
 
         # from pyonir.core.mapper import add_props_to_object
         # refresh_model = get_attr(req, 'query_params.rmodel')
@@ -473,6 +473,7 @@ def process_lookups(value_str: str, file_ctx: DeserializeFile = None) -> Optiona
     def parse_ref_to_files(filepath, as_dir=0):
         from pyonir.core.database import BaseFSQuery, DeserializeFile
         from pyonir.core.utils import get_attr, import_module, parse_query_model_to_object
+        from pyonir.core.schemas import GenericQueryModel
 
         if as_dir:
             # use proper app context for path reference outside of scope is always the root level
@@ -486,7 +487,8 @@ def process_lookups(value_str: str, file_ctx: DeserializeFile = None) -> Optiona
                     mod = mod[1:]
                     model = import_module(pkg, callable_name=mod)
                 if not model:
-                    model = parse_query_model_to_object(generic_model_properties)
+                    model = GenericQueryModel(generic_model_properties)
+                    # model = parse_query_model_to_object(generic_model_properties)
             collection = BaseFSQuery(filepath, app_ctx=app_ctx,
                                   model=model,
                                   exclude_names=(file_name, 'index.md'),

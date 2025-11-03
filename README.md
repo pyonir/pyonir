@@ -2,14 +2,17 @@
 
 Pyonir is a static site generator and flat file web framework written in Python. It allows you to create dynamic websites using simple markdown files and a powerful plugin architecture.
 
-### Install Pyonir
+## Install Pyonir
 
-From pypi:
+Run the following command to install Pyonir via pip:
 
-`pip install pyonir`
+- Python 3.9 or higher is required.
 
+```bash 
+> pip install pyonir
+```
 
-### Create a new project
+## Create a new project (manual setup)
 
 Manually create a `main.py` file from an empty directory with the following values.
 
@@ -21,10 +24,40 @@ your_project/
 ```
 
 **Example main.py file**
+
+1. Open the `main.py` file and add the following code:
 ```python
-import pyonir
-app = pyonir.init(__file__)
+from pyonir import Pyonir
+app = Pyonir(__file__)
+
+# Run the web server
+app.run()
 ```
+2. Customize your application by adding content files, themes, and plugins as needed.
+
+- Create a `contents/pages` directory to store your markdown files.
+  - Next, create a sample `index.md` file in the `contents/pages` directory with the following content:
+    ```markdown
+    title: Home Page
+    description: Welcome to my Pyonir web application!
+    ===
+    # Hello, Pyonir!
+    
+    This is my first page using the Pyonir web framework.
+    ```
+- Create a `frontend/templates` directory to store your html markup.
+  - Next, create a sample `pages.html` file in the `frontend/templates` directory with the following content:
+    ```html
+    <h1>{{ page.title }}</h1>
+    <p>{{ page.description }}</p>
+    ```
+
+3. Run your application:
+```bash
+> python main.py
+```
+
+## Create a new project (optional auto setup)
 
 **Scaffold a demo web application from the cli:**
 
@@ -91,16 +124,16 @@ You can configure your api pages to be serverd from a different directory by ove
 
 Override this directory name by setting `your_app.API_DIRNAME`
 
-### Generate static site
+## Generate static site
 
 ```python
-import pyonir
-app = pyonir.init(__file__)
+from pyonir import Pyonir
+app = Pyonir(__file__)
 
 app.generate_static_website()
 ```
 
-### Configure Route Controllers
+## Configure Route Controllers
 
 Configuration based routing defined at startup. All routes live in one place — easier for introspection or auto-generation.
 This allows flexibility for functions to be access from virtual routes and registered at startup.
@@ -120,13 +153,13 @@ router: 'PyonirRouters' = [
 ]
 ```
 
-### Run Web server
+## Run Web server
 
 Pyonir uses the starlette webserver by default to process web request. Below is an example of how to install a route
 handler.
 
 ```python
-import pyonir
+from pyonir import Pyonir
 
 def demo_route(user_id: int = 5):
     # perform logic using the typed arguments passed to this function on request
@@ -141,12 +174,12 @@ router: 'PyonirRouters' = [
     ('/api/demo', routes)
 ]
 
-app = pyonir.init(__file__)
+app = Pyonir(__file__)
 
 app.run(routes=router)
 ```
 
-### Configure Virtual Page Routes
+## Spec based Routes (Optional) 
 
 **Virtual routes `.routes.md`**
 

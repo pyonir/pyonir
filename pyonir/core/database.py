@@ -307,6 +307,7 @@ class BaseFSQuery:
                 name_pattern: str = None,
                 exclude_dirs: tuple = None,
                 exclude_names: tuple = None,
+                include_names: tuple = None,
                 force_all: bool = True) -> None:
 
         self.query_path = query_path
@@ -325,6 +326,7 @@ class BaseFSQuery:
                               name_pattern = name_pattern,
                               exclude_dirs = exclude_dirs,
                               exclude_names = exclude_names,
+                              include_names = include_names,
                               force_all = force_all)
 
     def set_params(self, params: dict):
@@ -485,6 +487,7 @@ def query_fs(abs_dirpath: str,
                 name_pattern: str = None,
                 exclude_dirs: tuple = None,
                 exclude_names: tuple = None,
+                include_names: tuple = None,
                 force_all: bool = True) -> Generator:
     """Returns a generator of files from a directory path"""
     from pathlib import Path
@@ -509,7 +512,9 @@ def query_fs(abs_dirpath: str,
         """Checks if the file should be skipped based on exclude_dirs and exclude_file"""
         is_private_file = file_path.name.startswith(hidden_file_prefixes)
         is_excluded_file = exclude_names and file_path.name in exclude_names
+        is_included_file = include_names and file_path.name in include_names
         is_allowed_file = file_path.suffix[1:] in allowed_content_extensions
+        if is_included_file: return False
         if not is_private_file and force_all: return False
         return is_excluded_file or is_private_file or not is_allowed_file
 

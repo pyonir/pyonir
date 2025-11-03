@@ -2,8 +2,6 @@ import uuid
 from datetime import datetime
 from typing import Type, TypeVar, Any, Optional
 
-from pyonir.core.mapper import collect_type_hints, cls_mapper
-
 
 T = TypeVar("T")
 
@@ -13,13 +11,19 @@ class BaseSchema:
     """
     __table_name__ = str()
     __fields__ = set()
+    __alias__ = dict()
+    __primary_key__ = str()
+    __frozen__ = bool()
     _sql_create_table: Optional[str] = None
     _errors: list[dict[str, Any]]
 
     def __init_subclass__(cls, **kwargs):
+        from pyonir.core.mapper import collect_type_hints
         table_name = kwargs.get("table_name")
         primary_key = kwargs.get("primary_key")
         dialect = kwargs.get("dialect")
+        alias = kwargs.get("alias_map", {})
+        frozen = kwargs.get("frozen", False)
         if table_name:
             setattr(cls, "__table_name__", table_name)
         print(f'init_subclass for {cls.__name__}')
@@ -27,17 +31,19 @@ class BaseSchema:
         setattr(cls, "__fields__", model_fields)
         setattr(cls, "__primary_key__", primary_key or "id")
         setattr(cls, "_errors", [])
+        setattr(cls, "__alias__", alias)
+        setattr(cls, "__frozen__", frozen)
         cls.generate_sql_table(dialect)
 
     def __init__(self, **data):
-        # Get field defaults from the class and apply them if not provided
-        # This ensures default_factory fields are called when value is None
+        from pyonir.core.mapper import coerce_value_to_type
+
         for field_name, field_type in self.__fields__:
             value = data.get(field_name)
-            dvalue_type = getattr(self, field_name, None)
-            if value is None and callable(dvalue_type):
-                value = dvalue_type()
-            setattr(self, field_name, cls_mapper(value, field_type))
+            custom_mapper_fn = getattr(self, f'map_to_{field_name}', None)
+            type_factory = getattr(self, field_name, custom_mapper_fn)
+            value = coerce_value_to_type(value, field_type, default_factory=type_factory) if value or type_factory else None
+            setattr(self, field_name, value)
 
     def is_valid(self) -> bool:
         """Returns True if there are no validation errors."""
@@ -162,3 +168,20 @@ class BaseSchema:
     @classmethod
     def generate_id(cls) -> str:
         return uuid.uuid4().hex
+
+
+class GenericQueryModel:
+    """A generic model to hold dynamic fields from query strings."""
+    file_created_on: str
+    file_name: str
+    def __init__(self, model_str: str):
+        aliases = {}
+        fields = set()
+        for k in model_str.split(','):
+            if ':' in k:
+                k,_, src = k.partition(':')
+                aliases[k] = src
+            fields.add((k, str))
+
+        setattr(self, "__fields__", fields)
+        setattr(self, "__alias__", aliases)

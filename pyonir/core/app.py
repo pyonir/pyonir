@@ -410,7 +410,15 @@ class BaseApp(Base):
         ".m3u", ".m3u8", ".pls", ".asx", ".m4v", ".ts"
     }
 
-    def __init__(self, app_entrypoint: str, use_themes: bool = None):
+    def __init__(self, app_entrypoint: str,
+                 use_themes: bool = None,
+                 salt: str = None):
+        """
+        Initializes the Pyonir application context.
+        :param app_entrypoint: application file initializing PyonirApp instance
+        :param use_themes: toggle to use themes for frontend rendering
+        :param salt: value to salt hashes and security tokens
+        """
         from pyonir.core.templating import TemplateEnvironment
         from pyonir import PyonirServer
         from pyonir.core.parser import parse_markdown, DeserializeFile
@@ -430,6 +438,8 @@ class BaseApp(Base):
         self._resolvers = {}
         self._settings: object = None
         self._env: EnvConfig = load_env(os.path.join(self.app_dirpath, '.env'))
+        if salt is not None:
+            self._env.salt = salt
         self._static_paths = set()
         self.use_themes = use_themes
         """Serve frontend files from the frontend directory for HTML requests"""
@@ -443,6 +453,7 @@ class BaseApp(Base):
             'pyformat': self.pyformatter,
             'md': parse_markdown
         }
+        self.apply_globals()
 
     @property
     def env(self) -> EnvConfig: return self._env
@@ -661,39 +672,43 @@ class BaseApp(Base):
             print('[pyformatter]', e, string)
             return string
 
+    def generate_nginx_config_file(self, template_path: str = None, context: dict = None):
+        """Generates Nginx configuration file for the application"""
+        self.server.generate_nginx_conf(self)
+
     def run(self, uvicorn_options: dict = None):
         """Runs the Uvicorn webserver"""
 
-        self.apply_globals()
+        # self.apply_globals()
         # Initialize Application settings and templates
         self.install_sys_plugins()
         self.activate_plugins()
         # self.collect_virtual_routes()
 
-        self.server.generate_nginx_conf(self)
         # Run uvicorn server
         if self.SSG_IN_PROGRESS: return
         # Initialize Server instance
         if not self.salt:
             raise ValueError(f"You are attempting to run the application without proper configurations. .env file must include app.salt to protect the application.")
+        # self.server.generate_nginx_conf(self)
         self.server.run_uvicorn_server(uvicorn_options=uvicorn_options)
 
     def generate_static_website(self):
         """Generates Static website"""
         import time
-        from pyonir import utilities
+        from pyonir.core.utils import create_file, copy_assets, PrntColrs
         from pyonir.core.server import BaseRequest
         from pyonir.core.parser import DeserializeFile
         from pyonir.core.database import query_fs
         self.SSG_IN_PROGRESS = True
         count = 0
-        print(f"{utilities.PrntColrs.OKBLUE}1. Coping Assets")
+        print(f"{PrntColrs.OKBLUE}1. Coping Assets")
         try:
             self.apply_globals()
             self.install_sys_plugins()
-            self.collect_virtual_routes()
+            # self.collect_virtual_routes()
             site_map_path = os.path.join(self.ssg_dirpath, 'sitemap.xml')
-            print(f"{utilities.PrntColrs.OKCYAN}3. Generating Static Pages")
+            print(f"{PrntColrs.OKCYAN}3. Generating Static Pages")
 
             self.TemplateEnvironment.globals['is_ssg'] = True
             ssg_req = BaseRequest(None, self)
@@ -717,11 +732,11 @@ class BaseApp(Base):
 
             # Compile sitemap
             smap = f'<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>{self.domain}</loc><priority>1.0</priority></url> {"".join(xmls)} </urlset>'
-            utilities.create_file(site_map_path, smap, 0)
+            create_file(site_map_path, smap, 0)
 
             # Copy theme static css, js files into ssg directory
-            utilities.copy_assets(self.frontend_assets_dirpath, os.path.join(self.ssg_dirpath, self.FRONTEND_ASSETS_DIRNAME))
-            utilities.copy_assets(self.public_assets_dirpath, os.path.join(self.ssg_dirpath, self.PUBLIC_ASSETS_DIRNAME))
+            copy_assets(self.frontend_assets_dirpath, os.path.join(self.ssg_dirpath, self.FRONTEND_ASSETS_DIRNAME))
+            copy_assets(self.public_assets_dirpath, os.path.join(self.ssg_dirpath, self.PUBLIC_ASSETS_DIRNAME))
 
             end_time = time.perf_counter() - start_time
             ms = end_time * 1000
@@ -735,5 +750,5 @@ class BaseApp(Base):
         self.SSG_IN_PROGRESS = False
         response = {"status": "COMPLETE", "msg": msg, "files": count}
         print(response)
-        print(utilities.PrntColrs.RESET)
+        print(PrntColrs.RESET)
         return response

@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from datetime import datetime
 import os, pytz
 from typing import Any
@@ -55,10 +56,10 @@ class BaseFile:
     def to_dict(self) -> dict[str, Any]:
         return self.__dict__
 
-
+@dataclass
 class BasePage:
     """Represents a single page returned from a web request"""
-    _orm_options = {"mapper": {'created_on': 'file_created_on', 'modified_on': 'file_modified_on'}}
+    __alias__ = {'created_on': 'file_created_on', 'modified_on': 'file_modified_on'}
     template: str = 'pages.html'
     created_on: datetime = None
     modified_on: datetime = None

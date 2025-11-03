@@ -1,12 +1,14 @@
 from dataclasses import is_dataclass
 from datetime import datetime
-from typing import get_type_hints, Any
+from enum import EnumType
+from typing import get_type_hints, Any, Tuple
 from typing import get_origin, get_args, Union, Callable, Mapping, Iterable, Generator
 from collections.abc import Iterable as ABCIterable, Mapping as ABCMapping, Generator as ABCGenerator
 
-# from pyonir.core.schemas import BaseSchema
 from sqlmodel import SQLModel
 
+from pyonir.core.parser import DeserializeFile
+from pyonir.core.schemas import GenericQueryModel
 from pyonir.core.utils import get_attr, deserialize_datestr
 
 
@@ -25,7 +27,7 @@ def is_mappable_type(tp):
     return isinstance(origin, type) and issubclass(origin, ABCMapping)
 
 def is_scalar_type(tp):
-    sclrs = (int, float, str, bool)
+    sclrs = (int, float, str, bool, EnumType)
     return tp in sclrs or (isinstance(tp, type) and issubclass(tp, sclrs))
 
 def is_custom_class(tp):
@@ -36,16 +38,17 @@ def unwrap_optional(tp):
     origin_tp = get_origin(tp)
     if is_mappable_type(origin_tp):
         key_tp, value_tp = get_args(tp)
-        return origin_tp, key_tp, unwrap_optional(value_tp)
+        return origin_tp, key_tp, get_args(value_tp)
     if is_iterable(origin_tp):
         value_tps = get_args(tp)
-        return origin_tp, value_tps
+        return origin_tp, None, value_tps
     if origin_tp is Union:
         args = [unwrap_optional(a) for a in get_args(tp) if a is not type(None)]
         if len(args):
-            res = [arg for arg, *rest in args]
-            return res
-    return tp, None
+            args = args[0]
+            return args[0], None, args[1]
+            # res = [arg for arg, *rest in args]
+    return tp, None, None
 
 def is_callable_type(tp):
     return get_origin(tp) is Callable
@@ -63,6 +66,19 @@ def coerce_union(t, v):
     except Exception as exc:
         print(f"failed to coerce {v} into {t}")
         return None
+
+def coerce_unions(union_types: list[type], v: any):
+
+    _value = None
+    for utyp in union_types:
+        if _value is not None: break
+        try:
+            _value = utyp(v)
+        except Exception as exc:
+            print(f"failed to coerce {v} into {utyp}")
+            pass
+    return _value
+
 
 def collect_type_hints(t, public_only=True):
     hints = get_type_hints(t)
@@ -91,6 +107,9 @@ def set_attr(target: object, attr: str, value: Any):
         target.update({attr: value})
     else:
         setattr(target, attr, value)
+
+is_sqlmodel_field = lambda t: callable(getattr(t,'default_factory', None))
+is_sqlmodel = lambda t: isinstance(t, type) and issubclass(t, SQLModel)
 
 def func_request_mapper(func: Callable, pyonir_request: 'BaseRequest') -> dict:
     """Map request data to function parameters"""
@@ -127,124 +146,215 @@ def func_request_mapper(func: Callable, pyonir_request: 'BaseRequest') -> dict:
 
     return cls_args
 
-def cls_mapper(file_obj: object, cls: Union[type, list[type]], from_request=None):
-    """Recursively map dict-like input into `cls` with type-safe field mapping."""
+def coerce_value_to_type(value: Any, target_type: Union[type, Tuple[type]], default_factory: Callable = None) -> Any:
+    """Coerce a value to the specified target type."""
+    is_nullable = is_optional_type(target_type)
+    actual_type, map_key_type, union_types = unwrap_optional(target_type) if not isinstance(target_type, tuple) else (None,None, target_type)
+    if is_nullable and value is None:
+        return None
 
+    if union_types:
+        _value = None
+        if is_mappable_type(actual_type) and map_key_type:
+            _value = {map_key_type(k): coerce_value_to_type(v, union_types) for k, v in value.items()}
+        elif is_iterable(actual_type):
+            _value = [coerce_value_to_type(v, union_types) for v in value]
+        else:
+            has_type = type(value) in union_types
+            _value = value if has_type else coerce_unions(union_types, value)
+        return _value
+
+    if isinstance(value, actual_type):
+        return value
+    elif value is None and callable(default_factory):
+        return default_factory()
+    elif value is None and is_sqlmodel_field(default_factory):
+        return default_factory.default_factory()
+    elif is_scalar_type(actual_type):
+        return actual_type(value)
+    elif issubclass(actual_type, datetime):
+        return deserialize_datestr(value)
+    elif is_callable_type(actual_type) or callable(value):
+        return value
+    elif is_custom_class(actual_type):
+        return cls_mapper(value, actual_type)
+    else:
+        try:
+            return actual_type(value)
+        except Exception as e:
+            return value
+
+def cls_mapper(file_obj: Union[dict, DeserializeFile], cls: Union['BaseSchema', type]):
+    """Recursively map dict-like input into `cls` with type-safe field mapping."""
     from pyonir.core.schemas import BaseSchema
 
     if hasattr(cls, '__skip_parsely_deserialization__'):
         return file_obj
+    is_generic = isinstance(cls, GenericQueryModel)
+    is_base = issubclass(cls, BaseSchema) if not is_generic else False
+    cls_ins = cls() if is_base else {}
+    field_hints = cls.__fields__ if is_base or is_generic else [(k,v) for k,v in collect_type_hints(cls).items()]
+    alias_keymap = cls.__alias__ if hasattr(cls, '__alias__') else {}
+    is_frozen = cls.__frozen__ if hasattr(cls, '__frozen__') else False
 
-    # Union types
-    if isinstance(cls, (list, tuple, set)):
-        _value = None
-        for ct in cls:
-            if isinstance(file_obj, ct):
-                _value = ct(file_obj)
-            if _value is not None: break
-            _value = coerce_union(ct, file_obj)
-        return _value
+    # normalize data source
+    mapper_key = getattr(cls, '__nested_field__', None)
+    data = get_attr(file_obj, mapper_key or 'data') or {}
 
-    if is_optional_type(cls) or isinstance(file_obj, cls):
-        return file_obj
-
-    # datetime passthrough
-    if cls == datetime and isinstance(file_obj, str):
-        return deserialize_datestr(file_obj)
-
-    # Scalars just wrap
-    if is_scalar_type(cls):
-        return cls(file_obj)
-    is_sqlmodel_field = lambda t: callable(getattr(value,'default_factory', None))
-    is_sqlmodel = lambda t: isinstance(t, type) and issubclass(t, SQLModel)
-    is_dclass = is_dataclass(cls) or len(required_parameters(cls)) > 0
-    is_generic_type = cls.__name__ == 'GenericQueryModel'
-    is_pyonirschema = issubclass(cls, BaseSchema)
-    param_type_map =  {k: field.annotation for k, field in cls.model_fields.items()} if is_sqlmodel(cls) else dict(cls.__fields__) if is_pyonirschema else collect_type_hints(cls)
-    data = get_attr(file_obj, 'data') or {}
-
-    # Merge nested access if ORM opts define mapper_key
-    orm_opts = getattr(cls, "_orm_options", {})
-    mapper_keys = orm_opts.get("mapper", {})
-    is_frozen = orm_opts.get("frozen")
-    access_path_to_nested = '.'.join(['data', orm_opts.get('mapper_key', cls.__name__.lower())])
-    nested_value = get_attr(file_obj, access_path_to_nested)
-    if nested_value:
-        data.update(**nested_value)
-
-    cls_args = {} if is_dclass else cls()
-    for name, hint in param_type_map.items():
-        mapper_name = get_attr(mapper_keys, name, None) #or name
+    # assign primary fields
+    processed = set()
+    for name, hint in field_hints:
         if name.startswith("_") or name == "return":
             continue
-
-        actual_type, *mapable = unwrap_optional(hint)
-        # value = None
-        for ds in (data, file_obj, cls): # try to get value from data, file_obj, cls (in that order)
-            value = get_attr(ds, mapper_name or name)
+        name_alias = get_attr(alias_keymap, name, None)
+        # access untyped value from data, file_obj, cls (in that order)
+        for ds in (data, file_obj, cls):
+            value = get_attr(ds, name_alias or name)
             if value is not None: break
-
         if value is None:
-            set_attr(cls_args, name, value)
+            set_attr(cls_ins, name, value)
             continue
-
         # Handle containers
         custom_mapper_fn = getattr(cls, f'map_to_{name}', None)
-        if isinstance(value, actual_type):
-            pass
-        elif custom_mapper_fn:
+        if custom_mapper_fn:
             value = custom_mapper_fn(value)
-        elif is_sqlmodel(hint):
-            value = cls_mapper(value, hint) if isinstance(value, dict) else value
-        elif is_sqlmodel_field(value):
-            value = value.default_factory()
-        elif is_scalar_type(actual_type):
-            value = actual_type(value)
-        elif is_callable_type(actual_type) or callable(value):
-            pass
-        elif is_mappable_type(actual_type) and len(mapable) and mapable[0]:
-            key_type, value_types = mapable
-            vtype = value_types[0] if len(value_types)==1 else None
-            value = {key_type(k): cls_mapper(v, vtype or value_types) for k, v in value.items()}
-        elif is_iterable(actual_type):
-            itypes = mapable[0] if len(mapable) == 1 else mapable
-            itype = itypes[0] if itypes and len(itypes) == 1 else None
-            value = [cls_mapper(v, itype) for v in value] if itype else value if isinstance(value, actual_type) else actual_type(value)
-        elif is_custom_class(actual_type):
-            value = cls_mapper(value, actual_type)
         else:
-            try:
-                value = actual_type(value)
-            except Exception as e:
-                pass
-        set_attr(cls_args, name, value)
-
-    # Methods passed from request are returned to be called later
-    if callable(cls) and from_request:
-        return cls_args
-
-    res = cls(**cls_args) if is_dclass else cls_args
-    if is_generic_type:
-        data = file_obj if not data and isinstance(file_obj, dict) else data
-        keys = list(cls.__dict__.keys()) + ['file_name','file_created_on']
-        for key in keys:
-            if key[0] == '_': continue
-            _key = mapper_keys.get(key, key)
-            value = get_attr(data, _key or key) or get_attr(file_obj, _key or key)
-            set_attr(res, key, value)
-        return res
-
-    # Pass additional fields that are not specified on model
-    if not is_frozen and not is_sqlmodel(cls):
-        # keys = data.keys() if is_sqlmodel(cls) else data.model_fields.keys()
+            fn_factory = (value if callable(value) or is_sqlmodel_field(value) else None)
+            if fn_factory:
+                value = None
+            value = coerce_value_to_type(value, hint, default_factory=fn_factory)
+        set_attr(cls_ins, name, value)
+        processed.add(name)
+    if is_generic:
+        cls_ins.update({'file_name': get_attr(file_obj, 'file_name'),
+                        'file_created_on': get_attr(file_obj, 'file_created_on')})
+        return dict_to_class(cls_ins, 'GenericQueryModel')
+    res = cls_ins if is_base else cls(**cls_ins)
+    if not is_frozen:
         for key, value in data.items():
-            if isinstance(getattr(cls, key, None), property):
-                continue  # skip properties
-            if param_type_map.get(key) or key[0] == '_':
-                continue  # skip private or declared attributes
+            if isinstance(getattr(cls, key, None), property): continue  # skip properties
+            if key in processed or key[0] == '_': continue  # skip private or declared attributes
             setattr(res, key, value)
+    return res if field_hints else coerce_value_to_type(file_obj, cls)
 
-    return res
+# def xcls_mapper(file_obj: object, cls: Union[type, list[type]], from_request=None):
+#     """Recursively map dict-like input into `cls` with type-safe field mapping."""
+#
+#     from pyonir.core.schemas import BaseSchema
+#
+#     if hasattr(cls, '__skip_parsely_deserialization__'):
+#         return file_obj
+#
+#     # Union types
+#     if isinstance(cls, (list, tuple, set)):
+#         _value = None
+#         for ct in cls:
+#             if isinstance(file_obj, ct):
+#                 _value = ct(file_obj)
+#             if _value is not None: break
+#             _value = coerce_union(ct, file_obj)
+#         return _value
+#
+#     if is_optional_type(cls) or isinstance(file_obj, cls):
+#         return file_obj
+#
+#     # datetime passthrough
+#     if cls == datetime and isinstance(file_obj, str):
+#         return deserialize_datestr(file_obj)
+#
+#     # Scalars just wrap
+#     if is_scalar_type(cls):
+#         return cls(file_obj)
+#     is_sqlmodel_field = lambda t: callable(getattr(value,'default_factory', None))
+#     is_sqlmodel = lambda t: isinstance(t, type) and issubclass(t, SQLModel)
+#     is_dclass = is_dataclass(cls) or len(required_parameters(cls)) > 0
+#     is_generic_type = cls.__name__ == 'GenericQueryModel'
+#     is_pyonirschema = issubclass(cls, BaseSchema)
+#     param_type_map =  {k: field.annotation for k, field in cls.model_fields.items()} if is_sqlmodel(cls) else dict(cls.__fields__) if is_pyonirschema else collect_type_hints(cls)
+#     data = get_attr(file_obj, 'data') or {}
+#
+#     # Merge nested access if ORM opts define mapper_key
+#     orm_opts = getattr(cls, "_orm_options", {})
+#     mapper_keys = orm_opts.get("mapper", {})
+#     is_frozen = orm_opts.get("frozen")
+#     access_path_to_nested = '.'.join(['data', orm_opts.get('mapper_key', cls.__name__.lower())])
+#     nested_value = get_attr(file_obj, access_path_to_nested)
+#     if nested_value:
+#         data.update(**nested_value)
+#
+#     cls_args = {} if is_dclass else cls()
+#     for name, hint in param_type_map.items():
+#         mapper_name = get_attr(mapper_keys, name, None) #or name
+#         if name.startswith("_") or name == "return":
+#             continue
+#
+#         actual_type, *mapable = unwrap_optional(hint)
+#         # value = None
+#         for ds in (data, file_obj, cls): # try to get value from data, file_obj, cls (in that order)
+#             value = get_attr(ds, mapper_name or name)
+#             if value is not None: break
+#
+#         if value is None:
+#             set_attr(cls_args, name, value)
+#             continue
+#
+#         # Handle containers
+#         custom_mapper_fn = getattr(cls, f'map_to_{name}', None)
+#         if isinstance(value, actual_type):
+#             pass
+#         elif custom_mapper_fn:
+#             value = custom_mapper_fn(value)
+#         elif is_sqlmodel(hint):
+#             value = cls_mapper(value, hint) if isinstance(value, dict) else value
+#         elif is_sqlmodel_field(value):
+#             value = value.default_factory()
+#         elif is_scalar_type(actual_type):
+#             value = actual_type(value)
+#         elif is_callable_type(actual_type) or callable(value):
+#             pass
+#         elif is_mappable_type(actual_type) and len(mapable) and mapable[0]:
+#             key_type, value_types = mapable
+#             vtype = value_types[0] if len(value_types)==1 else None
+#             value = {key_type(k): cls_mapper(v, vtype or value_types) for k, v in value.items()}
+#         elif is_iterable(actual_type):
+#             itypes = mapable[0] if len(mapable) == 1 else mapable
+#             itype = itypes[0] if itypes and len(itypes) == 1 else None
+#             value = [cls_mapper(v, itype) for v in value] if itype else value if isinstance(value, actual_type) else actual_type(value)
+#         elif is_custom_class(actual_type):
+#             value = cls_mapper(value, actual_type)
+#         else:
+#             try:
+#                 value = actual_type(value)
+#             except Exception as e:
+#                 pass
+#         set_attr(cls_args, name, value)
+#
+#     # Methods passed from request are returned to be called later
+#     if callable(cls) and from_request:
+#         return cls_args
+#
+#     res = cls(**cls_args) if is_dclass else cls_args
+#     if is_generic_type:
+#         data = file_obj if not data and isinstance(file_obj, dict) else data
+#         keys = list(cls.__dict__.keys()) + ['file_name','file_created_on']
+#         for key in keys:
+#             if key[0] == '_': continue
+#             _key = mapper_keys.get(key, key)
+#             value = get_attr(data, _key or key) or get_attr(file_obj, _key or key)
+#             set_attr(res, key, value)
+#         return res
+#
+#     # Pass additional fields that are not specified on model
+#     if not is_frozen and not is_sqlmodel(cls):
+#         # keys = data.keys() if is_sqlmodel(cls) else data.model_fields.keys()
+#         for key, value in data.items():
+#             if isinstance(getattr(cls, key, None), property):
+#                 continue  # skip properties
+#             if param_type_map.get(key) or key[0] == '_':
+#                 continue  # skip private or declared attributes
+#             setattr(res, key, value)
+#
+#     return res
 
 def dict_to_class(data: dict, name: Union[str, callable] = None, deep: bool = True) -> object:
     """

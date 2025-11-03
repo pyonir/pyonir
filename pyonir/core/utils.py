@@ -131,9 +131,14 @@ def deserialize_datestr(
                 date_part, _, time_part = raw.partition(" ")
 
             # Use fallback timestr if missing
-            time_part = time_part or "12:00:00.0000"
+            if '+' in time_part:
+                time_part,_,utc_offset = time_part.partition('+')
             hr,*minsec = time_part.split(':')
-            is_military_tme = "%H" in dfmt or int(hr) > 12
+            mins, sec = minsec
+            sec, _, micro = sec.partition('.')
+            time_part = f"{hr}:{mins}:{sec}" or "12:00:00.0000"
+            has_miltary_fmt = "%H" in dfmt
+            is_military_tme = (int(hr) > 12 or int(hr) < 1)
             dfmt = dfmt.replace("%I", "%H") if is_military_tme else fmt
 
             parts = date_part.split("-")
@@ -402,3 +407,15 @@ def load_env(path=".env") -> EnvConfig:
             set_nested(env_data, keys, value)
 
     return dict_to_class(env_data, EnvConfig)
+
+class PrntColrs:
+    RESET = '\033[0m'
+    HEADER = '\033[95m'
+    OKBLUE = '\033[94m'
+    OKCYAN = '\033[96m'
+    OKGREEN = '\x1b[0;92;49m'
+    WARNING = '\033[93m'
+    FAIL = '\033[91m'
+    ENDC = '\033[0m'
+    BOLD = '\033[1m'
+    UNDERLINE = '\033[4m'

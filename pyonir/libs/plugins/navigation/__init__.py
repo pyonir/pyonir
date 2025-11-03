@@ -5,7 +5,7 @@ from pyonir import PyonirRequest, PyonirApp
 
 @dataclass
 class Menu:
-    _orm_options = {'mapper_key': 'menu'}
+    __nested_field__ = 'menu'
     url: str
     slug: str = ''
     name: str = ''

@@ -31,11 +31,15 @@ class PyonirPlugin(BasePlugin): pass
 
 class Pyonir(PyonirApp):
     """Pyonir Application"""
-    def __init__(self, entry_file_path: str, use_themes: bool = None):
+    def __init__(self, entry_file_path: str,
+                 use_themes: bool = None,
+                 salt: str = None):
         """Initializes existing Pyonir application"""
         global Site
         sys.path.insert(0, os.path.dirname(os.path.dirname(entry_file_path)))
-        super().__init__(entry_file_path, use_themes=use_themes)
+        super().__init__(entry_file_path,
+                         use_themes=use_themes,
+                         salt=salt)
         Site = self
         self.process_configs()
         if use_themes:

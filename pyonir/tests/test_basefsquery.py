@@ -1,11 +1,28 @@
 import os
 
+from pyonir import PyonirApp
 from pyonir.core.database import BaseFSQuery, BasePagination
 from pyonir.core.parser import DeserializeFile
+from pyonir.core.schemas import GenericQueryModel
+from pyonir.core.utils import parse_query_model_to_object, parse_url_params
 
-
+app = PyonirApp(__file__)
 test_files_dir = '/Users/hypermac/dev/pyonir/pyonir/tests/contents/pages'
 query = BaseFSQuery(test_files_dir)
+
+def test_generic_model():
+    query_params = parse_url_params('where_key=file_name:=profile&model=name,avatar,uid')
+    modelstr = 'name,avatar,uid'
+    fspath = '/Users/hypermac/dev/finddibs/find_dibs_app_data_stores/users'
+    model = GenericQueryModel(modelstr)
+    collection = BaseFSQuery(fspath, app_ctx=app.app_ctx, model=model)
+    cfp = collection.set_params(query_params).paginated_collection()
+    item = cfp.items[0]
+    assert cfp is not None
+    assert hasattr(item, 'name')
+    assert hasattr(item, 'avatar')
+    assert hasattr(item, 'uid')
+    pass
 
 def test_init():
     assert query.order_by == 'file_created_on'

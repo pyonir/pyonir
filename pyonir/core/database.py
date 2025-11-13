@@ -11,7 +11,8 @@ from sortedcontainers import SortedList
 from pyonir.core.mapper import cls_mapper
 from pyonir.core.parser import DeserializeFile
 from pyonir.core.schemas import BaseSchema
-from pyonir.pyonir_types import PyonirApp, AppCtx
+from pyonir.core.app import BaseApp
+from pyonir.types import AppCtx
 from pyonir.core.utils import get_attr
 
 
@@ -29,7 +30,7 @@ class BasePagination:
 class DatabaseService(ABC):
     """Stub implementation of DatabaseService with env-based config + builder overrides."""
 
-    def __init__(self, app: PyonirApp, db_name: str = '') -> None:
+    def __init__(self, app: BaseApp, db_name: str = '') -> None:
         # Base config from environment
         from pyonir.core.utils import get_attr
         self.app = app
@@ -84,7 +85,8 @@ class DatabaseService(ABC):
     def set_database(self, database_dirpath: str = None) -> "DatabaseService":
         if self.driver.startswith('sqlite') or self.driver == 'fs':
             assert self.db_name is not None
-            database_dirpath = os.path.join(database_dirpath or self.datastore_path, self.db_name)
+            basepath = database_dirpath or self.datastore_path
+            database_dirpath = os.path.join(basepath, self.db_name)
         self._database = database_dirpath
         return self
 
@@ -320,7 +322,7 @@ class BaseFSQuery:
         self.page_nums: list[int, int] = None
         self.where_key: str = None
         self.sorted_files: SortedList = None
-        self.files: Generator[DeserializeFile] = query_fs(query_path,
+        self.query_fs: Generator[DeserializeFile] = query_fs(query_path,
                               app_ctx = app_ctx,
                               model = model,
                               name_pattern = name_pattern,
@@ -328,6 +330,11 @@ class BaseFSQuery:
                               exclude_names = exclude_names,
                               include_names = include_names,
                               force_all = force_all)
+
+    def set_order_by(self, *, order_by: str, order_dir: str = 'asc'):
+        self.order_by = order_by
+        self.order_dir = order_dir
+        return self
 
     def set_params(self, params: dict):
         for k in ['limit', 'curr_page','max_count','page_nums','order_by','order_dir','where_key']:
@@ -368,7 +375,7 @@ class BaseFSQuery:
         from sortedcontainers import SortedList
 
         if self.order_by:
-            self.sorted_files = SortedList(self.files, self.sorting_key)
+            self.sorted_files = SortedList(self.query_fs, self.sorting_key)
         if self.where_key:
             where_key = [self.parse_params(ex) for ex in self.where_key.split(',')]
             self.sorted_files = SortedList(self.where(**where_key[0]), self.sorting_key)
@@ -400,8 +407,8 @@ class BaseFSQuery:
         from pyonir.core.mapper import dict_to_class
         prv = None
         nxt = None
-        pc = BaseFSQuery(input_file.file_dirpath)
-        _collection = iter(pc.files)
+        bfsquery = BaseFSQuery(input_file.file_dirpath)
+        _collection = iter(bfsquery.query_fs)
         for cfile in _collection:
             if cfile.file_status == 'hidden': continue
             if cfile.file_path == input_file.file_path:
@@ -415,7 +422,7 @@ class BaseFSQuery:
         """Returns the first item where attr == value"""
         return next((item for item in self.sorted_files if getattr(item, from_attr, None) == value), None)
 
-    def where(self, attr, op="=", value=None):
+    def where(self, attr, op="=", value=None) -> 'BaseFSQuery':
         """Returns a list of items where attr == value"""
         from pyonir.core.utils import get_attr
 
@@ -442,8 +449,10 @@ class BaseFSQuery:
             return False
         if callable(attr): match = attr
         if not self.sorted_files:
-            self.sorted_files = SortedList(self.files, lambda x: get_attr(x, self.order_by) or x)
-        return filter(match, list(self.sorted_files or self.files))
+            self.sorted_files = SortedList(self.query_fs, lambda x: get_attr(x, self.order_by) or x)
+        target = list(self.sorted_files)
+        self.sorted_files = filter(match, target)
+        return self
 
     def __len__(self):
         return self.sorted_files and len(self.sorted_files) or 0

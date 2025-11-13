@@ -1,19 +1,22 @@
 import os
-from datetime import datetime
+
 from typing import Optional, Type
+import shutil
+import json
 
-from sqlmodel import Field
-
-from pyonir import PyonirApp
+from pyonir import Pyonir
 from pyonir.core.schemas import BaseSchema
 from pyonir.core.database import DatabaseService
 
+class MockRole(BaseSchema, table_name='roles_table', primary_key='rid'):
+    rid: str = BaseSchema.generate_id
+    value: str
 
-class MockUser(BaseSchema, table_name='pyonir_users', primary_key='uid'):
+class MockUser(BaseSchema, table_name='pyonir_users', primary_key='uid', foreign_keys={MockRole}):
     username: str
     email: str
-    created_at: datetime = datetime.now
     uid: str = BaseSchema.generate_id
+    role: MockRole = lambda _: MockRole(value="pythonista")
 
 
 class MockDataService(DatabaseService):
@@ -64,10 +67,12 @@ class MockDataService(DatabaseService):
             return cursor.rowcount > 0
         return False
 
-
-app = PyonirApp(__file__, False)  # Placeholder for PyonirApp instance
+app = Pyonir(__file__, False)  # Placeholder for PyonirApp instance
+temp_datastore = os.path.join(app.app_dirpath,'tmp_store')
+os.makedirs(temp_datastore, exist_ok=True)
+app.env.data_dirpath = temp_datastore
 db = (MockDataService(app, "pyonir_test.db")
-        .set_driver("sqlite").set_database())
+        .set_driver("sqlite").set_database(os.path.join(app.app_dirpath,'tmp_store')))
 
 def test_crud_operations():
     # Create
@@ -104,7 +109,7 @@ def test_crud_operations():
 
     # Delete
     deleted = db.delete(table_name, user_id)
-    assert (deleted)
+    assert deleted
 
     # Verify deletion
     results = db.find(table_name, {table_key: user_id})
@@ -113,3 +118,15 @@ def test_crud_operations():
     db.disconnect()
     db.destroy()
     assert not os.path.exists(db.database)
+
+def test_save_to_file_simple():
+    user = MockUser(username="fileuser", email="fileuser@example.com")
+    file_path = os.path.join(temp_datastore, user.__table_name__, "user.json")
+    result = user.save_to_file(file_path)
+    assert result
+    assert os.path.exists(file_path)
+    with open(file_path, "r") as f:
+        data = json.load(f)
+    assert data["username"] == "fileuser"
+    assert data["email"] == "fileuser@example.com"
+    shutil.rmtree(temp_datastore)

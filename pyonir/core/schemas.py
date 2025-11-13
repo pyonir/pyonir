@@ -1,6 +1,7 @@
+import os
 import uuid
 from datetime import datetime
-from typing import Type, TypeVar, Any, Optional
+from typing import Type, TypeVar, Any, Optional, List, Set
 
 
 T = TypeVar("T")
@@ -14,8 +15,13 @@ class BaseSchema:
     __alias__ = dict()
     __primary_key__ = str()
     __frozen__ = bool()
+    __foreign_keys__: Set[Any] = None
     _sql_create_table: Optional[str] = None
     _errors: list[dict[str, Any]]
+    _private_keys: Optional[list[str]]
+
+    created_by: str = staticmethod(lambda: "pyonir_system")
+    created_at: datetime = staticmethod(lambda: datetime.now())
 
     def __init_subclass__(cls, **kwargs):
         from pyonir.core.mapper import collect_type_hints
@@ -24,15 +30,27 @@ class BaseSchema:
         dialect = kwargs.get("dialect")
         alias = kwargs.get("alias_map", {})
         frozen = kwargs.get("frozen", False)
+        foreign_keys = kwargs.get("foreign_keys", False)
         if table_name:
             setattr(cls, "__table_name__", table_name)
-        print(f'init_subclass for {cls.__name__}')
-        model_fields = set((name, typ)  for name, typ in collect_type_hints(cls).items())
+        foreign_fields = set()
+        model_fields = set()
+
+        def is_fk(name, typ):
+            if foreign_keys and typ in foreign_keys:
+                foreign_fields.add((name, typ))
+                return True
+            return False
+        for name, typ in collect_type_hints(cls).items():
+            is_fk(name, typ)
+            model_fields.add((name, typ))
+        # model_fields = set((name, typ, is_fk(name,typ)) for name, typ in collect_type_hints(cls).items())
         setattr(cls, "__fields__", model_fields)
         setattr(cls, "__primary_key__", primary_key or "id")
-        setattr(cls, "_errors", [])
+        setattr(cls, "__foreign_keys__", foreign_fields)
         setattr(cls, "__alias__", alias)
         setattr(cls, "__frozen__", frozen)
+        setattr(cls, "_errors", [])
         cls.generate_sql_table(dialect)
 
     def __init__(self, **data):
@@ -79,6 +97,24 @@ class BaseSchema:
     def save_to_file(self, file_path: str) -> bool:
         """Saves the user data to a file in JSON format"""
         from pyonir.core.utils import create_file
+        from pyonir.core.parser import LOOKUP_DATA_PREFIX
+        from pyonir import Site
+        # file_path = app_datastore if Site and not file_path else file_path
+        active_user = getattr(Site.server.request, 'active_user', None)
+        filename_as_pk = os.path.basename(file_path).split('.')[0]
+        schema_pk_value = getattr(self, self.__primary_key__, None) if self.__primary_key__!='id' else filename_as_pk
+        if self.__foreign_keys__:
+            app_datastore = Site.datastore_dirpath if Site else os.path.dirname(file_path)
+            for k, fk_type in self.__foreign_keys__:
+                data_path = os.path.join(app_datastore, fk_type.__table_name__)
+                fk_schema_inst = getattr(self, k, None)
+                if fk_schema_inst and hasattr(fk_schema_inst, "save_to_file"):
+                    fk_schema_inst.created_by = active_user.uid if active_user else fk_schema_inst.created_by
+                    fk_pk_value = getattr(fk_schema_inst, fk_schema_inst.__primary_key__, None)
+                    fk_entry_name = (fk_pk_value if fk_pk_value and fk_pk_value!='id' else schema_pk_value) + '.json'
+                    fk_file_path = os.path.join(data_path, fk_entry_name)
+                    fk_schema_inst.save_to_file(fk_file_path)
+                    setattr(self,k, f"{LOOKUP_DATA_PREFIX}/{fk_schema_inst.__table_name__}/{fk_entry_name}")
         return create_file(file_path, self.to_dict(obfuscate=False))
 
     def save_to_session(self, request: 'PyonirRequest', key: str = None, value: any = None) -> None:
@@ -97,9 +133,11 @@ class BaseSchema:
                 return getattr(self, key)
             if isinstance(value, (tuple, list, set)):
                 return [process_value(key, v) for v in value]
+            if isinstance(value, datetime):
+                return value.isoformat()
             return value
-        fields = self.__fields__
-        return {key: process_value(key, getattr(self, key)) for key, ktype in fields if not is_ignored(key) and not obfuscated(key)}
+
+        return {key: process_value(key, getattr(self, key)) for key, ktype in self.__fields__ if not is_ignored(key) and not obfuscated(key)}
 
     def to_json(self, obfuscate = True) -> str:
         """Returns a JSON serializable dictionary"""
@@ -135,7 +173,7 @@ class BaseSchema:
         table_name = getattr(cls, '__table_name__', None) or cls.__name__.lower()
         columns = []
         has_pk = False
-        for name, typ in cls.__annotations__.items():
+        for name, typ in cls.__fields__:
             col_type = PY_TO_SQLA.get(typ, String)
             is_pk = name == 'id' or name == primary_key and not has_pk
             kwargs = {"primary_key": is_pk}

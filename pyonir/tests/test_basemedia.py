@@ -4,20 +4,15 @@ from pyonir.core.media import BaseMedia, ImageFormat
 from pathlib import Path
 
 frontend_path = Path(os.path.join(os.path.dirname(__file__), "frontend", "static"))
-# Create a temporary image file
-@pytest.fixture
-def temp_media_file(): return os.path.join(frontend_path, "test_image.png")
-
-@pytest.fixture
-def test_metadata():
-    return {
+temp_media_file = os.path.join(frontend_path, "test_image.png")
+test_metadata = {
         "name": "test_image",
         "width": 800,
         "height": 600,
         "created_on": "2024-01-01 00:00:00"
     }
 
-def test_basic_file_properties(temp_media_file):
+def test_basic_file_properties():
     media = BaseMedia(temp_media_file)
 
     assert media.file_path == temp_media_file
@@ -26,7 +21,7 @@ def test_basic_file_properties(temp_media_file):
     assert media.file_dirname == str(Path(temp_media_file).parent.name)
     assert media.slug == f"{media.file_dirname}/test_image.png"
 
-def test_encode_filename(temp_media_file, test_metadata):
+def test_encode_filename():
     file_ext = temp_media_file.split('.')[-1]
     encoded = BaseMedia.encode_filename(temp_media_file, test_metadata)
     assert isinstance(encoded, str)
@@ -44,7 +39,7 @@ def test_decode_filename():
     assert decoded.get('width') == "800"
     assert decoded.get('height') == "600"
 
-def test_rename_media_file(temp_media_file, test_metadata):
+def test_rename_media_file():
     media = BaseMedia(temp_media_file)
     old_path = media.file_path
 
@@ -61,6 +56,7 @@ def test_rename_media_file(temp_media_file, test_metadata):
 
 def test_resize_image():
     from PIL import Image
+    from pyonir import Site
 
     # Create a real test image
     img_path = os.path.join(frontend_path, "test_resize.jpg")
@@ -72,7 +68,7 @@ def test_resize_image():
     media.resize(sizes)
 
     # Check if thumbnail directory exists with resized images
-    thumb_dir = Path(media.file_dirpath) / media.file_name
+    thumb_dir = Path(media.file_dirpath) / (Site.UPLOADS_THUMBNAIL_DIRNAME if Site else media.file_name)
     assert thumb_dir.exists()
 
     # Check if resized files exist
@@ -84,6 +80,7 @@ def test_resize_image():
     os.remove(img_path)
     for f in thumb_dir.glob("*"):
         os.remove(f)
+    print("Removing thumbnail directory:", thumb_dir)
     thumb_dir.rmdir()
 
 def test_compress_image():
@@ -124,9 +121,17 @@ def test_get_media_data():
         assert media_data['width'] == 800
         assert media_data['height'] == 600
 
-def test_image_thumbnails(temp_media_file):
+def test_image_thumbnails():
+    from pyonir import Site
+
     media = BaseMedia(os.path.join(frontend_path, "test_image.png"))
     media.resized_to(40, 40)
     t = media.thumbnails
     assert t.get(f'40x40') is not None
+
+    thumb_dir = Path(media.file_dirpath) / (Site.UPLOADS_THUMBNAIL_DIRNAME if Site else media.file_name)
+
+    for f in thumb_dir.glob("*"):
+        os.remove(f)
+    thumb_dir.rmdir()
 

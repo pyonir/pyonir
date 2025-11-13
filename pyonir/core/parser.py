@@ -228,6 +228,16 @@ class DeserializeFile:
             file_dirname=self.file_dirname,
         )
 
+    def to_dict(self):
+        """Returns a dictionary representation of the file data"""
+        return {
+            **self.data,
+            "file_name": self.file_name,
+            "file_created_on": self.file_created_on,
+            "file_modified_on": self.file_modified_on,
+            "file_dirname": self.file_dirname,
+        }
+
     def output_html(self, req: "PyonirRequest") -> str:
         """Renders and html output"""
         from pyonir import Site
@@ -248,13 +258,14 @@ class DeserializeFile:
         from .utils import json_serial
 
         data = data_value or self
-        if not as_str:
-            return data
+        # if not as_str:
+        #     return data
         return json.dumps(data, default=json_serial)
 
     def generate_static_file(self, page_request=None, rtn_results=False):
         """Generate target file as html or json. Takes html or json content to save"""
         from pyonir import Site
+        from pyonir.core.utils import create_file
 
         count = 0
         html_data = None
@@ -267,7 +278,7 @@ class DeserializeFile:
         def render_save():
             # -- Render Content --
             html_data = self.output_html(page_request)
-            json_data = self.output_json(as_str=False)
+            json_data = self.to_dict()
             # -- Save contents --
             create_file(path_to_static_html, html_data)
             create_file(path_to_static_api, json_data)
@@ -508,7 +519,7 @@ def process_lookups(value_str: str, file_ctx: DeserializeFile = None) -> Optiona
         from pyonir.core.utils import parse_url_params
         base_path = app_ctx[-1:][0] if value_str.startswith(LOOKUP_DATA_PREFIX) else file_contents_dirpath
         _query_params = value_str.split("?").pop() if "?" in value_str else False
-        query_params = parse_url_params(_query_params) if _query_params else ''
+        query_params = parse_url_params(_query_params) if _query_params else {}
         has_attr_path = value_str.split("#")[-1] if "#" in value_str else ''
         value_str = value_str.replace(f"{LOOKUP_DIR_PREFIX}/", "") \
             .replace(f"{LOOKUP_DATA_PREFIX}/", "") \

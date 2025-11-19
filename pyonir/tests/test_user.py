@@ -4,7 +4,7 @@ from pyonir.core.auth import TaskAuthorities
 
 from pyonir.core.user import User, UserMeta, Roles, UserSignIn
 
-test_user_file = os.path.join(os.path.dirname(__file__), 'contents', 'test_user.json')
+test_user_file = os.path.join(os.path.dirname(__file__), 'contents','mock_data', 'test_user.json')
 valid_credentials = {
     "email": "test@example.com",
     "password": "secure123"

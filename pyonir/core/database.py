@@ -12,7 +12,7 @@ from pyonir.core.mapper import cls_mapper
 from pyonir.core.parser import DeserializeFile
 from pyonir.core.schemas import BaseSchema
 from pyonir.core.app import BaseApp
-from pyonir.types import AppCtx
+from pyonir.pyonir_types import AppCtx
 from pyonir.core.utils import get_attr
 
 
@@ -22,10 +22,20 @@ class BasePagination:
     max_count: int = 0
     curr_page: int = 0
     page_nums: list[int, int] = field(default_factory=list)
-    items: list['DeserializeFile'] = field(default_factory=list)
+    items: list[DeserializeFile] = field(default_factory=list)
 
-    def __iter__(self) -> Iterator['DeserializeFile']:
+    def __iter__(self) -> Iterator[DeserializeFile]:
         return iter(self.items)
+
+    def to_dict(self) -> dict:
+        from pyonir.core.utils import json_serial
+        return {
+            "limit": self.limit,
+            "max_count": self.max_count,
+            "curr_page": self.curr_page,
+            "page_nums": self.page_nums,
+            "items": [json_serial(item) for item in self.items]
+        }
 
 class DatabaseService(ABC):
     """Stub implementation of DatabaseService with env-based config + builder overrides."""
@@ -501,7 +511,7 @@ def query_fs(abs_dirpath: str,
     """Returns a generator of files from a directory path"""
     from pathlib import Path
     from pyonir.core.page import BasePage
-    from pyonir.core.parser import DeserializeFile
+    from pyonir.core.parser import DeserializeFile, FileCache
     from pyonir.core.media import BaseMedia
 
     # results = []
@@ -513,8 +523,8 @@ def query_fs(abs_dirpath: str,
         pf = DeserializeFile(str(filepath), app_ctx=app_ctx)
         if model == 'file':
             return pf
-        pf.schema = BasePage if (pf.is_page and not model) else model
-        res = cls_mapper(pf, pf.schema) if pf.schema else pf
+        schema = BasePage if (pf.is_page and not model) else model
+        res = cls_mapper(pf, schema) if schema else pf
         return res
 
     def skip_file(file_path: Path) -> bool:

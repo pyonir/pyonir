@@ -118,27 +118,8 @@ class BaseRequest:
     async def process_request_data(self):
         """Get form data and file upload contents from request"""
 
-        from pyonir import Site
         from pyonir.core.utils import expand_dotted_keys
         import json
-
-        def secure_upload_filename(filename):
-            import re
-            # Strip leading and trailing whitespace from the filename
-            filename = filename.strip()
-
-            # Replace spaces with underscores
-            filename = filename.replace(' ', '_')
-
-            # Remove any remaining unsafe characters using a regular expression
-            # Allow only alphanumeric characters, underscores, hyphens, dots, and slashes
-            filename = re.sub(r'[^a-zA-Z0-9_.-]', '', filename)
-
-            # Ensure the filename doesn't contain multiple consecutive dots (.) or start with one
-            filename = re.sub(r'\.+', '.', filename).lstrip('.')
-
-            # Return the filename as lowercase for consistency
-            return filename.lower()
 
         try:
             try:
@@ -234,7 +215,8 @@ class BaseRequest:
         path_slug = path_str[1:]
         app_scope, *path_segments = path_slug.split('/')
         is_api_request = (len(path_segments) and path_segments[0] == app.API_DIRNAME) or path_str.startswith(app.API_ROUTE)
-
+        # revalidate_cache = getattr(self.query_params, 'reload', False)
+        # DeserializeFile._invalidate_cache = bool(revalidate_cache)
         # Normalize API prefix and path segments
         if is_api_request:
             path_str = path_str.replace(app.API_ROUTE, '')

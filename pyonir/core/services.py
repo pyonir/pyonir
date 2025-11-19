@@ -1,13 +1,13 @@
 from abc import ABC
 from typing import Optional, get_type_hints
 
-from pyonir import PyonirApp
+from pyonir import BaseApp
 
 class BaseService(ABC):
     """
     Abstract base class defining a generic service interface for Pyonir applications.
     """
-    app: Optional[PyonirApp]
+    app: Optional[BaseApp]
     """Pyonir application instance"""
 
     name: str

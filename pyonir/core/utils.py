@@ -3,11 +3,6 @@ from datetime import datetime
 from collections.abc import Generator
 from typing import Optional, Union, Callable, Any
 
-from pyonir.pyonir_types import EnvConfig
-
-
-# from pyonir.pyonir_types import EnvConfig
-
 
 def get_file_created(file_path: str, platform: str = 'ios') -> datetime:
     from datetime import datetime
@@ -369,10 +364,11 @@ def parse_query_model_to_object(model_fields: str) -> object:
         params[k] = None
     return type('GenericQueryModel', (object,), params)
 
-def load_env(path=".env") -> EnvConfig:
+def load_env(path=".env") -> 'EnvConfig':
     import warnings
     from collections import defaultdict
     from pyonir.core.server import DEV_ENV
+    from pyonir.pyonir_types import EnvConfig
 
     env = os.getenv('APP_ENV') or DEV_ENV
     env_data = defaultdict(dict)

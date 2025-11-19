@@ -1,13 +1,11 @@
 from __future__ import annotations
 
 import os
-import sys
-from collections import OrderedDict
 from typing import Optional, Generator, List
 
 from pyonir.core.utils import get_attr, load_env, generate_id
 
-from pyonir.pyonir_types import PyonirThemes, EnvConfig, PyonirHooks, Parsely, PyonirRoute, PyonirRouters
+from pyonir.pyonir_types import PyonirThemes, EnvConfig, PyonirHooks, PyonirRoute, PyonirRouters
 
 
 class Base:
@@ -422,7 +420,7 @@ class BaseApp(Base):
         from pyonir.core.templating import TemplateEnvironment
         from pyonir import PyonirServer
         from pyonir.core.parser import parse_markdown, DeserializeFile
-        from pyonir import __version__, Site
+        from pyonir import __version__
         DeserializeFile._routes_dirname = self.PAGES_DIRNAME
         self.VERSION = __version__
         self.SECRET_SAUCE = generate_id()
@@ -668,8 +666,8 @@ class BaseApp(Base):
             context.update(self.TemplateEnvironment.globals)
         try:
             return string.format(**context)
-        except Exception as e:
-            print('[pyformatter]', e, string)
+        except (KeyError, AttributeError) as e:
+            # print('[pyformatter]', e, string)
             return string
 
     def generate_nginx_config_file(self, template_path: str = None, context: dict = None):

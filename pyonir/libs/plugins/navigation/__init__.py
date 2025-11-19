@@ -1,7 +1,7 @@
 import os
 from dataclasses import dataclass
 
-from pyonir import PyonirRequest, PyonirApp
+from pyonir import PyonirRequest, Pyonir
 
 @dataclass
 class Menu:
@@ -28,7 +28,7 @@ class Navigation:
     """Assembles a map of navigation menus based on file configurations"""
     name = 'pyonir_navigation'
 
-    def __init__(self, app: PyonirApp):
+    def __init__(self, app: Pyonir):
         self.app = app
         self.menus = {}
         self.active_page = None
@@ -39,10 +39,10 @@ class Navigation:
         self.add_menus_to_environment(app)
         pass
 
-    def after_init(self, data: any, app: PyonirApp):
+    def after_init(self, data: any, app: Pyonir):
         self.build_plugins_navigation(app)
 
-    async def on_request(self, request: PyonirRequest, app: PyonirApp):
+    async def on_request(self, request: PyonirRequest, app: Pyonir):
         """Executes task on web request"""
         refresh_nav = bool(getattr(request.query_params,'rnav', None))
         curr_nav = app.TemplateEnvironment.globals.get('navigation')
@@ -51,11 +51,11 @@ class Navigation:
         self.build_navigation(app)
         self.add_menus_to_environment(app)
 
-    def add_menus_to_environment(self, app: PyonirApp):
+    def add_menus_to_environment(self, app: Pyonir):
         app.TemplateEnvironment.globals['navigation'] = self.menus.get(app.name)
 
 
-    def build_plugins_navigation(self, app: PyonirApp):
+    def build_plugins_navigation(self, app: Pyonir):
         if app.activated_plugins:
             for plgn in app.activated_plugins:
                 if isinstance(plgn, Navigation):continue
@@ -63,7 +63,7 @@ class Navigation:
                 self.build_navigation(plgn)
                 pass
 
-    def build_navigation(self, app: PyonirApp):
+    def build_navigation(self, app: Pyonir):
         # from pyonir.core.utils import query_files
         from pyonir.core.database import query_fs
         from collections import defaultdict

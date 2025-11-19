@@ -4,7 +4,7 @@ import os, uuid
 from typing import Optional, Union, List, Dict
 from datetime import datetime
 
-from pyonir import PyonirRequest, PyonirApp
+from pyonir import PyonirRequest, Pyonir
 from pyonir.core.schemas import BaseSchema, GenericQueryModel
 
 from pyonir.core.mapper import cls_mapper, dict_to_class
@@ -15,7 +15,7 @@ from pyonir.libs.plugins.navigation import Menu
 
 # ==== Sample classes to map into ====
 
-class Address:
+class MockAddress:
 
     def __init__(self,
                  street: str,
@@ -23,13 +23,13 @@ class Address:
         self.street = street
         self.zip_code = zip_code
 
-class User:
+class MockUser:
 
     def __init__(self,
                  uid: int,
                  name: str,
                  email: Optional[str],
-                 address: Optional[Address],
+                 address: Optional[MockAddress],
                  tags: List[str],
                  meta: Dict[str, Union[str, int]]):
         self.uid = uid
@@ -59,7 +59,7 @@ def test_request_mapper():
     def demo_route(user_id: int, request: PyonirRequest):
         pass
     from pyonir.core.mapper import func_request_mapper
-    app = PyonirApp(__file__)
+    app = Pyonir(__file__)
     pyonir_request = PyonirRequest(None, app)
     pyonir_request.path_params = dict_to_class({'user_id': '42'})
     pyonir_request.query_params = dict_to_class({})
@@ -104,7 +104,7 @@ def test_no_hint_mapping():
 
 def test_scalar_mapping():
     obj = {"uid": "123", "name": "Alice", "email": None, "address": None, "tags": [], "meta": {}}
-    user = cls_mapper(obj, User)
+    user = cls_mapper(obj, MockUser)
     assert isinstance(user.uid, int)
     assert user.uid == 123
     assert user.name == "Alice"
@@ -112,21 +112,23 @@ def test_scalar_mapping():
 
 def test_optional_mapping():
     obj = {"id": 1, "name": "Bob", "email": "bob@test.com", "address": None, "tags": [], "meta": {}}
-    user = cls_mapper(obj, User)
+    user = cls_mapper(obj, MockUser)
     assert user.email == "bob@test.com"
     obj2 = {"id": 2, "name": "Charlie", "email": None, "address": None, "tags": [], "meta": {}}
-    user2 = cls_mapper(obj2, User)
+    user2 = cls_mapper(obj2, MockUser)
     assert user2.email is None
 
 def test_nested_object():
+    addr = {"street": "Main St", "zip_code": "90210"}
+    mock_address = cls_mapper(addr, MockAddress)
     obj = {
         "uid": 10, "name": "Diana", "email": "diana@test.com",
-        "address": {"street": "Main St", "zip_code": "90210"},
+        "address": addr,
         "tags": ["admin", "staff"],
         "meta": {"age": "30", "score": 95}
     }
-    user = cls_mapper(obj, User)
-    assert isinstance(user.address, Address)
+    user = cls_mapper(obj, MockUser)
+    assert isinstance(user.address, MockAddress)
     assert user.address.street == "Main St"
     assert isinstance(user.address.zip_code, int)
     assert user.address.zip_code == 90210
@@ -140,7 +142,7 @@ def test_list_mapping():
         "tags": ["one", "two"],
         "meta": {}
     }
-    user = cls_mapper(obj, User)
+    user = cls_mapper(obj, MockUser)
     assert isinstance(user.tags, list)
     assert user.tags == ["one", "two"]
 
@@ -151,6 +153,6 @@ def test_dict_mapping_with_union():
         "tags": [],
         "meta": {"age": 42, "nickname": "franky"}
     }
-    user = cls_mapper(obj, User)
+    user = cls_mapper(obj, MockUser)
     assert isinstance(user.meta["age"], int)
     assert isinstance(user.meta["nickname"], str)

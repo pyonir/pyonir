@@ -7,9 +7,8 @@ from typing import Tuple, Any, Dict, Optional
 from pyonir.core.schemas import BaseSchema
 from starlette_wtf import csrf_token
 
-from pyonir.core.server import BaseRequest, BaseApp
+from pyonir.core.server import BaseRequest, BaseApp, BaseRestResponse
 from pyonir.core.user import User, Role, PermissionLevel, Roles, UserSignIn
-from pyonir.pyonir_types import PyonirRequest, PyonirRestResponse
 
 
 class UserCredentials(BaseSchema):
@@ -151,7 +150,7 @@ def jwt_decoder(jwt_token: str, salt: str)-> dict:
     return jwt.decode(jwt_token, salt, algorithms=['HS256'])
 
 
-class AuthResponse(PyonirRestResponse):
+class AuthResponse(BaseRestResponse):
     """
     Represents a standardized authentication response.
 
@@ -653,7 +652,7 @@ class Auth:
         """Sets the user model for authentication."""
         if not issubclass(user_model, User):
             raise ValueError("user_model must be a subclass of User")
-        Auth.user_model = user_model
+        Auth._user_model = user_model
 
 
 class AuthService(ABC):

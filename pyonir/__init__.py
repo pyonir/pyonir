@@ -5,7 +5,7 @@ from pyonir.core.utils import get_version
 from pyonir.core.app import BaseApp, BasePlugin
 from pyonir.core.database import BaseFSQuery
 from pyonir.core.schemas import BaseSchema
-from pyonir.core.server import BaseRequest, BaseServer
+from pyonir.core.server import BaseRequest, BaseServer, BaseRestResponse
 
 # Pyonir settings
 PYONIR_DIRPATH = os.path.abspath(os.path.dirname(__file__))
@@ -22,14 +22,13 @@ __version__: str = get_version(PYONIR_TOML_FILE)
 Site: Optional[BaseApp] = None
 
 
-class PyonirApp(BaseApp):pass
 class PyonirServer(BaseServer): pass
 class PyonirRequest(BaseRequest): pass
 class PyonirCollection(BaseFSQuery): pass
 class PyonirSchema(BaseSchema): pass
 class PyonirPlugin(BasePlugin): pass
 
-class Pyonir(PyonirApp):
+class Pyonir(BaseApp):
     """Pyonir Application"""
     def __init__(self, entry_file_path: str,
                  use_themes: bool = None,
@@ -44,15 +43,3 @@ class Pyonir(PyonirApp):
         self.process_configs()
         if use_themes:
             self.configure_themes()
-
-# def init(entry_file_path: str, use_themes: bool = None):
-#     """Initializes existing Pyonir application"""
-#     global Site
-#     # Set Global Site instance
-#     # if options: options = PyonirOptions(**(options or {}))
-#     sys.path.insert(0, os.path.dirname(os.path.dirname(entry_file_path)))
-#     Site = PyonirApp(entry_file_path, use_themes=use_themes)
-#     Site.process_configs()
-#     if use_themes:
-#         Site.configure_themes()
-#     return Site

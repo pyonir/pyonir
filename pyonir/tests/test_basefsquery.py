@@ -1,21 +1,19 @@
 import os
 
-from pyonir import PyonirApp
+from pyonir import Pyonir
 from pyonir.core.database import BaseFSQuery, BasePagination
 from pyonir.core.parser import DeserializeFile
 from pyonir.core.schemas import GenericQueryModel
 from pyonir.core.utils import parse_query_model_to_object, parse_url_params
 
-app = PyonirApp(__file__)
-test_files_dir = '/Users/hypermac/dev/pyonir/pyonir/tests/contents/pages'
-query = BaseFSQuery(test_files_dir)
+app = Pyonir(__file__)
+query = BaseFSQuery(app.pages_dirpath)
 
 def test_generic_model():
-    query_params = parse_url_params('where_key=file_name:=profile&model=name,avatar,uid')
+    query_params = parse_url_params('where_key=file_name:=test_user&model=name,avatar,uid')
     modelstr = 'name,avatar,uid'
-    fspath = '/Users/hypermac/dev/finddibs/find_dibs_app_data_stores/users'
     model = GenericQueryModel(modelstr)
-    collection = BaseFSQuery(fspath, app_ctx=app.app_ctx, model=model)
+    collection = BaseFSQuery(os.path.join(app.contents_dirpath, 'mock_data'), app_ctx=app.app_ctx, model=model)
     cfp = collection.set_params(query_params).paginated_collection()
     item = cfp.items[0]
     assert cfp is not None
@@ -63,7 +61,7 @@ def test_where_filter():
 
 def test_prev_next():
     # Create a test file
-    test_file = DeserializeFile(os.path.join(test_files_dir,"index.md"))
+    test_file = DeserializeFile(os.path.join(app.pages_dirpath,"index.md"))
     result = BaseFSQuery.prev_next(test_file)
 
     assert hasattr(result, 'next')

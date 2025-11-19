@@ -6,6 +6,12 @@ from typing import Type, TypeVar, Any, Optional, List, Set
 
 T = TypeVar("T")
 
+def get_active_user() -> str:
+    from pyonir import Site
+    if Site and Site.server and Site.server.request and Site.server.request.auth and Site.server.request.auth.user:
+        return Site.server.request.auth.user.uid
+    return "unknown_user"
+
 class BaseSchema:
     """
     Interface for immutable dataclass models with CRUD and session support.
@@ -19,8 +25,9 @@ class BaseSchema:
     _sql_create_table: Optional[str] = None
     _errors: list[dict[str, Any]]
     _private_keys: Optional[list[str]]
+    _foreign_key_names: set[str]
 
-    created_by: str = staticmethod(lambda: "pyonir_system")
+    created_by: str = get_active_user
     created_at: datetime = staticmethod(lambda: datetime.now())
 
     def __init_subclass__(cls, **kwargs):
@@ -34,15 +41,23 @@ class BaseSchema:
         if table_name:
             setattr(cls, "__table_name__", table_name)
         foreign_fields = set()
+        foreign_field_names = set()
         model_fields = set()
 
         def is_fk(name, typ):
             if foreign_keys and typ in foreign_keys:
                 foreign_fields.add((name, typ))
+                foreign_field_names.add(name)
                 return True
             return False
+
+        def is_factory(val):
+            if callable(val):
+                setattr(cls, name, staticmethod(val))
+
         for name, typ in collect_type_hints(cls).items():
             is_fk(name, typ)
+            is_factory(getattr(cls, name, None))
             model_fields.add((name, typ))
         # model_fields = set((name, typ, is_fk(name,typ)) for name, typ in collect_type_hints(cls).items())
         setattr(cls, "__fields__", model_fields)
@@ -51,16 +66,21 @@ class BaseSchema:
         setattr(cls, "__alias__", alias)
         setattr(cls, "__frozen__", frozen)
         setattr(cls, "_errors", [])
+        setattr(cls, "_foreign_key_names", foreign_field_names)
         cls.generate_sql_table(dialect)
 
     def __init__(self, **data):
-        from pyonir.core.mapper import coerce_value_to_type
+        from pyonir.core.mapper import coerce_value_to_type, cls_mapper
 
         for field_name, field_type in self.__fields__:
             value = data.get(field_name)
-            custom_mapper_fn = getattr(self, f'map_to_{field_name}', None)
-            type_factory = getattr(self, field_name, custom_mapper_fn)
-            value = coerce_value_to_type(value, field_type, default_factory=type_factory) if value or type_factory else None
+            if data:
+                custom_mapper_fn = getattr(self, f'map_to_{field_name}', None)
+                type_factory = getattr(self, field_name, custom_mapper_fn)
+                if field_name in self._foreign_key_names:
+                    value = cls_mapper(value, field_type, is_fk=True)
+                else:
+                    value = coerce_value_to_type(value, field_type, factory_fn=type_factory) if value or type_factory else None
             setattr(self, field_name, value)
 
     def is_valid(self) -> bool:
@@ -77,9 +97,7 @@ class BaseSchema:
             if callable(validator_fn):
                 validator_fn()
             return
-        for name in self.__dict__.keys():
-            if name.startswith("_"):
-                continue
+        for name, typ in self.__fields__:
             validator_fn = getattr(self, f"validate_{name}", None)
             if callable(validator_fn):
                 validator_fn()
@@ -198,8 +216,8 @@ class BaseSchema:
         cls._sql_create_table = str(CreateTable(table, if_not_exists=True).compile(dialect=dialect_obj))
         return cls._sql_create_table
 
-    @staticmethod
-    def generate_date(date_value: str = None) -> datetime:
+    @classmethod
+    def generate_date(cls, date_value: str = None) -> datetime:
         from pyonir.core.utils import deserialize_datestr
         return deserialize_datestr(date_value or datetime.now())
 

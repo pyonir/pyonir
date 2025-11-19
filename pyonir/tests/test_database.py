@@ -16,7 +16,7 @@ class MockUser(BaseSchema, table_name='pyonir_users', primary_key='uid', foreign
     username: str
     email: str
     uid: str = BaseSchema.generate_id
-    role: MockRole = lambda _: MockRole(value="pythonista")
+    role: MockRole = lambda: MockRole(value="pythonista")
 
 
 class MockDataService(DatabaseService):

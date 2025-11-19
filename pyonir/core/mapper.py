@@ -1,3 +1,4 @@
+import os
 from dataclasses import is_dataclass
 from datetime import datetime
 from enum import EnumType
@@ -7,7 +8,7 @@ from collections.abc import Iterable as ABCIterable, Mapping as ABCMapping, Gene
 
 from sqlmodel import SQLModel
 
-from pyonir.core.parser import DeserializeFile
+from pyonir.core.parser import DeserializeFile, LOOKUP_DATA_PREFIX
 from pyonir.core.schemas import GenericQueryModel
 from pyonir.core.utils import get_attr, deserialize_datestr
 
@@ -114,7 +115,7 @@ is_sqlmodel = lambda t: isinstance(t, type) and issubclass(t, SQLModel)
 def func_request_mapper(func: Callable, pyonir_request: 'BaseRequest') -> dict:
     """Map request data to function parameters"""
     from pyonir import PyonirRequest
-    from pyonir import PyonirApp
+    from pyonir import Pyonir
     from pyonir.core import Auth
     import inspect
     # param_type_map = collect_type_hints(func)
@@ -135,8 +136,8 @@ def func_request_mapper(func: Callable, pyonir_request: 'BaseRequest') -> dict:
         default = (
             param.default if param.default is not inspect.Parameter.empty else None
         )
-        if param_type in (PyonirApp, PyonirRequest):
-            param_value = pyonir_request.app if param_type == PyonirApp else pyonir_request
+        if param_type in (Pyonir, PyonirRequest):
+            param_value = pyonir_request.app if param_type == Pyonir else pyonir_request
         elif issubclass(param_type, Auth):
             param_value = param_type(pyonir_request, pyonir_request.app)
         else:
@@ -146,7 +147,12 @@ def func_request_mapper(func: Callable, pyonir_request: 'BaseRequest') -> dict:
 
     return cls_args
 
-def coerce_value_to_type(value: Any, target_type: Union[type, Tuple[type]], default_factory: Callable = None) -> Any:
+def lookup_fk(value: str, data_dir: str, app_ctx: list):
+    _, _, has_lookup = value.partition(LOOKUP_DATA_PREFIX+'/') if isinstance(value, str) else [None,None,None]
+    value = DeserializeFile(os.path.join(data_dir, has_lookup), app_ctx=app_ctx) if has_lookup else value
+    return value
+
+def coerce_value_to_type(value: Any, target_type: Union[type, Tuple[type]], factory_fn: Callable = None) -> Any:
     """Coerce a value to the specified target type."""
     is_nullable = is_optional_type(target_type)
     actual_type, map_key_type, union_types = unwrap_optional(target_type) if not isinstance(target_type, tuple) else (None,None, target_type)
@@ -163,40 +169,43 @@ def coerce_value_to_type(value: Any, target_type: Union[type, Tuple[type]], defa
             has_type = type(value) in union_types
             _value = value if has_type else coerce_unions(union_types, value)
         return _value
-
+    # try:
     if isinstance(value, actual_type):
         return value
-    elif value is None and callable(default_factory):
-        return default_factory()
-    elif value is None and is_sqlmodel_field(default_factory):
-        return default_factory.default_factory()
-    elif is_scalar_type(actual_type):
-        return actual_type(value)
+    # except TypeError:
+    #     raise
+    if value is None and callable(factory_fn):
+        return factory_fn()
+    elif value is None and is_sqlmodel_field(factory_fn):
+        return factory_fn.default_factory()
+    elif value is not None and is_scalar_type(actual_type):
+        return actual_type(value) #if isinstance(value, actual_type) else value
     elif issubclass(actual_type, datetime):
         return deserialize_datestr(value)
-    elif is_callable_type(actual_type) or callable(value):
-        return value
     elif is_custom_class(actual_type):
         return cls_mapper(value, actual_type)
     else:
-        try:
-            return actual_type(value)
-        except Exception as e:
-            return value
+        return value
 
-def cls_mapper(file_obj: Union[dict, DeserializeFile], cls: Union['BaseSchema', type]):
+def cls_mapper(file_obj: Union[dict, DeserializeFile], cls: Union['BaseSchema', type], is_fk: bool = False) -> object:
     """Recursively map dict-like input into `cls` with type-safe field mapping."""
     from pyonir.core.schemas import BaseSchema
+    from pyonir import Site
+    app_ctx = Site.app_ctx if Site else []
+    data_dir = Site.datastore_dirpath if Site else ''
 
     if hasattr(cls, '__skip_parsely_deserialization__'):
         return file_obj
+    if is_fk and isinstance(file_obj, str):
+        file_obj = lookup_fk(file_obj, data_dir, app_ctx)
+        return cls_mapper(file_obj, cls)
     is_generic = isinstance(cls, GenericQueryModel)
     is_base = issubclass(cls, BaseSchema) if not is_generic else False
     cls_ins = cls() if is_base else {}
     field_hints = cls.__fields__ if is_base or is_generic else [(k,v) for k,v in collect_type_hints(cls).items()]
     alias_keymap = cls.__alias__ if hasattr(cls, '__alias__') else {}
     is_frozen = cls.__frozen__ if hasattr(cls, '__frozen__') else False
-
+    fks = getattr(cls, '__foreign_keys__', set())
     # normalize data source
     mapper_key = getattr(cls, '__nested_field__', None)
     data = get_attr(file_obj, mapper_key or 'data') or {}
@@ -211,6 +220,10 @@ def cls_mapper(file_obj: Union[dict, DeserializeFile], cls: Union['BaseSchema', 
         for ds in (data, file_obj, cls):
             value = get_attr(ds, name_alias or name)
             if value is not None: break
+
+        if (name, hint) in fks:
+            value = lookup_fk(value, data_dir, app_ctx)
+
         if value is None:
             set_attr(cls_ins, name, value)
             continue
@@ -222,7 +235,7 @@ def cls_mapper(file_obj: Union[dict, DeserializeFile], cls: Union['BaseSchema', 
             fn_factory = (value if callable(value) or is_sqlmodel_field(value) else None)
             if fn_factory:
                 value = None
-            value = coerce_value_to_type(value, hint, default_factory=fn_factory)
+            value = coerce_value_to_type(value, hint, factory_fn=fn_factory)
         set_attr(cls_ins, name, value)
         processed.add(name)
     if is_generic:

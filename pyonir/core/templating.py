@@ -3,12 +3,11 @@ from dataclasses import dataclass
 from typing import Optional, Dict
 
 from jinja2 import Environment
-from pyonir.core.app import BaseApp
 
 
 class TemplateEnvironment(Environment):
 
-    def __init__(self, app: BaseApp):
+    def __init__(self, app: 'BaseApp'):
         if not os.path.exists(app.frontend_dirpath) and app.use_themes:
             raise ValueError(f"Frontend directory {app.frontend_dirpath} does not exist. Please ensure the frontend directory is set up correctly.")
         from jinja2 import FileSystemLoader, ChoiceLoader
@@ -130,6 +129,8 @@ class PyonirThemes:
     def query_themes(self) -> Optional[Dict[str, Theme]]:
         """Returns a collection of available themes within the frontend/themes directory"""
         from pyonir import Site
+        from pyonir.core.app import BaseApp
+
         themes_map = {}
         for theme_dir in os.listdir(self.themes_dirpath):
             if theme_dir.startswith(BaseApp.IGNORE_WITH_PREFIXES): continue

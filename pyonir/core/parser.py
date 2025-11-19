@@ -23,7 +23,7 @@ LOOKUP_DATA_PREFIX = '$data'
 FILTER_KEY = '@filter'
 
 # Global cache
-EmbeddedTypes: Dict[str, Any] = {}
+FileCache: Dict[str, Any] = {}
 
 
 class FileStatuses(str):
@@ -42,15 +42,25 @@ class FileStatuses(str):
 
 class DeserializeFile:
     """Context for parsely file processing"""
-    _virtual_route_filename = '.virtual_routes.md'
-    _routes_dirname = "pages"
+    _virtual_route_filename: str = '.virtual_routes.md'
+    _routes_dirname: str = "pages"
     """Directory name that contains page files served as file based routing"""
+    _invalidate_cache: bool = False
+    """Flag to invalidate file cache on next access"""
+
+    def __new__(cls, *args, **kwargs):
+        file_path = args[0] if args else kwargs.get('file_path')
+        if file_path and FileCache.get(file_path):
+            return FileCache.get(file_path)
+        return super().__new__(cls)
 
     def __init__(self,
                 file_path: str,
                 app_ctx: "AppCtx" = None,
                 model: object = None,
                 text_string: str = None):
+        # print(f"__init__ skipped for file_path: {file_path} (already initialized)")
+        if FileCache.get(file_path): return
         name, ext = os.path.splitext(os.path.basename(file_path))
         self.app_ctx = app_ctx
         self._blob_keys = []
@@ -66,7 +76,8 @@ class DeserializeFile:
         self.file_lines = None
         self.file_line_count = None
         self.data: Dict = {}
-
+        self.is_virtual_route = None
+        self.is_page = None
         # Page specific attributes
         if not self.text_string:
             ctx_name, ctx_url, contents_dirpath, ssg_path, datastore_path = app_ctx or ("", "", "", "", "",)
@@ -106,6 +117,10 @@ class DeserializeFile:
         self.deserializer()
         # Post-processing
         self.apply_filters()
+
+        # if self.file_exists and self.is_page:
+        #     # Cache object
+        #     FileCache[self.file_path] = self
 
     def apply_filters(self):
         """Applies filter methods to data attributes"""
@@ -483,7 +498,7 @@ def process_lookups(value_str: str, file_ctx: DeserializeFile = None) -> Optiona
 
     def parse_ref_to_files(filepath, as_dir=0):
         from pyonir.core.database import BaseFSQuery, DeserializeFile
-        from pyonir.core.utils import get_attr, import_module, parse_query_model_to_object
+        from pyonir.core.utils import get_attr, import_module
         from pyonir.core.schemas import GenericQueryModel
 
         if as_dir:
@@ -499,7 +514,7 @@ def process_lookups(value_str: str, file_ctx: DeserializeFile = None) -> Optiona
                     model = import_module(pkg, callable_name=mod)
                 if not model:
                     model = GenericQueryModel(generic_model_properties)
-                    # model = parse_query_model_to_object(generic_model_properties)
+
             collection = BaseFSQuery(filepath, app_ctx=app_ctx,
                                   model=model,
                                   exclude_names=(file_name, 'index.md'),
@@ -511,7 +526,6 @@ def process_lookups(value_str: str, file_ctx: DeserializeFile = None) -> Optiona
             data = get_attr(p, rtn_key) or p
         return data
 
-    raw_value = value_str.strip()
     value_str = value_str.strip()
     has_lookup = value_str.startswith((LOOKUP_DIR_PREFIX, LOOKUP_DATA_PREFIX))
 
@@ -529,10 +543,7 @@ def process_lookups(value_str: str, file_ctx: DeserializeFile = None) -> Optiona
         value_str = value_str.replace('../', '').replace('/*', '')
         lookup_fpath = os.path.join(base_path, *value_str.split("/"))
         if not os.path.exists(lookup_fpath):
-            print({
-                'ISSUE': f'FileNotFound while processing {raw_value}',
-                'SOLUTION': f'Make sure the `{lookup_fpath}` file exists. Note that only valid md and json files can be processed.'
-            })
+            print(f"[DEBUG] FileNotFoundError: {lookup_fpath}")
             return None
         return parse_ref_to_files(lookup_fpath, os.path.isdir(lookup_fpath))
     return value_str
@@ -559,8 +570,8 @@ def deserialize_line(line_value: str, container_type: Any = None, file_ctx: Dese
         v = parse_line(line_value)
         return group_tuples_to_objects([v], parent_container=dict())
 
-    if EmbeddedTypes.get(line_value):
-        return EmbeddedTypes.get(line_value)
+    if FileCache.get(line_value):
+        return FileCache.get(line_value)
     is_num = is_num(line_value)
     if is_num != 'NAN':
         return is_num
@@ -747,5 +758,5 @@ def process_lines(file_lines: list[str], cursor: int = 0, data_container: Dict[s
 
         # Cache the $ check
         if line_key and line_key[0] == '$':
-            EmbeddedTypes[line_key] = line_value
+            FileCache[line_key] = line_value
     return data_container

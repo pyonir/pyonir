@@ -1,6 +1,6 @@
 import json
 
-from pyonir import PyonirRequest, PyonirApp
+from pyonir import PyonirRequest, Pyonir
 from pyonir.tests.backend.models.email_subscriber import EmailSubscriber
 from starlette.websockets import WebSocketState, WebSocket
 from typing import AsyncGenerator
@@ -29,7 +29,7 @@ async def some_route(name: str = 'pyonir'):
 
 class DemoService:
 
-    def __init__(self, app: PyonirApp):
+    def __init__(self, app: Pyonir):
         self.items = ['python','javascript']
         self.app = app
 

@@ -3,7 +3,6 @@ import json
 import yaml
 import toml
 from pyonir.core.parser import DeserializeFile, serializer
-from pyonir.core.parsely import process_lines
 import time
 
 data = {
@@ -35,9 +34,9 @@ toml_str = toml.dumps(data)
 dlines = data_str.strip().splitlines()
 COUNT = 10000
 
-def parsely_loop():
-    for _ in range(COUNT):
-        process_lines(dlines, cursor=0, data_container={})
+# def parsely_loop():
+#     for _ in range(COUNT):
+#         process_lines(dlines, cursor=0, data_container={})
 
 def toml_loop():
     for _ in range(COUNT):
@@ -64,7 +63,6 @@ def print_metrics(func):
     print(f"{name} peak memory usage: {max(mem_usage):.2f} MiB\n\n")
 
 if __name__ == "__main__":
-    print_metrics(parsely_loop)
-    # print_metrics(deser_loop)
+    print_metrics(deser_loop)
     print_metrics(json_loop)
     print_metrics(yaml_loop)

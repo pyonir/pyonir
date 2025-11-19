@@ -203,7 +203,8 @@ class User(BaseSchema):
         request.server_request.session[key or 'user'] = value or self.id
 
     @staticmethod
-    def map_to_role(role_value: str) -> 'Role':
+    def map_to_role(role_value: str) -> Role:
         """Maps a string role value to a Role instance"""
-        r = getattr(Roles, role_value.upper(), None)
+        if isinstance(role_value, Role): return role_value
+        r = getattr(Roles, str(role_value).upper(), None)
         return Role(name=role_value, perms=[]) if r is None else r

@@ -71,7 +71,6 @@ class BaseSchema:
 
     def __init__(self, **data):
         from pyonir.core.mapper import coerce_value_to_type, cls_mapper
-
         for field_name, field_type in self.__fields__:
             value = data.get(field_name)
             if data:
@@ -82,6 +81,10 @@ class BaseSchema:
                 else:
                     value = coerce_value_to_type(value, field_type, factory_fn=type_factory) if value or type_factory else None
             setattr(self, field_name, value)
+
+        self._errors = []
+        self.validate_fields()
+        self._after_init()
 
     def is_valid(self) -> bool:
         """Returns True if there are no validation errors."""
@@ -161,6 +164,10 @@ class BaseSchema:
         """Returns a JSON serializable dictionary"""
         import json
         return json.dumps(self.to_dict(obfuscate))
+
+    def _after_init(self):
+        """Hook for additional initialization in subclasses."""
+        pass
 
     @classmethod
     def from_file(cls: Type[T], file_path: str, app_ctx=None) -> T:

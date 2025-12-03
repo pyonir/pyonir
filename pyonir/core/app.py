@@ -704,7 +704,6 @@ class BaseApp(Base):
         try:
             self.apply_globals()
             self.install_sys_plugins()
-            # self.collect_virtual_routes()
             site_map_path = os.path.join(self.ssg_dirpath, 'sitemap.xml')
             print(f"{PrntColrs.OKCYAN}3. Generating Static Pages")
 
@@ -714,11 +713,13 @@ class BaseApp(Base):
 
             all_pages: Generator[DeserializeFile] = query_fs(self.pages_dirpath, app_ctx=self.app_ctx, model='file')
             xmls = []
+            virtual_file = ssg_req.fetch_virtual_route(self, url='')
+            del virtual_file.data['url']
+            del virtual_file.data['slug']
             for pgfile in all_pages:
-                virtual_data, path_params, *rest = self.server.get_virtual(pgfile.data.get('url'))
-                if path_params: ssg_req.ssg_request(pgfile, path_params)
+                if virtual_file: ssg_req.ssg_request(pgfile, virtual_file.data)
                 try:
-                    pgfile.data.update(path_params or {})
+                    pgfile.data.update(virtual_file.data or {})
                     pgfile.apply_filters()
                 except Exception as e:
                     raise

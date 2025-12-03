@@ -76,7 +76,7 @@ def process_contents(path, app_ctx=None, file_model: any = None) -> object:
         name = getattr(pg, 'file_name')
         # pg_obj = type(name, (object,), {"__name__": name, 'file_path': pg.file_path})
         # val = cls_mapper(pg, pg_obj)
-        setattr(res, name, pg.to_named_tuple())
+        setattr(res, name, pg.to_named_tuple() if hasattr(pg, 'to_named_tuple') else pg)
     return res
 
 def json_serial(obj):

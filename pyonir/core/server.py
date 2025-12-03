@@ -471,7 +471,7 @@ class BaseServer(Starlette):
 
     def get_virtual(self, url: str, virtual_data: dict = None) -> Union[tuple[str, dict, dict], tuple[None, None, None]]:
         """Performs url pattern matching against virtual routes and returns vitual page data and new path parameter values."""
-        for vurl, vdata in (virtual_data).items():
+        for vurl, vdata in (virtual_data or {}).items():
             has_match = self.matching_route(url, vurl)
             if has_match:
                 return vurl, vdata, has_match

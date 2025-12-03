@@ -11,8 +11,11 @@ from pyonir.core.server import BaseRequest, BaseApp, BaseRestResponse
 from pyonir.core.user import User, Role, PermissionLevel, Roles, UserSignIn
 
 
+INVALID_EMAIL_MESSAGE: str = "Invalid email address format"
+INVALID_PASSWORD_MESSAGE: str = "Incorrect password"
 class UserCredentials(BaseSchema):
     """Represents user credentials for login"""
+
     email: str = ''
     """User's email address is required for login"""
 
@@ -31,20 +34,16 @@ class UserCredentials(BaseSchema):
     def validate_email(self):
         """Validates the email format"""
         import re
-        if not self.email:
-            self._errors.append("Email cannot be empty")
-        if not re.match(r"[^@]+@[^@]+\.[^@]+", self.email):
-            self._errors.append(f"Invalid email address: {self.email}")
+        if not self.email or not re.match(r"[^@]+@[^@]+\.[^@]+", self.email):
+            self._errors.append(INVALID_EMAIL_MESSAGE)
 
     def validate_password(self):
         """Validates the password for login"""
-        if not self.password:
-            self._errors.append("Password cannot be empty")
-        elif len(self.password) < 6:
-            self._errors.append("Password must be at least 6 characters long")
+        if not self.password or len(self.password) < 6:
+            self._errors.append(INVALID_PASSWORD_MESSAGE)
 
     @classmethod
-    def from_request(cls, request: PyonirRequest) -> 'UserCredentials':
+    def from_request(cls, request: BaseRequest) -> 'UserCredentials':
         """New sign in user"""
         email = request.form.get('email')
         password = request.form.get('password')

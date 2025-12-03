@@ -23,7 +23,7 @@ class BaseSchema:
     __frozen__ = bool()
     __foreign_keys__: Set[Any] = None
     _sql_create_table: Optional[str] = None
-    _errors: list[dict[str, Any]]
+    _errors: list[str]
     _private_keys: Optional[list[str]]
     _foreign_key_names: set[str]
 

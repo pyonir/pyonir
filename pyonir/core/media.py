@@ -9,6 +9,12 @@ from pyonir import PyonirRequest
 from pyonir.core.database import BaseFSQuery
 
 from enum import Enum, unique
+import base64
+from io import BytesIO
+from PIL import Image
+
+ALLOWED_FORMATS = {"PNG", "JPEG", "WEBP"}
+MAX_BYTES = 5 * 1024 * 1024  # 5 MB limit
 
 @unique
 class AudioFormat(Enum):
@@ -47,6 +53,16 @@ class ImageFormat(Enum):
 
     def __str__(self):
         return self.value
+
+    def __contains__(self, item):
+        """Allow checks like `'png' in ImageFormat` or `ImageFormat.PNG in ImageFormat`."""
+        if isinstance(item, ImageFormat):
+            return True
+        if isinstance(item, str):
+            v = item.lower()
+            return any(v == member.value or v == member.name.lower() for member in ImageFormat)
+        return False
+
 
 def sanitize_filename(filename: str) -> str:
     """
@@ -453,6 +469,42 @@ class MediaManager:
             while chunk := await file.read(1024 * 1024):  # 1MB chunks
                 buffer.write(chunk)
         return path
+
+    def _save_base64(data_url: str, path: str):
+        # 1. Validate prefix
+        if not data_url.startswith("data:image/") or ";base64," not in data_url:
+            raise ValueError("Invalid data URL")
+
+        header, encoded = data_url.split(",", 1)
+
+        # 2. Decode base64 safely
+        try:
+            raw = base64.b64decode(encoded, validate=True)
+        except Exception:
+            raise ValueError("Invalid base64 data")
+
+        # 3. Enforce size limit
+        if len(raw) > MAX_BYTES:
+            raise ValueError("Image exceeds max allowed size")
+
+        # 4. Load with Pillow (ensures it’s actually an image)
+        try:
+            img = Image.open(BytesIO(raw))
+            img.verify()  # verifies integrity without decoding full image
+        except Exception:
+            raise ValueError("Decoded data is not a valid image")
+
+        # 5. Check allowed formats
+        if img.format not in ImageFormat:
+            raise ValueError(f"Unsupported format: {img.format}")
+
+        # 6. Reload (Pillow requires re-open after verify())
+        img = Image.open(BytesIO(raw))
+
+        # 7. Save to file safely
+        img.save(path)
+
+        return True
 
     @staticmethod
     def media_type(ext: str) -> Optional[str]:

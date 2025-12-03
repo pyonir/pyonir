@@ -5,7 +5,7 @@ from pyonir import PyonirRequest, Pyonir
 
 @dataclass
 class Menu:
-    __nested_field__ = 'menu'
+    __nested_field__ = 'data.menu'
     url: str
     slug: str = ''
     name: str = ''

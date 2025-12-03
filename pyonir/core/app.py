@@ -325,8 +325,8 @@ class Base:
 class BasePlugin(Base):
 
     def __init__(self, app, parent):
-        from pyonir import PyonirApp
-        self.app: PyonirApp = app
+        from pyonir import Pyonir
+        self.app: Pyonir = app
         self.name: str = parent.__class__.__name__.lower()
 
     @property

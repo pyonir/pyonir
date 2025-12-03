@@ -1,6 +1,6 @@
 import os
 
-from pyonir.core.auth import TaskAuthorities
+from pyonir.core.auth import TaskAuthorities, UserCredentials, INVALID_EMAIL_MESSAGE, INVALID_PASSWORD_MESSAGE
 
 from pyonir.core.user import User, UserMeta, Roles, UserSignIn
 
@@ -11,6 +11,13 @@ valid_credentials = {
 }
 admin = User(role=Roles.ADMIN)
 TaskAuthorities.MOCK_ACTION = TaskAuthorities.create_authority("MOCK_ACTION", [Roles.ADMIN, Roles.SUPER])
+
+def test_user_credentials():
+    """Test user creation with credentials"""
+    user = UserCredentials(name=None, password="securepass")
+    for msg in user._errors:
+        print("Error:", msg)
+        assert msg == INVALID_EMAIL_MESSAGE
 
 def test_user_from_dict():
     """Test loading user from dict"""

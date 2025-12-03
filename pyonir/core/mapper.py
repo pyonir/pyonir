@@ -207,8 +207,9 @@ def cls_mapper(file_obj: Union[dict, DeserializeFile], cls: Union['BaseSchema', 
     is_frozen = cls.__frozen__ if hasattr(cls, '__frozen__') else False
     fks = getattr(cls, '__foreign_keys__', set())
     # normalize data source
-    mapper_key = getattr(cls, '__nested_field__', None)
-    data = get_attr(file_obj, mapper_key or 'data') or {}
+    nested_key = getattr(cls, '__nested_field__', None)
+    nested_data = get_attr(file_obj, nested_key) or {}
+    data = get_attr(file_obj, 'data') or {}
 
     # assign primary fields
     processed = set()
@@ -217,7 +218,7 @@ def cls_mapper(file_obj: Union[dict, DeserializeFile], cls: Union['BaseSchema', 
             continue
         name_alias = get_attr(alias_keymap, name, None)
         # access untyped value from data, file_obj, cls (in that order)
-        for ds in (data, file_obj, cls):
+        for ds in (nested_data, data, file_obj, cls):
             value = get_attr(ds, name_alias or name)
             if value is not None: break
 

@@ -1,23 +1,23 @@
 from __future__ import annotations
 
-import os, re
+import os, re, base64
+from io import BytesIO
+from PIL import Image
 from dataclasses import dataclass
-from typing import Optional, Union, Generator
+from typing import Optional, Union, Generator, Tuple
+
+from PIL.ImageFile import ImageFile
 from starlette.datastructures import UploadFile
 
 from pyonir import PyonirRequest
 from pyonir.core.database import BaseFSQuery
-
-from enum import Enum, unique
-import base64
-from io import BytesIO
-from PIL import Image
+from pyonir.pyonir_types import BaseEnum
 
 ALLOWED_FORMATS = {"PNG", "JPEG", "WEBP"}
 MAX_BYTES = 5 * 1024 * 1024  # 5 MB limit
 
-@unique
-class AudioFormat(Enum):
+
+class AudioFormat(BaseEnum):
     MP3  = "mp3"
     WAV  = "wav"
     FLAC = "flac"
@@ -25,11 +25,7 @@ class AudioFormat(Enum):
     OGG  = "ogg"
     M4A  = "m4a"
 
-    def __str__(self):
-        return self.value
-
-@unique
-class VideoFormat(Enum):
+class VideoFormat(BaseEnum):
     MP4  = "mp4"
     MKV  = "mkv"
     AVI  = "avi"
@@ -37,11 +33,7 @@ class VideoFormat(Enum):
     WEBM = "webm"
     FLV  = "flv"
 
-    def __str__(self):
-        return self.value
-
-@unique
-class ImageFormat(Enum):
+class ImageFormat(BaseEnum):
     JPG   = "jpg"
     JPEG  = "jpeg"
     PNG   = "png"
@@ -50,18 +42,6 @@ class ImageFormat(Enum):
     TIFF  = "tiff"
     WEBP  = "webp"
     SVG   = "svg"
-
-    def __str__(self):
-        return self.value
-
-    def __contains__(self, item):
-        """Allow checks like `'png' in ImageFormat` or `ImageFormat.PNG in ImageFormat`."""
-        if isinstance(item, ImageFormat):
-            return True
-        if isinstance(item, str):
-            v = item.lower()
-            return any(v == member.value or v == member.name.lower() for member in ImageFormat)
-        return False
 
 
 def sanitize_filename(filename: str) -> str:
@@ -356,6 +336,8 @@ class BaseMedia:
 @dataclass
 class UploadOptions:
     """Options for uploading media files."""
+    directory_path: str = ''
+    """Directory path to save uploads"""
     directory_name: str = ''
     """Directory name to save the uploaded file."""
     file_name: str = ''
@@ -367,6 +349,10 @@ class UploadOptions:
     compress_quality: int = 55
     """Quality for image compression (1-100)."""
     dimensions: tuple = (256, 256)
+    """Upload dimensions for files being saved"""
+    from_base64: bool = False
+    """Indicates when uploaded files are in base64 format"""
+
 
 class MediaManager:
     """Manage audio, video, and image documents."""
@@ -434,7 +420,7 @@ class MediaManager:
         :param upload_options: upload config options
         :param request: PyonirRequest instance
         """
-        resource_files = []
+        resource_files: list[BaseMedia] = []
         file_name = upload_options.file_name if upload_options else None
         limit = upload_options.limit if upload_options else None
         directory_name = upload_options.directory_name if upload_options else None
@@ -446,13 +432,36 @@ class MediaManager:
             if limit and series_index > limit: break
             if file_name:
                 file.filename = f"{file_name}_{series_index}" if as_series else file_name
-            # directory_name = directory_name or BaseMedia.media_type(file.filename.split('.').pop())
             media_file: str = await self._upload_bytes(file, directory_name=directory_name)
             if media_file:
                 file_media = BaseMedia(path=media_file)
                 file_media.compress(quality=compress_quality)
                 resource_files.append(file_media)
         return resource_files
+
+    def upload_base64(self, base64imgs: Tuple[str, str], upload_options: UploadOptions):
+        """Save base64 images to file system"""
+        from pathlib import Path
+
+        series_name = upload_options.file_name if upload_options else None
+        limit = upload_options.limit if upload_options else None
+        directory_name = upload_options.directory_name if upload_options else None
+        as_series = upload_options.as_series if upload_options else False
+        compress_quality = upload_options.compress_quality if upload_options else None
+        uploaded_files: list[BaseMedia] = []
+
+        for name, base64img in base64imgs:
+            series_index = len(uploaded_files) + 1
+            if limit and series_index > limit: break
+            if series_name:
+                name = f"{series_name}_{series_index}" if as_series else name
+            path = os.path.join(self.storage_dirpath, directory_name, name)
+            Path(os.path.dirname(path)).mkdir(parents=True, exist_ok=True)
+            path = self._save_base64(base64img, path=path)
+            file_media = BaseMedia(path=path)
+            file_media.compress(quality=compress_quality)
+            uploaded_files.append(file_media)
+        return uploaded_files
 
     async def _upload_bytes(self, file: UploadFile, directory_name: str = None) -> Optional[str]:
         """
@@ -470,7 +479,8 @@ class MediaManager:
                 buffer.write(chunk)
         return path
 
-    def _save_base64(data_url: str, path: str):
+    @staticmethod
+    def _normalize_base64_string(data_url: str) -> ImageFile:
         # 1. Validate prefix
         if not data_url.startswith("data:image/") or ";base64," not in data_url:
             raise ValueError("Invalid data URL")
@@ -483,11 +493,9 @@ class MediaManager:
         except Exception:
             raise ValueError("Invalid base64 data")
 
-        # 3. Enforce size limit
-        if len(raw) > MAX_BYTES:
-            raise ValueError("Image exceeds max allowed size")
-
-        # 4. Load with Pillow (ensures it’s actually an image)
+        # # 3. Enforce size limit
+        # if len(raw) > MAX_BYTES:
+        #     raise ValueError("Image exceeds max allowed size")
         try:
             img = Image.open(BytesIO(raw))
             img.verify()  # verifies integrity without decoding full image
@@ -495,16 +503,18 @@ class MediaManager:
             raise ValueError("Decoded data is not a valid image")
 
         # 5. Check allowed formats
-        if img.format not in ImageFormat:
+        if not ImageFormat.contains(img.format):
             raise ValueError(f"Unsupported format: {img.format}")
 
-        # 6. Reload (Pillow requires re-open after verify())
-        img = Image.open(BytesIO(raw))
+        # Reload (Pillow requires re-open after verify())
+        return Image.open(BytesIO(raw))
 
-        # 7. Save to file safely
+    @staticmethod
+    def _save_base64(data_url: str, path: str) -> str:
+        img = MediaManager._normalize_base64_string(data_url)
+        path = f'{path}.{img.format.lower()}'
         img.save(path)
-
-        return True
+        return path
 
     @staticmethod
     def media_type(ext: str) -> Optional[str]:

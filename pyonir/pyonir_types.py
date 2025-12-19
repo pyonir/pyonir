@@ -1,3 +1,4 @@
+from enum import unique, Enum
 from typing import Optional, Callable, List, Tuple
 from pyonir.core.templating import TemplateEnvironment, PyonirThemes, Theme
 
@@ -75,3 +76,18 @@ class PyonirHooks(str):
     AFTER_INIT = 'AFTER_INIT'
     ON_REQUEST = 'ON_REQUEST'
     ON_PARSELY_COMPLETE = 'ON_PARSELY_COMPLETE'
+
+@unique
+class BaseEnum(Enum):
+    def __str__(self):
+        return self.value
+
+    @classmethod
+    def contains(cls, item: str) -> bool:
+        if not isinstance(item, str):
+            return False
+        item = item.lower()
+        return any(
+            item == member.value or item == member.name.lower()
+            for member in cls
+        )

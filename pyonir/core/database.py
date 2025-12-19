@@ -21,7 +21,7 @@ class BasePagination:
     limit: int = 0
     max_count: int = 0
     curr_page: int = 0
-    page_nums: list[int, int] = field(default_factory=list)
+    page_nums: list[int] = field(default_factory=list)
     items: list[DeserializeFile] = field(default_factory=list)
 
     def __iter__(self) -> Iterator[DeserializeFile]:
@@ -251,7 +251,8 @@ class DatabaseService(ABC):
             cursor = self.connection.cursor()
             cursor.execute(query, values)
             self.connection.commit()
-            return getattr(entity, entity.__primary_key__) if hasattr(entity,'__primary_key__') else cursor.lastrowid
+            primary_id_value = getattr(entity, get_attr(entity,'__primary_key__'), None)
+            return cursor.lastrowid if primary_id_value is None else primary_id_value
 
         elif self.driver == "fs":
             # Save JSON file per record
@@ -380,7 +381,7 @@ class BaseFSQuery:
 
         return value if self.order_dir == "asc" else _invert(value)
 
-    def paginated_collection(self)-> Optional[BasePagination]:
+    def paginated_collection(self, reverse=True)-> BasePagination:
         """Paginates a list into smaller segments based on curr_pg and display limit"""
         from sortedcontainers import SortedList
 
@@ -396,7 +397,7 @@ class BaseFSQuery:
         start = (page_num * self.limit) - self.limit
         end = (self.limit * page_num)
         pg = (self.max_count // self.limit) + (self.max_count % self.limit > 0) if self.limit > 0 else 0
-        pag_data = self.paginate(start=start, end=end, reverse=True) if not force_all else self.sorted_files
+        pag_data = self.paginate(start=start, end=end, reverse=reverse) if not force_all else self.sorted_files
 
         return BasePagination(
             curr_page = page_num,

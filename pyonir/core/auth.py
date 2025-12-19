@@ -508,6 +508,7 @@ class Auth:
             user = self.user_model(name=self.user_creds.email.split('@')[0], password=hashed_password, auth_token=user_token, meta={'email': self.user_creds.email})
         uid = generate_id(from_email=user.meta.email, salt=self.app.salt)
         user_profile_path = os.path.join(self.app.datastore_dirpath, 'users', uid, 'profile.json')
+        user_avatar_path = os.path.join(self.app.datastore_dirpath, 'users', uid, 'static','avatar.jpg')
         user.uid = uid
         user.file_path = user_profile_path
         user.file_dirpath = os.path.dirname(user_profile_path)
@@ -516,6 +517,8 @@ class Auth:
             return None
 
         created = user.save_to_file(user_profile_path)
+        if user and user.auth_from=='oauth2' and user.avatar:
+            self.save_avatar_from_url(user.avatar, user_avatar_path)
         if created:
             formated_msg = self.responses.SUCCESS.message.format(user=user, request=self.request)
             self.response = self.responses.SUCCESS.response(formated_msg)
@@ -632,6 +635,19 @@ class Auth:
             self.session.clear()
         except Exception as e:
             print(f"{__name__} method - {str(e)}: {type(e).__name__}")
+
+    @staticmethod
+    def save_avatar_from_url(url: str, output_path: str):
+        import requests
+        response = requests.get(url, stream=True)
+
+        if response.status_code == 200:
+            with open(output_path, "wb") as file:
+                for chunk in response.iter_content(1024):
+                    file.write(chunk)
+            print(f"Avatar saved to {output_path}")
+        else:
+            print("Failed to download image:", response.status_code)
 
     @staticmethod
     def verify_password(encrypted_pwd, input_password) -> bool:

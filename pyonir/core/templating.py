@@ -19,6 +19,7 @@ class TemplateEnvironment(Environment):
         app_extensions = [AssetsExtension, *installed_extensions]
         jinja_template_paths = ChoiceLoader([FileSystemLoader(app.frontend_templates_dirpath), FileSystemLoader(PYONIR_JINJA_TEMPLATES_DIRPATH)])
         super().__init__(loader=jinja_template_paths, extensions=app_extensions)
+        self._app = app
 
         #  Custom filters
         sys_filters = load_modules_from(PYONIR_JINJA_FILTERS_DIRPATH)
@@ -26,17 +27,21 @@ class TemplateEnvironment(Environment):
         app_filters = {**sys_filters, **app_filters}
         self.filters.update(**app_filters)
 
-        def url_for(path):
-            rmaps = app.server.url_map if app.server else {}
-            return rmaps.get(path, {}).get('path', '/'+path)
+        # def url_for(path):
+        #     rmaps = app.server.url_map if app.server else {}
+        #     return rmaps.get(path, {}).get('path', '/'+path)
 
         # Include globals
-        self.globals['url_for'] = url_for
+        self.globals['url_for'] = self.url_for
         self.globals['request'] = None
         self.globals['user'] = None
         self.globals['get_request'] = lambda: app.server.request
         self.globals['get_active_user'] = lambda: app.server.request.auth.user
         self.globals["render_component"] = self.render_component
+
+    def url_for(self, route_name: str):
+        rmaps = self._app.server.url_map if self._app.server else {}
+        return rmaps.get(route_name, {}).get('path', '/'+route_name)
 
     def render_component(self, name: str, *args, **kwargs) -> str:
         """Render a macro from components.jinja with full Jinja context."""

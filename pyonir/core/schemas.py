@@ -142,7 +142,7 @@ class BaseSchema:
         """Convert instance to a serializable dict."""
         request.server_request.session[key or self.__class__.__name__.lower()] = value
 
-    def to_dict(self, obfuscate = True):
+    def to_dict(self, obfuscate:bool = True):
         """Dictionary representing the instance"""
 
         obfuscated = lambda attr: obfuscate and hasattr(self,'_private_keys') and attr in (self._private_keys or [])

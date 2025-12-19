@@ -1,7 +1,8 @@
 import os
 from dataclasses import dataclass
 
-from pyonir import PyonirRequest, Pyonir
+from pyonir import PyonirRequest, Pyonir, PyonirPlugin
+
 
 @dataclass
 class Menu:
@@ -24,7 +25,7 @@ class Menu:
             self.name = self.title
         pass
 
-class Navigation:
+class Navigation(PyonirPlugin):
     """Assembles a map of navigation menus based on file configurations"""
     name = 'pyonir_navigation'
 
@@ -33,8 +34,8 @@ class Navigation:
         self.menus = {}
         self.active_page = None
         self.build_navigation(app=app)
+        self.after_init(None, app)
         # include navigation template example
-        # self.register_templates([os.path.join(os.path.dirname(__file__), 'templates')])
         app.TemplateEnvironment.load_template_path(os.path.join(os.path.dirname(__file__), 'templates'))
         self.add_menus_to_environment(app)
         pass
@@ -56,6 +57,7 @@ class Navigation:
 
 
     def build_plugins_navigation(self, app: Pyonir):
+        """Scans activated plugins for pages used for navigation"""
         if app.activated_plugins:
             for plgn in app.activated_plugins:
                 if isinstance(plgn, Navigation):continue
@@ -78,7 +80,13 @@ class Navigation:
             for item in items:
                 has_menu = item.group or item.parent
                 if item.status == 'hidden' or not item.url or (not has_menu): continue
+                # add_to_site = item.group.startswith('@site.')
                 grouped[item.group].append(item)
             return dict(grouped)  # convert to plain dict if you like
         result = group_by_menu(file_list)
+        # merge menus
+        main_ref = self.menus.get(self.app.name, {})
+        for k,v in main_ref.items():
+            if result.get(k):
+                main_ref[k] += (result[k])
         self.menus[app.name] = result

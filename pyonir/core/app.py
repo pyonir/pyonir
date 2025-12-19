@@ -324,6 +324,14 @@ class Base:
 
 class BasePlugin(Base):
 
+    def after_init(self, data: any, app: BaseApp):
+        """Execute plugin after Pyonir application starts"""
+        pass
+
+    def on_request(self, request: 'BaseRequest', app: BaseApp):
+        """Executed during web request"""
+        pass
+
     def __init__(self, app, parent):
         from pyonir import Pyonir
         self.app: Pyonir = app

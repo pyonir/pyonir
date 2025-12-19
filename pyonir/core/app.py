@@ -71,7 +71,7 @@ class Base:
     @property
     def virtual_routes_filepath(self) -> Optional[str]:
         """The context virtual routes file"""
-        routes_file = os.path.join(self.pages_dirpath, '.virtual_route.md')
+        routes_file = os.path.join(self.pages_dirpath, '.virtual_routes.md')
         return routes_file if os.path.exists(routes_file) else None
 
     # DIRECTORIES

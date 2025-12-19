@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-import inspect, os
+import inspect, os, datetime
 from pyonir.core.utils import create_file
 
 gen_template = """\
+generated_on: {generated_date}
 @resolvers:
     {methods}.call: {import_method_path}
     {gen_params}
@@ -34,7 +35,9 @@ class APIGen:
                     import_method_path = f"{namespace}.{fn_name}"
                     gen_params = "\n\t".join([f"{k}: {v}" for k, v in params.items()]) if params else ""
                     file_path = os.path.join(self.app.api_dirpath,namespace, fn_name+'.md')
-                    create_file(str(file_path), gen_template.format(gen_params=gen_params, methods=method, import_method_path=import_method_path, docs=fn_docs))
+                    create_file(str(file_path), gen_template.format(
+                        generated_date=datetime.datetime.now(),
+                        gen_params=gen_params, methods=method, import_method_path=import_method_path, docs=fn_docs))
                     print(f"\t{fn_name} at {file_path}")
 
         cls.__init__ = __init__

@@ -5,7 +5,8 @@ from typing import Optional, Generator, List
 
 from pyonir.core.utils import get_attr, load_env, generate_id
 
-from pyonir.pyonir_types import PyonirThemes, EnvConfig, PyonirHooks, PyonirRoute, PyonirRouters
+from pyonir.pyonir_types import PyonirThemes, EnvConfig, PyonirHooks, PyonirRoute, PyonirRouters, \
+    VIRTUAL_ROUTES_FILENAME
 
 
 class Base:
@@ -71,7 +72,7 @@ class Base:
     @property
     def virtual_routes_filepath(self) -> Optional[str]:
         """The context virtual routes file"""
-        routes_file = os.path.join(self.pages_dirpath, '.virtual_routes.md')
+        routes_file = os.path.join(self.pages_dirpath, f'{VIRTUAL_ROUTES_FILENAME}.md')
         return routes_file if os.path.exists(routes_file) else None
 
     # DIRECTORIES
@@ -472,8 +473,8 @@ class BaseApp(Base):
 
     @property
     def is_dev(self) -> bool:
-        from pyonir.core.server import DEV_ENV
-        return getattr(self.env, 'APP_ENV') == DEV_ENV and not self.SSG_IN_PROGRESS
+        from pyonir.core.server import LOCAL_ENV
+        return getattr(self.env, 'APP_ENV') == LOCAL_ENV and not self.SSG_IN_PROGRESS
 
     @property
     def host(self) -> str:

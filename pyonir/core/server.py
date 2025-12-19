@@ -9,7 +9,7 @@ from starlette.requests import Request as StarletteRequest
 
 from pyonir.core.app import BaseApp
 from pyonir.core.parser import DeserializeFile
-from pyonir.pyonir_types import PyonirRouters, PyonirHooks, PyonirRoute
+from pyonir.pyonir_types import PyonirRouters, PyonirHooks, PyonirRoute, VIRTUAL_ROUTES_FILENAME
 from pyonir.core.utils import dict_to_class
 
 TEXT_RES: str = 'text/html'
@@ -185,7 +185,7 @@ class BaseRequest:
 
     def fetch_virtual_route(self, app: BaseApp, url: str) -> Optional[DeserializeFile]:
         """Fetches a virtual route matching the request path for the current app context"""
-        virtual_page_path = os.path.join(app.pages_dirpath, '.virtual_route') + BaseApp.EXTENSIONS['file']
+        virtual_page_path = os.path.join(app.pages_dirpath, VIRTUAL_ROUTES_FILENAME) + BaseApp.EXTENSIONS['file']
         if not os.path.exists(virtual_page_path): return None
         virtual_route = DeserializeFile(virtual_page_path, app_ctx=app.app_ctx)
         vkey, vdata, vparams = self.app.server.get_virtual(url, virtual_data=virtual_route.data)

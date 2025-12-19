@@ -6,7 +6,7 @@ TEXT_RES: str = 'text/html'
 JSON_RES: str = 'application/json'
 EVENT_RES: str = 'text/event-stream'
 PAGINATE_LIMIT: int = 6
-
+VIRTUAL_ROUTES_FILENAME: str = '.virtual_routes'
 
 # === Route Definitions ===
 PagesPath = str

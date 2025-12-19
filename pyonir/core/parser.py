@@ -2,6 +2,7 @@ import os, re, json
 from typing import Tuple, Dict, List, Any, Optional, Union
 
 from pyonir.core.utils import get_file_created, open_file, get_attr
+from pyonir.pyonir_types import VIRTUAL_ROUTES_FILENAME
 
 # Pre-compile regular expressions for better performance
 _RE_LEADING_SPACES = re.compile(r'^\s+')
@@ -42,7 +43,7 @@ class FileStatuses(str):
 
 class DeserializeFile:
     """Context for parsely file processing"""
-    _virtual_route_filename: str = '.virtual_routes.md'
+    _virtual_route_filename: str = f'{VIRTUAL_ROUTES_FILENAME}.md'
     _routes_dirname: str = "pages"
     """Directory name that contains page files served as file based routing"""
     _invalidate_cache: bool = False

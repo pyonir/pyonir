@@ -1,6 +1,6 @@
-import pyonir
+from pyonir import Pyonir
 # Instantiate pyonir application
-demo_app = pyonir.init(__file__, use_themes=True)
+demo_app = Pyonir(__file__)
 
 # Generate static website
 # demo_app.generate_static_website()

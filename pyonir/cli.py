@@ -22,7 +22,7 @@ def pyonir_new_project(args):
         os.makedirs(project_path)
         os.makedirs(os.path.join(project_path, 'frontend'))
     copy_assets(pkg_filepath, os.path.join(project_path, '__init__.py'), False)
-    copy_assets(env_filepath, os.path.join(project_path, '.env.example'), False)
+    copy_assets(env_filepath, os.path.join(project_path, '.env'), False)
     copy_assets(entry_filepath, os.path.join(project_path, 'main.py'), False)
     copy_assets(theme_readme_filepath, os.path.join(project_path, 'frontend', 'README.md'), False)
     copy_assets(backend_dirpath, os.path.join(project_path, 'backend'), False)

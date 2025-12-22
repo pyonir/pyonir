@@ -1,9 +1,9 @@
 ## File based Routes (Optional) 
 
-**Virtual routes `.routes.md`**
+**Virtual routes `.virtual_routes.md`**
 
 A virtual route generates a page from aggregated data sources, giving you greater control over the request and response.
-Just add `.routes.md` file in the `contents/pages` directory.
+Just add `.virtual_routes.md` file in the `contents/pages` directory.
 
 **JSON response** 
 

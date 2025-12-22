@@ -1,6 +1,7 @@
 @filter.md:- content
-title: Welcome to Pyonir
+title: Demo Pyonir page
 menu.group: primary
+menu.name: Home
 content:|
 # Getting Started
 

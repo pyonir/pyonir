@@ -1,7 +1,7 @@
 import os, json
 from datetime import datetime
 from collections.abc import Generator
-from typing import Optional, Union, Callable, Any
+from typing import Optional, Union, Callable, Any, Dict
 
 
 def get_file_created(file_path: str, platform: str = 'ios') -> datetime:
@@ -74,8 +74,6 @@ def process_contents(path, app_ctx=None, file_model: any = None) -> object:
     pgs = query_fs(path, app_ctx=app_ctx, model=file_model)
     for pg in pgs:
         name = getattr(pg, 'file_name')
-        # pg_obj = type(name, (object,), {"__name__": name, 'file_path': pg.file_path})
-        # val = cls_mapper(pg, pg_obj)
         setattr(res, name, pg.to_named_tuple() if hasattr(pg, 'to_named_tuple') else pg)
     return res
 
@@ -364,24 +362,82 @@ def parse_query_model_to_object(model_fields: str) -> object:
         params[k] = None
     return type('GenericQueryModel', (object,), params)
 
+def merge_dict(derived: Dict, src: Dict) -> None:
+    """
+    Merge keys from `derived` into `src` without overwriting existing values.
+    - If a key from `derived` is missing in `src`, add it.
+    - If the key is FILTER_KEY, merge lists/dicts from both sides.
+    - If both values are same type and key exists in `src`, perform nested merge via update_nested.
+    Returns the mutated `src` dict.
+    """
+    from pyonir.core.parser import update_nested, FILTER_KEY
+
+    for key, value in derived.items():
+        if key not in src:
+            src[key] = value
+            continue
+
+        # Both have the key; handle FILTER_KEY merging specially
+        src_value = src.get(key)
+        if key == FILTER_KEY:
+            if isinstance(src_value, list) and isinstance(value, list):
+                src_value.extend(value)
+                src[key] = src_value
+            elif isinstance(src_value, dict) and isinstance(value, dict):
+                src_value.update(value)
+                src[key] = src_value
+            # if types mismatch or not list/dict, keep existing src value
+            continue
+
+        # If both values are same type, perform nested merge
+        if isinstance(src_value, type(value)):
+            update_nested([], src[key], data_merge=value)
+        # If types mismatch, keep existing src value
+
+def coerce_bool(value: str) -> any:
+    """
+    Coerce a string into a boolean.
+
+    Truthy values:
+        "true", "1", "yes", "y", "on"
+
+    Falsy values:
+        "false", "0", "no", "n", "off"
+
+    Raises:
+        ValueError if the value cannot be coerced.
+    """
+    if isinstance(value, bool):
+        return value
+
+    v = str(value).strip().lower()
+
+    if v in {"true", "1", "yes", "y", "on"}:
+        return True
+
+    if value is None or v in {"false", "0", "no", "n", "off"}:
+        return False
+
+    return value
+
 def load_env(path=".env") -> 'EnvConfig':
     import warnings
     from collections import defaultdict
-    from pyonir.core.server import DEV_ENV
+    from pyonir.core.server import LOCAL_ENV
     from pyonir.pyonir_types import EnvConfig
-
-    env = os.getenv('APP_ENV') or DEV_ENV
+    # local is the default environment unless specified by system
+    env = os.getenv('APP_ENV') or LOCAL_ENV
     env_data = defaultdict(dict)
     env_data['APP_ENV'] = env
     if not env:
-        warnings.warn("APP_ENV not set. Defaulting to LOCAL mode. Expected one of DEV, TEST, PROD, LOCAL.", UserWarning)
+        warnings.warn("APP_ENV not set. Defaulting to LOCAL mode. Expected one of LOCAL, DEV, PROD.", UserWarning)
     if not os.path.exists(path): return dict_to_class(env_data, EnvConfig)
 
     def set_nested(d, keys, value):
         """Helper to set value in nested dictionary using dot-separated keys."""
         for key in keys[:-1]:
             d = d.setdefault(key, {})
-        d[keys[-1]] = value
+        d[keys[-1]] = coerce_bool(value)
 
     with open(path) as f:
         for line in f:

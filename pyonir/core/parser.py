@@ -127,6 +127,8 @@ class DeserializeFile:
         """Replays deserializing line"""
         fd = self.__dict__
         retries = RETRY_MAP.get(self.file_path)
+        if not retries:
+            return
         for key, value in retries:
             lookup_fpath, file_name, app_ctx, has_attr_path, query_params = value
             lookup_fpath = self.process_site_filter('pyformat', lookup_fpath, fd) if '{' in lookup_fpath else lookup_fpath

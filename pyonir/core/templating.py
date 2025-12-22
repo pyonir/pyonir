@@ -27,10 +27,6 @@ class TemplateEnvironment(Environment):
         app_filters = {**sys_filters, **app_filters}
         self.filters.update(**app_filters)
 
-        # def url_for(path):
-        #     rmaps = app.server.url_map if app.server else {}
-        #     return rmaps.get(path, {}).get('path', '/'+path)
-
         # Include globals
         self.globals['url_for'] = self.url_for
         self.globals['request'] = None
@@ -49,12 +45,15 @@ class TemplateEnvironment(Environment):
         macro = getattr(tmpl.module, name)
         return macro(*args, **kwargs)
 
-    def load_template_path(self, template_path: str):
+    def load_template_path(self, template_path: str, priority: bool = False):
         """Adds template path to file loader"""
         from jinja2 import FileSystemLoader
         app_loader = self.loader
         if not app_loader: return
-        self.loader.loaders.append(FileSystemLoader(template_path))
+        if priority:
+            app_loader.loaders[0].searchpath.insert(0, template_path)
+        else:
+            self.loader.loaders.append(FileSystemLoader(template_path))
 
     def add_filter(self, filter: callable):
         name = filter.__name__
@@ -70,7 +69,7 @@ class Theme:
     """Directory name for theme folder within frontend/themes directory"""
     theme_dirpath: str = ''
     """Directory path for theme folder within frontend/themes directory"""
-    details: Optional['Parsely'] = None
+    details: Optional['DeserializeFile'] = None
     """Represents a theme available in the frontend/themes directory."""
     _template_dirname = 'templates'
     _static_dirname = 'static'

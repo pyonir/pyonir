@@ -25,7 +25,8 @@ FILTER_KEY = '@filter'
 
 # Global cache
 FileCache: Dict[str, Any] = {}
-
+NS: List[str] = []
+RETRY_MAP: Dict = {}
 
 class FileStatuses(str):
     UNKNOWN = "unknown"
@@ -61,7 +62,7 @@ class DeserializeFile:
                 model: object = None,
                 text_string: str = None):
         # print(f"__init__ skipped for file_path: {file_path} (already initialized)")
-        if FileCache.get(file_path): return
+        # if FileCache.get(file_path): return
         name, ext = os.path.splitext(os.path.basename(file_path))
         self.app_ctx = app_ctx
         self._blob_keys = []
@@ -118,10 +119,22 @@ class DeserializeFile:
         self.deserializer()
         # Post-processing
         self.apply_filters()
-
         # if self.file_exists and self.is_page:
         #     # Cache object
         #     FileCache[self.file_path] = self
+
+    def replay_retry(self):
+        """Replays deserializing line"""
+        fd = self.__dict__
+        retries = RETRY_MAP.get(self.file_path)
+        for key, value in retries:
+            lookup_fpath, file_name, app_ctx, has_attr_path, query_params = value
+            lookup_fpath = self.process_site_filter('pyformat', lookup_fpath, fd) if '{' in lookup_fpath else lookup_fpath
+            v = parse_ref_to_files(lookup_fpath, file_name, app_ctx, attr_path=has_attr_path, query_params=query_params)
+            update_nested(key, self.data, data_update=v)
+            pass
+
+        RETRY_MAP.clear()
 
     def apply_filters(self):
         """Applies filter methods to data attributes"""
@@ -138,7 +151,7 @@ class DeserializeFile:
                     filtr, get_attr(self.data, key), {"page": self.data}
                 )
                 update_nested(key, self.data, data_update=mod_val)
-        del self.data[FILTER_KEY]
+        # del self.data[FILTER_KEY]
 
     def deserializer(self):
         """Deserialize file line strings into map object"""
@@ -491,41 +504,43 @@ def serializer(json_map: dict, namespace: list = [], inline_mode: bool = False, 
         [lines.append(f"{mlk}\n{mlv}") for mlk, mlv in multi_line_keys]
     return "\n".join(lines)
 
+def parse_ref_to_files(filepath, file_name, app_ctx, attr_path: str = None, query_params=None):
+    if query_params is None:
+        query_params = {}
+    from pyonir.core.database import BaseFSQuery, DeserializeFile
+    from pyonir.core.utils import get_attr, import_module
+    from pyonir.core.schemas import GenericQueryModel
+    as_dir = os.path.isdir(filepath)
+    if as_dir:
+        # use proper app context for path reference outside of scope is always the root level
+        # Ref parameters with model will return a generic model to represent the data value
+        model = None
+        generic_model_properties = query_params.get('model')
+        return_all_files = query_params.get('limit','') == '*'
+        if generic_model_properties:
+            if '.' in generic_model_properties:
+                pkg, mod = os.path.splitext(generic_model_properties)
+                mod = mod[1:]
+                model = import_module(pkg, callable_name=mod)
+            if not model:
+                model = GenericQueryModel(generic_model_properties)
+
+        collection = BaseFSQuery(filepath, app_ctx=app_ctx,
+                              model=model,
+                              exclude_names=(file_name, 'index.md'),
+                              force_all=return_all_files)
+        data = collection.set_params(query_params).paginated_collection()
+    else:
+        rtn_key = attr_path or 'data'
+        p = DeserializeFile(filepath, app_ctx=app_ctx)
+        data = get_attr(p, rtn_key) or p
+    return data
+
 def process_lookups(value_str: str, file_ctx: DeserializeFile = None) -> Optional[Union[str, dict, list]]:
     """Process $dir and $data lookups in the value string"""
     app_ctx: list = file_ctx.app_ctx
     file_contents_dirpath: str = file_ctx.file_contents_dirpath
     file_name: str = file_ctx.file_name
-
-    def parse_ref_to_files(filepath, as_dir=0):
-        from pyonir.core.database import BaseFSQuery, DeserializeFile
-        from pyonir.core.utils import get_attr, import_module
-        from pyonir.core.schemas import GenericQueryModel
-
-        if as_dir:
-            # use proper app context for path reference outside of scope is always the root level
-            # Ref parameters with model will return a generic model to represent the data value
-            model = None
-            generic_model_properties = query_params.get('model')
-            return_all_files = query_params.get('limit','') == '*'
-            if generic_model_properties:
-                if '.' in generic_model_properties:
-                    pkg, mod = os.path.splitext(generic_model_properties)
-                    mod = mod[1:]
-                    model = import_module(pkg, callable_name=mod)
-                if not model:
-                    model = GenericQueryModel(generic_model_properties)
-
-            collection = BaseFSQuery(filepath, app_ctx=app_ctx,
-                                  model=model,
-                                  exclude_names=(file_name, 'index.md'),
-                                  force_all=return_all_files)
-            data = collection.set_params(query_params).paginated_collection()
-        else:
-            rtn_key = has_attr_path or 'data'
-            p = DeserializeFile(filepath, app_ctx=app_ctx)
-            data = get_attr(p, rtn_key) or p
-        return data
 
     value_str = value_str.strip()
     has_lookup = value_str.startswith((LOOKUP_DIR_PREFIX, LOOKUP_DATA_PREFIX))
@@ -545,8 +560,10 @@ def process_lookups(value_str: str, file_ctx: DeserializeFile = None) -> Optiona
         lookup_fpath = os.path.join(base_path, *value_str.split("/"))
         if not os.path.exists(lookup_fpath):
             print(f"[DEBUG] FileNotFoundError: {lookup_fpath}")
+            if file_ctx.is_virtual_route:
+                track_retry(file_ctx.file_path, (lookup_fpath, file_name, app_ctx, has_attr_path, query_params))
             return None
-        return parse_ref_to_files(lookup_fpath, os.path.isdir(lookup_fpath))
+        return parse_ref_to_files(lookup_fpath, file_name, app_ctx, attr_path=has_attr_path, query_params=query_params)
     return value_str
 
 def deserialize_line(line_value: str, container_type: Any = None, file_ctx: DeserializeFile = None) -> Any:
@@ -600,6 +617,21 @@ def get_container_type(delim):
     else:
         return str()
 
+def track_retry(file_path: str, value: any):
+    """Tracks lines to deserialize"""
+    if not RETRY_MAP.get(file_path):
+        RETRY_MAP[file_path] = [(".".join(NS), value)]
+    else:
+        RETRY_MAP[file_path].append((".".join(NS), value))
+    NS.pop()
+
+def track_namespace(key: str, is_root: bool = False):
+    """Tracks object namespace by key"""
+    if not key or key.strip().startswith(FILTER_KEY): return
+    if is_root:
+        NS.clear()
+    NS.append(key.strip())
+
 def parse_line(line: str, from_block_str: bool = False, file_ctx: Any = None) -> tuple:
     """partition key value pairs"""
 
@@ -629,12 +661,14 @@ def parse_line(line: str, from_block_str: bool = False, file_ctx: Any = None) ->
             value = None
             is_str_block = True
             is_parent = True
+        line_count = count_tabs(line)
+        track_namespace(key, is_root=(line_count==0 or is_parent))
         if not from_block_str:
             key = key.strip() if key else None
             value = deserialize_line(value, container_type=line_type, file_ctx=file_ctx) if value else None
         elif value:
             value += '\n'
-        return count_tabs(line), key, line_type, value or None, (is_str_block, is_parent)
+        return line_count, key, line_type, value or None, (is_str_block, is_parent)
     except Exception as e:
         raise e
         # return None, None, line.strip(), None, None

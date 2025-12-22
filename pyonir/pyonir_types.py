@@ -65,6 +65,7 @@ class EnvConfig:
     APP_KEY: str
     APP_DEBUG: bool
     APP_URL: str
+    USE_THEMES: bool
     DB_CONNECTION: str
     DB_HOST: str
     DB_PORT: int

@@ -1,0 +1,9 @@
+<nav id="navigation" class="menu inline">
+    <ul class="menu center">
+        {% for link in navigation.primary | sort(attribute='rank') %}
+            <li class="active">
+                <a href="{{ link.url }}">{{ link.name }}</a>
+            </li>
+        {% endfor %}
+    </ul>
+</nav>

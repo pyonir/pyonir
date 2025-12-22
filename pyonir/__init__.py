@@ -41,5 +41,5 @@ class Pyonir(BaseApp):
                          salt=salt)
         Site = self
         self.process_configs()
-        if use_themes:
+        if self.use_themes:
             self.configure_themes()

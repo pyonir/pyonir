@@ -448,7 +448,7 @@ class BaseApp(Base):
         if salt is not None:
             self._env.salt = salt
         self._static_paths = set()
-        self.use_themes = use_themes
+        self.use_themes = use_themes or getattr(self.env, 'USE_THEMES', False)
         """Serve frontend files from the frontend directory for HTML requests"""
         self.TemplateEnvironment = TemplateEnvironment(self)
         """Templating manager"""
@@ -466,7 +466,7 @@ class BaseApp(Base):
     def env(self) -> EnvConfig: return self._env
 
     @property
-    def use_ssl(self) -> bool: return get_attr(self.env, 'app.use_ssl',  '').strip().lower() in ('true', '1', 'yes')
+    def use_ssl(self) -> bool: return get_attr(self.env, 'app.use_ssl',  False)
 
     @property
     def salt(self) -> str: return get_attr(self.env, 'app.salt')
@@ -578,7 +578,7 @@ class BaseApp(Base):
             raise ValueError(f"No active theme name {get_attr(self.settings, 'app.theme_name')} found in {self.frontend_dirpath} themes directory. Please ensure a theme is available.")
 
         # Load theme templates
-        self.TemplateEnvironment.load_template_path(app_active_theme.jinja_template_path)
+        self.TemplateEnvironment.load_template_path(app_active_theme.jinja_template_path, priority=True)
 
     # RUNTIME
     def load_static_path(self,url: str, path: str) -> None:

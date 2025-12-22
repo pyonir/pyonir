@@ -3,7 +3,7 @@ import os
 from dataclasses import dataclass, field
 from typing import Optional, Union, Tuple, Callable, get_type_hints, OrderedDict, Any, List
 
-from pyonir.core.utils import get_attr
+from pyonir.core.utils import get_attr, merge_dict
 from starlette.applications import Starlette
 from starlette.requests import Request as StarletteRequest
 
@@ -188,13 +188,16 @@ class BaseRequest:
         virtual_page_path = os.path.join(app.pages_dirpath, VIRTUAL_ROUTES_FILENAME) + BaseApp.EXTENSIONS['file']
         if not os.path.exists(virtual_page_path): return None
         virtual_route = DeserializeFile(virtual_page_path, app_ctx=app.app_ctx)
-        vkey, vdata, vparams = self.app.server.get_virtual(url, virtual_data=virtual_route.data)
+        vkey, vdata, vparams, wildcard_vdata = self.app.server.get_virtual(url, virtual_data=virtual_route.data)
         if vparams and vkey:
             self.path_params.update(vparams)
-            virtual_route.refresh_data()
+            virtual_route.replay_retry()
             vdata = virtual_route.data.get(vkey) if vkey else vdata
         virtual_route.data = {'url': self.url, 'slug': self.slug, **(vdata or {})}
         virtual_route.is_virtual_route = bool(vkey)
+        if wildcard_vdata:
+            merge_dict(wildcard_vdata, virtual_route.data)
+        virtual_route.apply_filters()
         return virtual_route
 
     def resolve_request_to_file(self, app: BaseApp, path_str: str = None) -> DeserializeFile:
@@ -244,7 +247,8 @@ class BaseRequest:
                 if os.path.exists(candidate):
                     route_page = DeserializeFile(candidate, app_ctx=app.app_ctx)
                     if virtual_route:
-                        route_page.data.update(virtual_route.data)
+                        merge_dict(derived=virtual_route.data, src=route_page.data)
+                        # route_page.data.update(virtual_route.data)
                         route_page.apply_filters()
                     return route_page
 
@@ -469,13 +473,15 @@ class BaseServer(Starlette):
                                 )
         self.add_middleware(CSRFProtectMiddleware, csrf_secret=self.app.SECRET_SAUCE)
 
-    def get_virtual(self, url: str, virtual_data: dict = None) -> Union[tuple[str, dict, dict], tuple[None, None, None]]:
+    def get_virtual(self, url: str, virtual_data: dict = None) -> Union[tuple[str, dict, dict, dict], tuple[None, None, None, dict]]:
         """Performs url pattern matching against virtual routes and returns vitual page data and new path parameter values."""
-        for vurl, vdata in (virtual_data or {}).items():
+        _data = (virtual_data or {})
+        wildcard_data = _data.pop('*') if _data.get('*') else {}
+        for vurl, vdata in _data.items():
             has_match = self.matching_route(url, vurl)
             if has_match:
-                return vurl, vdata, has_match
-        return None, None, None
+                return vurl, vdata, has_match, wildcard_data
+        return None, None, None, wildcard_data
 
     @staticmethod
     async def build_response(pyonir_request: BaseRequest, dec_func: callable):

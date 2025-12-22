@@ -1,52 +1,45 @@
-{% extends 'base.html' %}
-{% block content %}
+{% import 'system_macros.html' as system %}
 
-
-<h1 class="center">{{page.title}}</h1>
-{{page.content|safe|format(request=request, page=page)}}
-
-
-{% if page.gallery %}
-<div class="gallery">
-    {{page.gallery.files.max_count}}
-    {{page.gallery.files.items|length}}
-    {% for image in page.gallery.files.items if image.is_thumb %}
-    <figure>
-        <img
-            src="{{image.url}}"
-            alt="{{image.name}}"
-        />
-        <figcaption>
-            {{image.group}}
-            <a href="{{image.full_url}}" target="_blank">{{image.name}}</a>
-            <button data-id="{{image.group}}/{{image.file_name}}.{{image.file_ext}}" onclick="deleteImg(event)" type="submit">Delete</button>
-        </figcaption>
-    </figure>
-    {% endfor %}
-<script>
-    async function deleteImg(event) {
-        const itemId = event.target.getAttribute('data-id');
-        const response = await fetch(`/api/demo-uploads?file_id=${itemId}`, {
-            method: 'DELETE',
-            headers: {
-              'Content-Type': 'application/json',
-            }
-          });
-        if (response.ok) {
-            alert('Item deleted successfully!');
-        } else {
-            const error = await response.text();
-            console.error('Failed to delete:', error);
-            alert('Failed to delete item.');
-        }
-    }
-</script>
-</div>
-{% endif %}
+<html lang="en">
+     <head>
+{% block head %}
+{{system.head(data=page)}}
+<!--  CSS -->
+<link rel="stylesheet" href="{{url_for('static')}}/css/pencil.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Courier+Prime:ital,wght@0,400;0,700;1,400;1,700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Courier+Prime:wght@400;700&family=Hanken+Grotesk:ital,wght@0,100..900;1,100..900&display=swap" rel="stylesheet">
 
 {% endblock %}
+     </head>
+
+<body class="courier-prime-regular">
+    <header id="header" class="row">
+    {% block header_nav %}
+       {% include 'components/navigation.html' %}
+    {% endblock %}
+    </header>
+
+    <div id="content" class="row">
+        <div class="content-body">
+        {% block content %}
+        <h1 class="center">{{page.title}}</h1>
+        {{page.content|safe|format(request=request, page=page)}}
+            {{ page.foo }}
+        {% endblock %}
+        </div>
+    </div>
+
+
+    <footer>
+        <div class="credits text-center">Pencil Theme Powered by Pyonir</div>
+    </footer>
+</body>
 
 {% block js %}
-    {{super()}}
-    {{ page.js }}
+{% yield 'js' %}
+{{ page.js }}
 {% endblock %}
+
+</html>

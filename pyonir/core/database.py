@@ -530,6 +530,9 @@ def query_fs(abs_dirpath: str,
 
     def skip_file(file_path: Path) -> bool:
         """Checks if the file should be skipped based on exclude_dirs and exclude_file"""
+        is_hidden_dir = file_path.parent.name.startswith(hidden_file_prefixes)
+        if is_hidden_dir:
+            return True
         is_private_file = file_path.name.startswith(hidden_file_prefixes)
         is_excluded_file = exclude_names and file_path.name in exclude_names
         is_included_file = include_names and file_path.name in include_names
@@ -539,5 +542,5 @@ def query_fs(abs_dirpath: str,
         return is_excluded_file or is_private_file or not is_allowed_file
 
     for path in Path(abs_dirpath).rglob(name_pattern or "*"):
-        if skip_file(path) or path.is_dir(): continue
+        if path.is_dir() or skip_file(path): continue
         yield get_datatype(path)

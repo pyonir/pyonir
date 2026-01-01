@@ -1,8 +1,10 @@
+import json
 import os
 import uuid
 from datetime import datetime
 from typing import Type, TypeVar, Any, Optional, List, Set
 
+from pyonir.core.utils import json_serial, get_attr
 
 T = TypeVar("T")
 
@@ -22,13 +24,14 @@ class BaseSchema:
     __primary_key__ = str()
     __frozen__ = bool()
     __foreign_keys__: Set[Any] = None
+    __table_columns__: Set[Any] = None
     _sql_create_table: Optional[str] = None
     _errors: list[str]
     _private_keys: Optional[list[str]]
     _foreign_key_names: set[str]
 
     created_by: str = get_active_user
-    created_at: datetime = staticmethod(lambda: datetime.now())
+    created_on: datetime = staticmethod(lambda: BaseSchema.generate_date())
 
     def __init_subclass__(cls, **kwargs):
         from pyonir.core.mapper import collect_type_hints
@@ -43,6 +46,7 @@ class BaseSchema:
         foreign_fields = set()
         foreign_field_names = set()
         model_fields = set()
+        table_columns = set()
 
         def is_fk(name, typ):
             if foreign_keys and typ in foreign_keys:
@@ -59,10 +63,12 @@ class BaseSchema:
             is_fk(name, typ)
             is_factory(getattr(cls, name, None))
             model_fields.add((name, typ))
-        # model_fields = set((name, typ, is_fk(name,typ)) for name, typ in collect_type_hints(cls).items())
+            table_columns.add(name)
+
         setattr(cls, "__fields__", model_fields)
         setattr(cls, "__primary_key__", primary_key or "id")
         setattr(cls, "__foreign_keys__", foreign_fields)
+        setattr(cls, "__table_columns__", table_columns)
         setattr(cls, "__alias__", alias)
         setattr(cls, "__frozen__", frozen)
         setattr(cls, "_errors", [])
@@ -77,7 +83,7 @@ class BaseSchema:
                 custom_mapper_fn = getattr(self, f'map_to_{field_name}', None)
                 type_factory = getattr(self, field_name, custom_mapper_fn)
                 if field_name in self._foreign_key_names:
-                    value = cls_mapper(value, field_type, is_fk=True)
+                    value = type_factory() if type_factory else cls_mapper(value, field_type, is_fk=True)
                 else:
                     value = coerce_value_to_type(value, field_type, factory_fn=type_factory) if value or type_factory else None
             setattr(self, field_name, value)
@@ -136,17 +142,17 @@ class BaseSchema:
                     fk_file_path = os.path.join(data_path, fk_entry_name)
                     fk_schema_inst.save_to_file(fk_file_path)
                     setattr(self,k, f"{LOOKUP_DATA_PREFIX}/{fk_schema_inst.__table_name__}/{fk_entry_name}")
-        return create_file(file_path, self.to_dict(obfuscate=False))
+        return create_file(file_path, self.to_dict(obfuscate=False, with_extras=False))
 
     def save_to_session(self, request: 'PyonirRequest', key: str = None, value: any = None) -> None:
         """Convert instance to a serializable dict."""
         request.server_request.session[key or self.__class__.__name__.lower()] = value
 
-    def to_dict(self, obfuscate:bool = True):
+    def to_dict(self, obfuscate:bool = True, with_extras: bool = False) -> dict:
         """Dictionary representing the instance"""
-
+        is_property = lambda attr: isinstance(getattr(self.__class__, attr, None), property)
         obfuscated = lambda attr: obfuscate and hasattr(self,'_private_keys') and attr in (self._private_keys or [])
-        is_ignored = lambda attr: attr in ('file_path','file_dirpath') or attr.startswith("_") or callable(getattr(self, attr)) or obfuscated(attr)
+        is_ignored = lambda attr: attr in ('file_path','file_dirpath') or attr.startswith("_") or is_property(attr) or callable(getattr(self, attr)) or obfuscated(attr)
         def process_value(key, value):
             if hasattr(value, 'to_dict'):
                 return value.to_dict(obfuscate=obfuscate)
@@ -164,6 +170,26 @@ class BaseSchema:
         """Returns a JSON serializable dictionary"""
         import json
         return json.dumps(self.to_dict(obfuscate))
+
+    def to_tuple(self) -> tuple:
+        """Returns a tuple of the model's column values in order."""
+        columns = []
+        values = []
+        for name, _ in self.__fields__:
+            columns.append(name)
+            v = getattr(self, name)
+            v = json.dumps(v, default=json_serial) if isinstance(v,(dict, list, tuple, set)) else v
+            if (name, _) in self.__foreign_keys__:
+                v = get_attr(v, v.__primary_key__)
+            values.append(v)
+        return tuple(columns), tuple(values)
+
+    @staticmethod
+    def dict_to_tuple(data: dict) -> tuple:
+        """Convert a dictionary to a tuple of values in the model's column order."""
+        keys = ', '.join(data.keys())
+        values = tuple(json.dumps(v) if isinstance(v,(dict, list, tuple, set)) else v for v in data.values())
+        return keys, values
 
     def _after_init(self):
         """Hook for additional initialization in subclasses."""

@@ -1,8 +1,6 @@
 import os
 import sqlite3
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
-from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional, Type, Union, Iterator, Generator
 
@@ -12,30 +10,9 @@ from pyonir.core.mapper import cls_mapper
 from pyonir.core.parser import DeserializeFile
 from pyonir.core.schemas import BaseSchema
 from pyonir.core.app import BaseApp
-from pyonir.pyonir_types import AppCtx
+from pyonir.pyonir_types import AppCtx, AbstractFSQuery, BasePagination
 from pyonir.core.utils import get_attr
 
-
-@dataclass
-class BasePagination:
-    limit: int = 0
-    max_count: int = 0
-    curr_page: int = 0
-    page_nums: list[int] = field(default_factory=list)
-    items: list[DeserializeFile] = field(default_factory=list)
-
-    def __iter__(self) -> Iterator[DeserializeFile]:
-        return iter(self.items)
-
-    def to_dict(self) -> dict:
-        from pyonir.core.utils import json_serial
-        return {
-            "limit": self.limit,
-            "max_count": self.max_count,
-            "curr_page": self.curr_page,
-            "page_nums": self.page_nums,
-            "items": [json_serial(item) for item in self.items]
-        }
 
 class DatabaseService(ABC):
     """Stub implementation of DatabaseService with env-based config + builder overrides."""
@@ -240,19 +217,22 @@ class DatabaseService(ABC):
     @abstractmethod
     def insert(self, table: str, entity: BaseSchema) -> Any:
         """Insert entity into backend."""
-        import json
-        data = entity if isinstance(entity, dict) else entity.to_dict()
 
         if self.driver == "sqlite":
-            keys = ', '.join(data.keys())
-            placeholders = ', '.join('?' for _ in data)
-            query = f"INSERT INTO {table} ({keys}) VALUES ({placeholders})"
-            values = tuple(json.dumps(v) if isinstance(v,(dict, list, tuple, set)) else v for v in data.values())
+            keys, values = BaseSchema.dict_to_tuple(entity) if isinstance(entity, dict) else entity.to_tuple()
+            placeholders = ', '.join('?' for _ in values)
+            query = f"INSERT INTO {table} {keys} VALUES ({placeholders})"
             cursor = self.connection.cursor()
             cursor.execute(query, values)
             self.connection.commit()
-            primary_id_value = getattr(entity, get_attr(entity,'__primary_key__'), None)
-            return cursor.lastrowid if primary_id_value is None else primary_id_value
+            primary_id_value = getattr(entity, get_attr(entity,'__primary_key__'), cursor.lastrowid)
+            # perform nested inserts for foreign keys if any
+            for fk_name, fk_type in getattr(entity, '__foreign_keys__', []):
+                fk_entity = getattr(entity, fk_name, None)
+                if fk_entity and isinstance(fk_entity, BaseSchema):
+                    self.create_table(fk_entity._sql_create_table)
+                    fk_primary_id = self.insert(fk_entity.__table_name__, fk_entity)
+            return primary_id_value
 
         elif self.driver == "fs":
             # Save JSON file per record
@@ -310,7 +290,37 @@ class DatabaseService(ABC):
 
         return False
 
-class BaseFSQuery:
+    @abstractmethod
+    def delete(self, table: str, key_value: Any) -> bool:
+        """Delete entity from backend using primary key."""
+        if self.driver == "sqlite":
+            if not self.connection:
+                raise ValueError("Database connection is not established.")
+
+            # Get schema class to find primary key
+            schema_cls = None
+            for row in self.connection.execute(f"SELECT * FROM {table} LIMIT 1"):
+                schema_cls = type(table.capitalize(), (BaseSchema,), {k: None for k in dict(row).keys()})
+                break
+
+            pk_field = getattr(schema_cls, '_primary_key', 'id') if schema_cls else 'id'
+
+            # Build DELETE query
+            query = f"DELETE FROM {table} WHERE {pk_field} = ?"
+            values = (key_value,)
+
+            try:
+                cursor = self.connection.cursor()
+                cursor.execute(query, values)
+                self.connection.commit()
+                return cursor.rowcount > 0
+            except sqlite3.Error as e:
+                print(f"[ERROR] SQLite delete failed: {e}")
+                return False
+
+        return False
+
+class CollectionQuery(AbstractFSQuery):
     """Base class for querying files and directories"""
     _cache: Dict[str, Any] = {}
 
@@ -324,7 +334,6 @@ class BaseFSQuery:
                 force_all: bool = True) -> None:
 
         self.query_path = query_path
-        # self.sort_by: str = 'file_created_on'
         self.order_by: str = 'file_created_on' # column name to order items by
         self.order_dir: str = 'asc' # asc or desc
         self.limit: int = 0
@@ -343,162 +352,30 @@ class BaseFSQuery:
                               force_all = force_all)
 
     def set_order_by(self, *, order_by: str, order_dir: str = 'asc'):
-        self.order_by = order_by
-        self.order_dir = order_dir
-        return self
+        return super().set_order_by(order_by=order_by, order_dir=order_dir)
 
     def set_params(self, params: dict):
-        for k in ['limit', 'curr_page','max_count','page_nums','order_by','order_dir','where_key']:
-            if k in params:
-                if k in ('limit', 'curr_page', 'max_count') and params[k]:
-                    params[k] = int(params[k])
-                setattr(self, k, params[k])
-        return self
+        return super().set_params(params)
 
     def sorting_key(self, x: any):
-        if self.order_dir not in ("asc", "desc"):
-            raise ValueError("order_dir must be 'asc' or 'desc'")
-
-        def _invert(val):
-            # For numbers and timestamps
-            if isinstance(val, (int, float)):
-                return -val
-            # For strings: reverse lexicographic order
-            if isinstance(val, str):
-                return "".join(chr(255 - ord(c)) for c in val)
-            # Fallback
-            return val
-
-        value = get_attr(x, self.order_by)
-
-        # If sorting by datetime-like values
-        if isinstance(value, datetime):
-            value = value.timestamp()
-
-        # If value is None, push it to the end consistently
-        if value is None:
-            return float("inf") if self.order_dir == "asc" else float("-inf")
-
-        return value if self.order_dir == "asc" else _invert(value)
+        return super().sorting_key(x)
 
     def paginated_collection(self, reverse=True)-> BasePagination:
         """Paginates a list into smaller segments based on curr_pg and display limit"""
-        from sortedcontainers import SortedList
+        return super().paginated_collection(reverse)
 
-        if self.order_by:
-            self.sorted_files = SortedList(self.query_fs, self.sorting_key)
-        if self.where_key:
-            where_key = [self.parse_params(ex) for ex in self.where_key.split(',')]
-            self.sorted_files = SortedList(self.where(**where_key[0]), self.sorting_key)
-        force_all = not self.limit
-
-        self.max_count = len(self.sorted_files)
-        page_num = 0 if force_all else int(self.curr_page)
-        start = (page_num * self.limit) - self.limit
-        end = (self.limit * page_num)
-        pg = (self.max_count // self.limit) + (self.max_count % self.limit > 0) if self.limit > 0 else 0
-        pag_data = self.paginate(start=start, end=end, reverse=reverse) if not force_all else self.sorted_files
-
-        return BasePagination(
-            curr_page = page_num,
-            page_nums = [n for n in range(1, pg + 1)] if pg else None,
-            limit = self.limit,
-            max_count = self.max_count,
-            items = list(pag_data)
-        )
-
-    def paginate(self, start: int, end: int, reverse: bool = False):
+    def paginate(self, start: int, end: int, reverse: bool = False) -> SortedList:
         """Returns a slice of the items list"""
-        sl = self.sorted_files.islice(start, end, reverse=reverse) if end else self.sorted_files
-        return sl
-
-    @staticmethod
-    def prev_next(input_file: 'DeserializeFile'):
-        """Returns the previous and next files relative to the input file"""
-        from pyonir.core.mapper import dict_to_class
-        prv = None
-        nxt = None
-        bfsquery = BaseFSQuery(input_file.file_dirpath)
-        _collection = iter(bfsquery.query_fs)
-        for cfile in _collection:
-            if cfile.file_status == 'hidden': continue
-            if cfile.file_path == input_file.file_path:
-                nxt = next(_collection, None)
-                break
-            else:
-                prv = cfile
-        return dict_to_class({"next": nxt, "prev": prv})
+        return super().paginate(start, end, reverse)
 
     def find(self, value: any, from_attr: str = 'file_name'):
         """Returns the first item where attr == value"""
-        return next((item for item in self.sorted_files if getattr(item, from_attr, None) == value), None)
+        return super().find(value, from_attr)
 
-    def where(self, attr, op="=", value=None) -> 'BaseFSQuery':
+    def where(self, attr, op="=", value=None):
         """Returns a list of items where attr == value"""
-        from pyonir.core.utils import get_attr
+        return super().where(attr, op, value)
 
-        def match(item):
-            actual = get_attr(item, attr)
-            if not hasattr(item, attr):
-                return False
-            if actual and not value:
-                return True # checking only if item has an attribute
-            elif op == "=":
-                return actual == value
-            elif op == "in" or op == "contains":
-                return actual in value if actual is not None else False
-            elif op == ">":
-                return actual > value
-            elif op == "<":
-                return actual < value
-            elif op == ">=":
-                return actual >= value
-            elif op == "<=":
-                return actual <= value
-            elif op == "!=":
-                return actual != value
-            return False
-        if callable(attr): match = attr
-        if not self.sorted_files:
-            self.sorted_files = SortedList(self.query_fs, lambda x: get_attr(x, self.order_by) or x)
-        target = list(self.sorted_files)
-        self.sorted_files = filter(match, target)
-        return self
-
-    def __len__(self):
-        return self.sorted_files and len(self.sorted_files) or 0
-
-    def __iter__(self):
-        return iter(self.sorted_files)
-
-    @staticmethod
-    def parse_params(param: str):
-        k, _, v = param.partition(':')
-        op = '='
-        is_eq = lambda x: x[1]=='='
-        if v.startswith('>'):
-            eqs = is_eq(v)
-            op = '>=' if eqs else '>'
-            v = v[1:] if not eqs else v[2:]
-        elif v.startswith('<'):
-            eqs = is_eq(v)
-            op = '<=' if eqs else '<'
-            v = v[1:] if not eqs else v[2:]
-            pass
-        elif v[0]=='=':
-            v = v[1:]
-        else:
-            pass
-        return {"attr": k.strip(), "op":op, "value":BaseFSQuery.coerce_bool(v)}
-
-    @staticmethod
-    def coerce_bool(value: str):
-        d = ['false', 'true']
-        try:
-            i = d.index(value.lower().strip())
-            return True if i else False
-        except ValueError as e:
-            return value.strip()
 
 
 def query_fs(abs_dirpath: str,

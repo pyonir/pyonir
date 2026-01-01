@@ -77,11 +77,11 @@ db = (MockDataService(app, "pyonir_test.db")
 def test_crud_operations():
     # Create
     db.connect()
-    user = MockUser(username="testuser", email="test@example.com")
-    table_name = user.__table_name__
-    table_key = user.__primary_key__
-    db.create_table(user._sql_create_table)
-    user_id = db.insert(table_name, user)
+    mock_user = MockUser(username="testuser", email="test@example.com")
+    table_name = mock_user.__table_name__
+    table_key = mock_user.__primary_key__
+    db.create_table(mock_user._sql_create_table)
+    user_id = db.insert(table_name, mock_user)
     assert user_id
 
     # Read

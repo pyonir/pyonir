@@ -722,10 +722,14 @@ class BaseRestResponse:
 
     def set_file_response(self, value: any):
         """Sets the file response value"""
-        self._file_response = value
+        from starlette.exceptions import HTTPException
+        self._file_response = value #or HTTPException(status_code=404, detail="User not found")
 
     def build(self):
         """Builds the response object"""
+        from starlette.exceptions import HTTPException
+        if self.status_code >= 400:
+            raise HTTPException(status_code=self.status_code, detail=self.message or "An error occurred")
         self.set_header('Server', 'Pyonir Web Framework')
         res = self.content
         if self.headers:

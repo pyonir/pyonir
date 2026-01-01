@@ -1,19 +1,19 @@
 import os
 
 from pyonir import Pyonir
-from pyonir.core.database import BaseFSQuery, BasePagination
+from pyonir.core.database import CollectionQuery, BasePagination
 from pyonir.core.parser import DeserializeFile
 from pyonir.core.schemas import GenericQueryModel
 from pyonir.core.utils import parse_query_model_to_object, parse_url_params
 
 app = Pyonir(__file__)
-query = BaseFSQuery(app.pages_dirpath)
+query = CollectionQuery(app.pages_dirpath)
 
 def test_generic_model():
     query_params = parse_url_params('where_key=file_name:=test_user&model=name,avatar,uid')
     modelstr = 'name,avatar,uid'
     model = GenericQueryModel(modelstr)
-    collection = BaseFSQuery(os.path.join(app.contents_dirpath, 'mock_data'), app_ctx=app.app_ctx, model=model)
+    collection = CollectionQuery(os.path.join(app.contents_dirpath, 'mock_data'), app_ctx=app.app_ctx, model=model)
     cfp = collection.set_params(query_params).paginated_collection()
     item = cfp.items[0]
     assert cfp is not None
@@ -62,13 +62,13 @@ def test_where_filter():
 def test_prev_next():
     # Create a test file
     test_file = DeserializeFile(os.path.join(app.pages_dirpath,"index.md"))
-    result = BaseFSQuery.prev_next(test_file)
+    result = CollectionQuery.prev_next(test_file)
 
     assert hasattr(result, 'next')
     assert hasattr(result, 'prev')
 
 def test_parse_params():
     # Test various parameter parsing cases
-    assert BaseFSQuery.parse_params("name:value") == {"attr": "name", "op": "=", "value": "value"}
-    assert BaseFSQuery.parse_params("age:>18") == {"attr": "age", "op": ">", "value": "18"}
-    assert BaseFSQuery.parse_params("price:<=100") == {"attr": "price", "op": "<=", "value": "100"}
+    assert CollectionQuery.parse_params("name:value") == {"attr": "name", "op": "=", "value": "value"}
+    assert CollectionQuery.parse_params("age:>18") == {"attr": "age", "op": ">", "value": "18"}
+    assert CollectionQuery.parse_params("price:<=100") == {"attr": "price", "op": "<=", "value": "100"}

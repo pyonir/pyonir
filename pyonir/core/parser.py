@@ -2,7 +2,6 @@ import os, re, json
 from typing import Tuple, Dict, List, Any, Optional, Union
 
 from pyonir.core.utils import get_file_created, open_file, get_attr
-from pyonir.pyonir_types import VIRTUAL_ROUTES_FILENAME
 
 # Pre-compile regular expressions for better performance
 _RE_LEADING_SPACES = re.compile(r'^\s+')
@@ -22,6 +21,7 @@ LOOKUP_EMBED_PREFIX = '$'
 LOOKUP_DIR_PREFIX = '$dir'
 LOOKUP_DATA_PREFIX = '$data'
 FILTER_KEY = '@filter'
+VIRTUAL_ROUTES_FILENAME: str = '.virtual_routes'
 
 # Global cache
 FileCache: Dict[str, Any] = {}
@@ -231,11 +231,11 @@ class DeserializeFile:
         self.apply_filters()
 
     def prev_next(self):
-        from pyonir.core.database import BaseFSQuery
+        from pyonir.core.database import CollectionQuery
 
         if self.file_dirname != "pages" or self.is_home:
             return None
-        return BaseFSQuery.prev_next(self)
+        return CollectionQuery.prev_next(self)
 
     def to_named_tuple(self):
         """Returns a tuple representation of the file data"""
@@ -509,7 +509,7 @@ def serializer(json_map: dict, namespace: list = [], inline_mode: bool = False, 
 def parse_ref_to_files(filepath, file_name, app_ctx, attr_path: str = None, query_params=None):
     if query_params is None:
         query_params = {}
-    from pyonir.core.database import BaseFSQuery, DeserializeFile
+    from pyonir.core.database import CollectionQuery, DeserializeFile
     from pyonir.core.utils import get_attr, import_module
     from pyonir.core.schemas import GenericQueryModel
     as_dir = os.path.isdir(filepath)
@@ -527,10 +527,10 @@ def parse_ref_to_files(filepath, file_name, app_ctx, attr_path: str = None, quer
             if not model:
                 model = GenericQueryModel(generic_model_properties)
 
-        collection = BaseFSQuery(filepath, app_ctx=app_ctx,
-                              model=model,
-                              exclude_names=(file_name, 'index.md'),
-                              force_all=return_all_files)
+        collection = CollectionQuery(filepath, app_ctx=app_ctx,
+                                     model=model,
+                                     exclude_names=(file_name, 'index.md'),
+                                     force_all=return_all_files)
         data = collection.set_params(query_params).paginated_collection()
     else:
         rtn_key = attr_path or 'data'

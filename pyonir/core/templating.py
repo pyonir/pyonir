@@ -126,7 +126,7 @@ class PyonirThemes:
         from pyonir import Site
         from pyonir.core.utils import get_attr
         if not Site or not self.available_themes: return None
-        site_theme = get_attr(Site.settings, 'app.theme_name')
+        site_theme = get_attr(Site.configs, 'app.theme_name')
         site_theme = self.available_themes.get(site_theme)
         return site_theme
 

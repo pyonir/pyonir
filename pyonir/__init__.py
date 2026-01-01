@@ -3,7 +3,7 @@ import os, sys
 from pyonir.core.app import BaseApp, Optional
 from pyonir.core.utils import get_version
 from pyonir.core.app import BaseApp, BasePlugin
-from pyonir.core.database import BaseFSQuery
+from pyonir.core.database import CollectionQuery
 from pyonir.core.schemas import BaseSchema
 from pyonir.core.server import BaseRequest, BaseServer, BaseRestResponse
 
@@ -24,7 +24,7 @@ Site: Optional[BaseApp] = None
 
 class PyonirServer(BaseServer): pass
 class PyonirRequest(BaseRequest): pass
-class PyonirCollection(BaseFSQuery): pass
+class PyonirCollection(CollectionQuery): pass
 class PyonirSchema(BaseSchema): pass
 class PyonirPlugin(BasePlugin): pass
 

@@ -3,10 +3,10 @@ from __future__ import annotations
 import os
 from typing import Optional, Generator, List
 
-from pyonir.core.utils import get_attr, load_env, generate_id
+from pyonir.core.utils import get_attr, load_env, generate_id, merge_dict
 
 from pyonir.pyonir_types import PyonirThemes, EnvConfig, PyonirHooks, PyonirRoute, PyonirRouters, \
-    VIRTUAL_ROUTES_FILENAME
+    VIRTUAL_ROUTES_FILENAME, AbstractFSQuery
 
 
 class Base:
@@ -35,7 +35,7 @@ class Base:
 
     app_dirpath: str = '' # absolute path to context directory
     name: str = ''# context name
-    _settings: Optional[object] # context settings
+    _configs: Optional[object] # context settings
     _resolvers = Optional[dict] # resolver registry
 
     # FIELDS
@@ -44,14 +44,14 @@ class Base:
         return self.name, self.endpoint, self.contents_dirpath, self.ssg_dirpath, self.datastore_dirpath
 
     @property
-    def settings(self) -> object:
+    def configs(self) -> object:
         """Application context settings"""
-        return self._settings
+        return self._configs
 
     @property
     def endpoint(self):
         """Customer facing url address to access the store pages"""
-        return self.settings.url if hasattr(self.settings, 'url') else None
+        return self.configs.url if hasattr(self.configs, 'url') else None
 
     # ROUTES
     @property
@@ -156,7 +156,7 @@ class Base:
     def process_configs(self):
         """Processes all context settings"""
         from pyonir.core.utils import process_contents
-        self._settings = process_contents(self.configs_dirpath, app_ctx=self.app_ctx)
+        self._configs = process_contents(self.configs_dirpath, app_ctx=self.app_ctx)
 
     def parse_file(self, file_path: str, model: any = None) -> 'DeserializeFile':
         """Parses a file and returns a Parsely instance for the file."""
@@ -312,10 +312,10 @@ class Base:
             create_file(file_path, m_temp)
             print(f"\t{meth_name} at {file_path}")
 
-    def query_fs(self, dir_path: str, model_type: any = None, app_ctx = None) -> BaseFSQuery:
+    def query_fs(self, dir_path: str, model_type: any = None, app_ctx = None) -> AbstractFSQuery:
         """Query files in a directory and return instances of the specified model type."""
-        from pyonir.core.database import BaseFSQuery
-        return BaseFSQuery(dir_path, app_ctx=app_ctx or self.app_ctx, model=model_type, exclude_names=None, force_all=True)
+        from pyonir.core.database import CollectionQuery
+        return CollectionQuery(dir_path, app_ctx=app_ctx or self.app_ctx, model=model_type, exclude_names=None, force_all=True)
 
     @staticmethod
     def query_files(dir_path: str, app_ctx: tuple, model_type: any = None) -> object:
@@ -351,7 +351,7 @@ class BasePlugin(Base):
     @property
     def endpoint(self):
         """Customer facing url address to access the store pages"""
-        return self.settings.url if hasattr(self.settings, 'url') else None
+        return self.configs.url if hasattr(self.configs, 'url') else None
 
     @property
     def datastore_dirpath(self) -> str:
@@ -379,9 +379,9 @@ class BasePlugin(Base):
         return os.path.join(self.app.ssg_dirpath, self.endpoint)
 
     @property
-    def settings(self) -> object:
+    def configs(self) -> object:
         """Plugin settings are pulled from the application settings"""
-        plugin_settings = getattr(self.app.settings, self.name)
+        plugin_settings = getattr(self.app.configs, self.name)
         return plugin_settings
 
     @property
@@ -443,7 +443,7 @@ class BaseApp(Base):
         self.plugins_installed = {}
         self._plugins_activated: set = set()
         self._resolvers = {}
-        self._settings: object = None
+        self._configs: object = None
         self._env: EnvConfig = load_env(os.path.join(self.app_dirpath, '.env'))
         if salt is not None:
             self._env.salt = salt
@@ -575,7 +575,7 @@ class BaseApp(Base):
         self.themes = PyonirThemes(themes_dir_path)
         app_active_theme = self.themes.active_theme
         if app_active_theme is None:
-            raise ValueError(f"No active theme name {get_attr(self.settings, 'app.theme_name')} found in {self.frontend_dirpath} themes directory. Please ensure a theme is available.")
+            raise ValueError(f"No active theme name {get_attr(self.configs, 'app.theme_name')} found in {self.frontend_dirpath} themes directory. Please ensure a theme is available.")
 
         # Load theme templates
         self.TemplateEnvironment.load_template_path(app_active_theme.jinja_template_path, priority=True)
@@ -597,7 +597,7 @@ class BaseApp(Base):
     def apply_globals(self, global_vars: dict = None):
         """Updates the jinja global variables dictionary"""
         self.TemplateEnvironment.globals['site'] = self
-        self.TemplateEnvironment.globals['configs'] = self.settings
+        self.TemplateEnvironment.globals['configs'] = self.configs
         self.TemplateEnvironment.globals['env'] = self.env
         if global_vars:
             self.TemplateEnvironment.globals.update(global_vars)
@@ -611,7 +611,7 @@ class BaseApp(Base):
     def activate_plugins(self):
         """Active plugins enabled based on settings"""
         from pyonir.core.utils import get_attr
-        has_plugin_configured = get_attr(self.settings, 'app.enabled_plugins', None)
+        has_plugin_configured = get_attr(self.configs, 'app.enabled_plugins', None)
         if not has_plugin_configured: return
         for plg_id, plugin in self.plugins_installed.items():
             self.activate_plugin(plg_id)
@@ -619,7 +619,7 @@ class BaseApp(Base):
     def activate_plugin(self, plugin_name: str):
         """Activates an installed plugin and adds to set of activated plugins"""
         plg_cls = self.plugins_installed.get(plugin_name)
-        has_plugin_configured = plugin_name in (get_attr(self.settings, 'app.enabled_plugins') or [])
+        has_plugin_configured = plugin_name in (get_attr(self.configs, 'app.enabled_plugins') or [])
         if plg_cls is None or not has_plugin_configured:
             self.deactivate_plugin(plugin_name)
             return
@@ -664,7 +664,7 @@ class BaseApp(Base):
         if not self.TemplateEnvironment or not string: return string
         if not context: context = {}
         try:
-            return self.TemplateEnvironment.from_string(string).render(configs=self.settings, **context)
+            return self.TemplateEnvironment.from_string(string).render(configs=self.configs, **context)
         except Exception as e:
             raise
 
@@ -728,7 +728,7 @@ class BaseApp(Base):
             for pgfile in all_pages:
                 if virtual_file: ssg_req.ssg_request(pgfile, virtual_file.data)
                 try:
-                    pgfile.data.update(virtual_file.data or {})
+                    merge_dict(virtual_file.data, pgfile.data)
                     pgfile.apply_filters()
                 except Exception as e:
                     raise

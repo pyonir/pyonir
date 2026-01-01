@@ -10,7 +10,7 @@ from PIL.ImageFile import ImageFile
 from starlette.datastructures import UploadFile
 
 from pyonir import PyonirRequest
-from pyonir.core.database import BaseFSQuery
+from pyonir.core.database import CollectionQuery
 from pyonir.pyonir_types import BaseEnum
 
 ALLOWED_FORMATS = {"PNG", "JPEG", "WEBP"}
@@ -120,25 +120,29 @@ class BaseMedia:
         pass
 
     @property
-    def file_name(self):
+    def file_name_ext(self) -> str:
+        return os.path.basename(self.file_path)
+
+    @property
+    def file_name(self) -> str:
         name, ext = os.path.splitext(os.path.basename(self.file_path))
         self.file_ext = ext
         return name
 
     @property
-    def file_dirpath(self):
+    def file_dirpath(self) -> str:
         return os.path.dirname(self.file_path)
 
     @property
-    def file_dirname(self):
+    def file_dirname(self) -> str:
         return os.path.basename(os.path.dirname(self.file_path))
 
     @property
-    def slug(self):
+    def slug(self) -> str:
         return f"{self.file_dirname}/{self.file_name}{self.file_ext}"
 
     @property
-    def url(self):
+    def url(self) -> str:
         return f"/{self.slug}"
 
     @property
@@ -392,7 +396,7 @@ class MediaManager:
 
     def get_medias(self, file_type: str) -> list[BaseMedia]:
         """Retrieves user paginated media files"""
-        files = BaseFSQuery(self.storage_dirpath, model=BaseMedia, force_all=True)
+        files = CollectionQuery(self.storage_dirpath, model=BaseMedia, force_all=True)
         return list(files)
 
     def delete_media_dir(self, dir_name: str) -> bool:

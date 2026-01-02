@@ -2,7 +2,7 @@ import json
 import os
 import uuid
 from datetime import datetime
-from typing import Type, TypeVar, Any, Optional, List, Set
+from typing import Type, TypeVar, Any, Optional, List, Set, Dict
 
 from pyonir.core.utils import json_serial, get_attr
 
@@ -24,6 +24,7 @@ class BaseSchema:
     __primary_key__ = str()
     __frozen__ = bool()
     __foreign_keys__: Set[Any] = None
+    __fk_options__: Dict = None
     __table_columns__: Set[Any] = None
     _sql_create_table: Optional[str] = None
     _errors: list[str]
@@ -41,6 +42,7 @@ class BaseSchema:
         alias = kwargs.get("alias_map", {})
         frozen = kwargs.get("frozen", False)
         foreign_keys = kwargs.get("foreign_keys", False)
+        foreign_key_options = kwargs.get("fk_options", {})
         if table_name:
             setattr(cls, "__table_name__", table_name)
         foreign_fields = set()
@@ -68,6 +70,7 @@ class BaseSchema:
         setattr(cls, "__fields__", model_fields)
         setattr(cls, "__primary_key__", primary_key or "id")
         setattr(cls, "__foreign_keys__", foreign_fields)
+        setattr(cls, "__fk_options__", foreign_key_options)
         setattr(cls, "__table_columns__", table_columns)
         setattr(cls, "__alias__", alias)
         setattr(cls, "__frozen__", frozen)
@@ -185,9 +188,9 @@ class BaseSchema:
         return tuple(columns), tuple(values)
 
     @staticmethod
-    def dict_to_tuple(data: dict) -> tuple:
+    def dict_to_tuple(data: dict, as_update_keys: bool = False) -> tuple:
         """Convert a dictionary to a tuple of values in the model's column order."""
-        keys = ', '.join(data.keys())
+        keys = ', '.join(data.keys()) if not as_update_keys else ', '.join(f"{k}=?" for k in data.keys())
         values = tuple(json.dumps(v) if isinstance(v,(dict, list, tuple, set)) else v for v in data.values())
         return keys, values
 
@@ -211,6 +214,7 @@ class BaseSchema:
         from sqlalchemy.schema import CreateTable
         from sqlalchemy.dialects import sqlite, postgresql, mysql
         from sqlalchemy import Boolean, Float, JSON, Table, Column, Integer, String, MetaData, ForeignKey
+        from pyonir.core.mapper import is_optional_type
 
         dialect = dialect or "sqlite"
         PY_TO_SQLA = {
@@ -250,17 +254,18 @@ class BaseSchema:
 
             # determine if this column is a primary key
             is_pk = name == 'id' or (primary_key and name == primary_key and not has_pk)
-            kwargs = {"primary_key": is_pk}
+            is_nullable = is_optional_type(typ) and not is_pk
+            kwargs = {"primary_key": is_pk, "nullable": is_nullable}
 
             # collect column positional args (type, optional ForeignKey)
             col_args = [col_type]
 
             # if this field is registered as a foreign key, add ForeignKey constraint
             if (name, typ) in fk_set and hasattr(typ, "__table_name__"):
+                fk_options = cls.__fk_options__.get(name, {})
                 ref_table = getattr(typ, "__table_name__", None) or typ.__name__.lower()
                 ref_pk = getattr(typ, "__primary_key__", "id")
-                fk_kwargs = {"ondelete": "CASCADE", "onupdate": "CASCADE"}
-                col_args.append(ForeignKey(f"{ref_table}.{ref_pk}", **fk_kwargs))
+                col_args.append(ForeignKey(f"{ref_table}.{ref_pk}", **fk_options))
 
             columns.append(Column(name, *col_args, **kwargs))
 

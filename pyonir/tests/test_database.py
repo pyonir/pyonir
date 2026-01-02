@@ -12,9 +12,10 @@ class MockRole(BaseSchema, table_name='roles_table', primary_key='rid'):
     rid: str = BaseSchema.generate_id
     value: str
 
-class MockUser(BaseSchema, table_name='pyonir_users', primary_key='uid', foreign_keys={MockRole}):
+class MockUser(BaseSchema, table_name='pyonir_users', primary_key='uid', foreign_keys={MockRole}, fk_options={"role": {"ondelete": "RESTRICT", "onupdate": "RESTRICT"}}):
     username: str
     email: str
+    gender: Optional[str] = "godly"
     uid: str = BaseSchema.generate_id
     role: MockRole = lambda: MockRole(value="pythonista")
 
@@ -47,16 +48,7 @@ class MockDataService(DatabaseService):
         return super().find(table, filter)
 
     def update(self, table: str, id: int, data: dict) -> bool:
-        if self.driver == "sqlite":
-            pk = self.get_pk(table)
-            set_clause = ', '.join(f"{k} = ?" for k in data.keys())
-            query = f"UPDATE {table} SET {set_clause} WHERE {pk} = ?"
-            values = list(data.values()) + [id]
-            cursor = self.connection.cursor()
-            cursor.execute(query, values)
-            self.connection.commit()
-            return cursor.rowcount > 0
-        return False
+        return super().update(table, id, data)
 
     def delete(self, table: str, id: int) -> bool:
         if self.driver == "sqlite":

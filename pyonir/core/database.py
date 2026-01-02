@@ -260,34 +260,18 @@ class DatabaseService(ABC):
         return results
 
     @abstractmethod
-    def update(self, table: str, key_value: Any, data: Dict) -> bool:
-        """Update entity in backend using primary key."""
+    def update(self, table: str, id: Any, data: Dict) -> bool:
+        """Update entity row using table primary key."""
+
         if self.driver == "sqlite":
-            if not self.connection:
-                raise ValueError("Database connection is not established.")
-
-            # Get schema class to find primary key
-            schema_cls = None
-            for row in self.connection.execute(f"SELECT * FROM {table} LIMIT 1"):
-                schema_cls = type(table.capitalize(), (BaseSchema,), {k: None for k in dict(row).keys()})
-                break
-
-            pk_field = getattr(schema_cls, '_primary_key', 'id') if schema_cls else 'id'
-
-            # Build UPDATE query
-            set_clause = ', '.join(f"{k} = ?" for k in data.keys())
-            query = f"UPDATE {table} SET {set_clause} WHERE {pk_field} = ?"
-            values = list(data.values()) + [key_value]
-
-            try:
-                cursor = self.connection.cursor()
-                cursor.execute(query, values)
-                self.connection.commit()
-                return cursor.rowcount > 0
-            except sqlite3.Error as e:
-                print(f"[ERROR] SQLite update failed: {e}")
-                return False
-
+            pk = self.get_pk(table)
+            columns, values = BaseSchema.dict_to_tuple(data, as_update_keys=True)
+            query = f"UPDATE {table} SET {columns} WHERE {pk} = ?"
+            values = list(values) + [id]
+            cursor = self.connection.cursor()
+            cursor.execute(query, values)
+            self.connection.commit()
+            return cursor.rowcount > 0
         return False
 
     @abstractmethod

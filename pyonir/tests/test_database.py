@@ -86,9 +86,14 @@ def test_crud_operations():
 
     # Read
     results = db.find(table_name, {table_key: user_id})
+    mock_role_results = db.find(mock_user.role.__table_name__, {"rid": mock_user.role.rid})
     assert (len(results) == 1)
     assert (results[0]["username"] == "testuser")
     assert (results[0]["email"] == "test@example.com")
+    assert (results[0]["role"] == mock_user.role.rid)
+    # Verify foreign key role
+    assert (len(mock_role_results) == 1)
+    assert (mock_role_results[0]["value"] == mock_user.role.value)
 
     # Update
     updated = db.update(table_name, user_id, {

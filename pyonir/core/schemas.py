@@ -205,12 +205,13 @@ class BaseSchema:
 
     @classmethod
     def generate_sql_table(cls, dialect: str = None) -> str:
-        """Generate the CREATE TABLE SQL string for this model."""
+        """Generate the CREATE TABLE SQL string for this model, including foreign keys.
+        Ensure referenced tables are present in the same MetaData so ForeignKey targets can be resolved.
+        """
         from sqlalchemy.schema import CreateTable
-        from sqlalchemy.dialects import sqlite
-        from sqlalchemy.dialects import postgresql
-        from sqlalchemy.dialects import mysql
-        from sqlalchemy import Boolean, Float, JSON, Table, Column, Integer, String, MetaData
+        from sqlalchemy.dialects import sqlite, postgresql, mysql
+        from sqlalchemy import Boolean, Float, JSON, Table, Column, Integer, String, MetaData, ForeignKey
+
         dialect = dialect or "sqlite"
         PY_TO_SQLA = {
             int: Integer,
@@ -222,19 +223,56 @@ class BaseSchema:
         }
         primary_key = getattr(cls, "__primary_key__", None)
         table_name = getattr(cls, '__table_name__', None) or cls.__name__.lower()
+
+        metadata = MetaData()
         columns = []
         has_pk = False
+        fk_set = getattr(cls, "__foreign_keys__", set()) or set()
+
+        # Create minimal stub tables for all referenced foreign key targets so SQLAlchemy can resolve them.
+        for fk_name, fk_typ in fk_set:
+            if hasattr(fk_typ, "__table_name__"):
+                ref_table = getattr(fk_typ, "__table_name__", None) or fk_typ.__name__.lower()
+                ref_pk = getattr(fk_typ, "__primary_key__", "id")
+                # determine pk column type from referenced model fields
+                pk_col_type = String
+                for f_name, f_typ in getattr(fk_typ, "__fields__", set()):
+                    if f_name == ref_pk:
+                        pk_col_type = PY_TO_SQLA.get(f_typ, String)
+                        break
+                # register a stub table in the same metadata if not already present
+                if ref_table not in metadata.tables:
+                    Table(ref_table, metadata, Column(ref_pk, pk_col_type, primary_key=True), extend_existing=True)
+
         for name, typ in cls.__fields__:
+            # determine SQL column type
             col_type = PY_TO_SQLA.get(typ, String)
-            is_pk = name == 'id' or name == primary_key and not has_pk
+
+            # determine if this column is a primary key
+            is_pk = name == 'id' or (primary_key and name == primary_key and not has_pk)
             kwargs = {"primary_key": is_pk}
-            columns.append(Column(name, col_type, **kwargs))
+
+            # collect column positional args (type, optional ForeignKey)
+            col_args = [col_type]
+
+            # if this field is registered as a foreign key, add ForeignKey constraint
+            if (name, typ) in fk_set and hasattr(typ, "__table_name__"):
+                ref_table = getattr(typ, "__table_name__", None) or typ.__name__.lower()
+                ref_pk = getattr(typ, "__primary_key__", "id")
+                fk_kwargs = {"ondelete": "CASCADE", "onupdate": "CASCADE"}
+                col_args.append(ForeignKey(f"{ref_table}.{ref_pk}", **fk_kwargs))
+
+            columns.append(Column(name, *col_args, **kwargs))
+
             if is_pk:
                 has_pk = True
+
         if not has_pk:
             # Ensure at least one primary key
             columns.insert(0, Column("id", Integer, primary_key=True, autoincrement=True))
-        table = Table(table_name, MetaData(), *columns)
+
+        # Create main table with the same metadata so FK resolution works
+        table = Table(table_name, metadata, *columns)
 
         # Pick dialect
         if dialect == "sqlite":

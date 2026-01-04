@@ -420,6 +420,18 @@ def coerce_bool(value: str) -> any:
 
     return value
 
+def set_attr(source, keys, value):
+    """Helper to set value in nested dictionary using dot-separated keys."""
+    d = {}
+    keys = keys.split('.') if isinstance(keys, str) else keys
+    for key in keys[:-1]:
+        d = d.setdefault(key, {})
+    d[keys[-1]] = coerce_bool(value)
+    if isinstance(source, dict):
+        merge_dict(d, source)
+    else:
+        setattr(source, keys[0], dict_to_class(d))
+
 def load_env(path=".env") -> 'EnvConfig':
     import warnings
     from collections import defaultdict

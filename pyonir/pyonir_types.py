@@ -67,18 +67,18 @@ AppRequestPaths = Tuple[RoutePath, AppPaths]
 """Tuple representing an incoming request path and all known paths for resolution."""
 
 class EnvConfig:
-    """Application Configurations"""
-    APP_ENV: str
-    APP_KEY: str
-    APP_DEBUG: bool
-    APP_URL: str
-    USE_THEMES: bool
-    DB_CONNECTION: str
-    DB_HOST: str
-    DB_PORT: int
-    DB_DATABASE: str
-    DB_USERNAME: str
-    DB_PASSWORD: str
+    """Application configuration values loaded from environment variables.
+
+    This class defines all required configuration fields for the application,
+    including feature flags and database connection settings.
+    """
+    salt: str
+    """Secret salt value used for hashing and security operations."""
+    use_ssl: bool
+    """Enable or disable SSL for the application."""
+    use_themes: bool
+    """Enable or disable application theme support."""
+
 
 class PyonirHooks(str):
     AFTER_INIT = 'AFTER_INIT'

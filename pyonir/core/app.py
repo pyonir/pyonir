@@ -540,7 +540,7 @@ class BaseApp(Base):
         """Directory path for file system data storage is one level above the application directory
         and labeled as {appname}_data_stores"""
         default = os.path.join(self.app_account_dirpath, f"{self.name}_{self.DATA_DIRNAME}")
-        return get_attr(self.env, 'app.data_dirpath') or default
+        return get_attr(self.env, 'app.datastore_dirpath') or default
 
     @property
     def frontend_assets_dirpath(self) -> str:

@@ -62,7 +62,7 @@ class MockDataService(DatabaseService):
 app = Pyonir(__file__, False)  # Placeholder for PyonirApp instance
 temp_datastore = os.path.join(app.app_dirpath,'tmp_store')
 os.makedirs(temp_datastore, exist_ok=True)
-app.env.data_dirpath = temp_datastore
+app.env.datastore_dirpath = temp_datastore
 db = (MockDataService(app, "pyonir_test.db")
         .set_driver("sqlite").set_database(os.path.join(app.app_dirpath,'tmp_store')))
 

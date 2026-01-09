@@ -88,7 +88,7 @@ class BaseSchema:
                 if field_name in self._foreign_key_names:
                     value = type_factory() if type_factory else cls_mapper(value, field_type, is_fk=True)
                 else:
-                    value = coerce_value_to_type(value, field_type, factory_fn=type_factory) if value or type_factory else None
+                    value = coerce_value_to_type(value, field_type, factory_fn=type_factory) if (value is not None) or type_factory else None
             setattr(self, field_name, value)
 
         self._errors = []
@@ -176,12 +176,15 @@ class BaseSchema:
 
     def to_tuple(self) -> tuple:
         """Returns a tuple of the model's column values in order."""
+        from pyonir.core.mapper import is_optional_type
+
         columns = []
         values = []
         for name, _ in self.__fields__:
             columns.append(name)
             v = getattr(self, name)
-            v = json.dumps(v, default=json_serial) if isinstance(v,(dict, list, tuple, set)) else v
+            is_optional_schema = isinstance(v, BaseSchema) and is_optional_type(_)
+            v = json.dumps(v, default=json_serial) if is_optional_schema or isinstance(v,(dict, list, tuple, set)) else v
             if (name, _) in self.__foreign_keys__:
                 v = get_attr(v, v.__primary_key__)
             values.append(v)

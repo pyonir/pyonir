@@ -2,6 +2,7 @@ import os
 from dataclasses import is_dataclass
 from datetime import datetime
 from enum import EnumType
+from types import UnionType
 from typing import get_type_hints, Any, Tuple
 from typing import get_origin, get_args, Union, Callable, Mapping, Iterable, Generator
 from collections.abc import Iterable as ABCIterable, Mapping as ABCMapping, Generator as ABCGenerator
@@ -43,7 +44,7 @@ def unwrap_optional(tp):
     if is_iterable(origin_tp):
         value_tps = get_args(tp)
         return origin_tp, None, value_tps
-    if origin_tp is Union:
+    if origin_tp is Union or isinstance(tp, UnionType):
         args = [unwrap_optional(a) for a in get_args(tp) if a is not type(None)]
         if len(args):
             args = args[0]

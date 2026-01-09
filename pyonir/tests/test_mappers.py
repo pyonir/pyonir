@@ -14,6 +14,9 @@ from pyonir.libs.plugins.navigation import Menu
 
 
 # ==== Sample classes to map into ====
+class MockGeneric(BaseSchema):
+    foo: str | None
+    bar: int | None
 
 class MockAddress:
 
@@ -54,6 +57,13 @@ class Article:
 
 article_filepath = os.path.join(os.path.dirname(__file__), 'contents', 'article.md')
 # ==== Tests ====
+def test_generic():
+    generic_model = MockGeneric(foo='field1', bar='123')
+    pass
+    # genmodel = cls_mapper(obj, generic_model)
+    # assert genmodel.field1 == "value1"
+    # assert genmodel.field2 == 123
+
 def test_request_mapper():
 
     def demo_route(user_id: int, request: PyonirRequest):

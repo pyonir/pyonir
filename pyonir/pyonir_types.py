@@ -4,7 +4,7 @@ from typing import Any, Dict, Generator, Optional, Union, Callable, List, Tuple,
 
 from pyonir.core.parser import DeserializeFile, VIRTUAL_ROUTES_FILENAME
 from pyonir.core.templating import TemplateEnvironment, PyonirThemes, Theme
-from pyonir.core.utils import get_attr
+from pyonir.core.utils import get_attr, set_attr
 from datetime import datetime
 
 from sortedcontainers import SortedList
@@ -79,6 +79,10 @@ class EnvConfig:
     use_themes: bool
     """Enable or disable application theme support."""
 
+    def add(self, key: str, value: Any, is_nested: bool = False) -> None:
+        """Adds a configuration value to the environment settings."""
+        set_attr(self, key, value)
+
 
 class PyonirHooks(str):
     AFTER_INIT = 'AFTER_INIT'
@@ -148,7 +152,10 @@ class AbstractFSQuery:
         for k in ['limit', 'curr_page','max_count','page_nums','order_by','order_dir','where_key']:
             if k in params:
                 if k in ('limit', 'curr_page', 'max_count') and params[k]:
-                    params[k] = int(params[k])
+                    try:
+                        params[k] = int(params[k])
+                    except ValueError:
+                        params[k] = 0
                 setattr(self, k, params[k])
         return self
 
@@ -182,6 +189,8 @@ class AbstractFSQuery:
         """Paginates a list into smaller segments based on curr_pg and display limit"""
         from sortedcontainers import SortedList
         self.order_dir = 'desc' if reverse else 'asc'
+        # if self.limit:
+        #     self.curr_page = 1 if not self.curr_page else self.curr_page
         if self.order_by:
             self.sorted_files = SortedList(self.query_fs, self.sorting_key)
         if self.where_key:
@@ -190,7 +199,7 @@ class AbstractFSQuery:
         force_all = not self.limit
 
         self.max_count = len(self.sorted_files)
-        page_num = 0 if force_all else int(self.curr_page)
+        page_num = 0 if force_all else self.curr_page or 1
         start = (page_num * self.limit) - self.limit
         end = (self.limit * page_num)
         pg = (self.max_count // self.limit) + (self.max_count % self.limit > 0) if self.limit > 0 else 0
@@ -198,7 +207,7 @@ class AbstractFSQuery:
 
         return BasePagination(
             curr_page = page_num,
-            page_nums = [n for n in range(1, pg + 1)] if pg else None,
+            page_nums = [n for n in range(1, pg + 1)] if pg else [],
             limit = self.limit,
             max_count = self.max_count,
             items = list(pag_data)

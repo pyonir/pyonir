@@ -518,6 +518,7 @@ def parse_ref_to_files(filepath, file_name, app_ctx, attr_path: str = None, quer
         # Ref parameters with model will return a generic model to represent the data value
         model = None
         generic_model_properties = query_params.get('model')
+        include_names = tuple(query_params.get('include_names').split('|')) if query_params.get('include_names') else None
         return_all_files = query_params.get('limit','') == '*'
         if generic_model_properties:
             if '.' in generic_model_properties:
@@ -529,6 +530,7 @@ def parse_ref_to_files(filepath, file_name, app_ctx, attr_path: str = None, quer
 
         collection = CollectionQuery(filepath, app_ctx=app_ctx,
                                      model=model,
+                                     include_names=include_names,
                                      exclude_names=(file_name, 'index.md'),
                                      force_all=return_all_files)
         data = collection.set_params(query_params).paginated_collection()

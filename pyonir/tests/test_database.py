@@ -1,4 +1,5 @@
 import os
+from abc import ABC
 
 from typing import Optional, Type
 import shutil
@@ -6,7 +7,7 @@ import json
 
 from pyonir import Pyonir
 from pyonir.core.schemas import BaseSchema
-from pyonir.core.database import DatabaseService
+from pyonir.core.database import PyonirDatabaseService
 
 class MockRole(BaseSchema, table_name='roles_table', primary_key='rid'):
     rid: str = BaseSchema.generate_id
@@ -20,35 +21,11 @@ class MockUser(BaseSchema, table_name='pyonir_users', primary_key='uid', foreign
     role: MockRole = lambda: MockRole(value="pythonista")
 
 
-class MockDataService(DatabaseService):
-
-    def create_table_from_model(self, model: Type[BaseSchema]) -> 'DatabaseService':
-        pass
+class MockDataService(PyonirDatabaseService, ABC):
 
     name = "test_data_service"
     version = "0.1.0"
     endpoint = "/testdata"
-
-    def create_table(self, sql_create: str) -> 'DatabaseService':
-        return super().create_table(sql_create)
-
-    def destroy(self):
-        super().destroy()
-
-    def connect(self) -> None:
-        super().connect()
-
-    def disconnect(self) -> None:
-        super().disconnect()
-
-    def insert(self, table: str, entity: MockUser) -> int:
-        return super().insert(table, entity)
-
-    def find(self, table: str, filter: dict = None) -> list:
-        return super().find(table, filter)
-
-    def update(self, table: str, id: int, data: dict) -> bool:
-        return super().update(table, id, data)
 
     def delete(self, table: str, id: int) -> bool:
         if self.driver == "sqlite":
@@ -63,8 +40,8 @@ app = Pyonir(__file__, False)  # Placeholder for PyonirApp instance
 temp_datastore = os.path.join(app.app_dirpath,'tmp_store')
 os.makedirs(temp_datastore, exist_ok=True)
 app.env.datastore_dirpath = temp_datastore
-db = (MockDataService(app, "pyonir_test.db")
-        .set_driver("sqlite").set_database(os.path.join(app.app_dirpath,'tmp_store')))
+db = (MockDataService(app)
+        .set_driver("sqlite").set_dbname("pyonir_test"))
 
 def test_crud_operations():
     # Create
@@ -72,8 +49,8 @@ def test_crud_operations():
     mock_user = MockUser(username="testuser", email="test@example.com")
     table_name = mock_user.__table_name__
     table_key = mock_user.__primary_key__
-    db.create_table(mock_user._sql_create_table)
-    user_id = db.insert(table_name, mock_user)
+    db.build_table_from_model(mock_user)
+    user_id = db.insert(mock_user)
     assert user_id
 
     # Read
@@ -114,7 +91,7 @@ def test_crud_operations():
 
     db.disconnect()
     db.destroy()
-    assert not os.path.exists(db.database)
+    assert not db.exists()
 
 def test_save_to_file_simple():
     user = MockUser(username="fileuser", email="fileuser@example.com")

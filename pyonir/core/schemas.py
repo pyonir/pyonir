@@ -79,14 +79,16 @@ class BaseSchema:
         cls.generate_sql_table(dialect)
 
     def __init__(self, **data):
-        from pyonir.core.mapper import coerce_value_to_type, cls_mapper
+        from pyonir.core.mapper import coerce_value_to_type, cls_mapper, is_optional_type
         for field_name, field_type in self.__fields__:
             value = data.get(field_name)
             if data:
                 custom_mapper_fn = getattr(self, f'map_to_{field_name}', None)
                 type_factory = getattr(self, field_name, custom_mapper_fn)
+                is_opt = is_optional_type(field_type)
+                has_correct_type = (not is_opt and isinstance(value, field_type)) or (value is None and (type_factory is None or callable(type_factory)))
                 if field_name in self._foreign_key_names:
-                    value = type_factory() if type_factory else cls_mapper(value, field_type, is_fk=True)
+                    value = type_factory() if type_factory else cls_mapper(value, field_type, is_fk=True) if not has_correct_type else value
                 else:
                     value = coerce_value_to_type(value, field_type, factory_fn=type_factory) if (value is not None) or type_factory else None
             setattr(self, field_name, value)

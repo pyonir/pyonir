@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os, time
 from abc import ABC, abstractmethod
+from os import makedirs
 from typing import Tuple, Any, Dict, Optional
 
 from pyonir.core.schemas import BaseSchema
@@ -133,7 +134,7 @@ def get_geolocation(ip_address: str) -> Dict[str, Any]:
     loc = loc.json()
     return loc
 
-def client_location(request: PyonirRequest) -> Optional[dict]:
+def client_location(request: BaseRequest) -> Optional[dict]:
     """Returns the requester's location information."""
     if not request or not request.headers:
         return None
@@ -431,8 +432,32 @@ class Auth:
             print(f"Something went wrong refreshing jwt token. {e}")
             raise
 
+    def _validate_password(self, user: User) -> bool:
+        """Validates the provided password against the stored user password."""
+        salt = self.app.salt
+        requested_passw = Auth.harden_password(salt, self.user_creds.password, user.auth_token)
+        return Auth.verify_password(user.password, requested_passw)
+
+    def verify_credentials(self, user: User) -> bool:
+        """Verifies the provided user credentials."""
+        if not user:
+            return False
+        if user.auth_from == 'basic':
+            return self._validate_password(user)
+        elif user.auth_from == 'oauth2':
+            return True
+        return False
+
+    def create_session(self, user: User = None):
+        """Creates a user jwt and saves session."""
+        user = user or self.user
+        if not user or not self.request.server_request or self.signin_has_exceeded():
+            return
+        user_jwt = self.create_jwt(user.uid, user.role.name)
+        user.save_to_session(self.request, value=user_jwt)
+
     def create_signin(self, user: User = None):
-        """Signs in a user account based on the provided credentials."""
+        """Signs in a user account based on the provided credentials. Creates a new session and profile on filesystem."""
         if self.user:
             self.response = self.responses.ACTIVE_SESSION
             return
@@ -446,7 +471,6 @@ class Auth:
             if user.auth_from == 'oauth2':
                 # TODO: handle checking oauth
                 user_jwt = self.create_jwt(user.uid, user.role.name)
-                # self.log_user_location(user)
                 user.save_to_file(user.file_path)
                 user.save_to_session(self.request, value=user_jwt)
                 pass
@@ -460,9 +484,7 @@ class Auth:
                     # update csrf token after successful login for better security
                     user.auth_token = csrf_token(self.request.server_request)
                     user.password = self.hash_password(self.user_creds.password, with_token=user.auth_token)
-                    # user.save_to_session(self.request, key='csrf_token', value=user.auth_token)
                     user.save_to_session(self.request, value=user_jwt)
-                    # self.log_user_location(user)
                     user.save_to_file(user.file_path)
 
                     self.response = self.responses.SUCCESS
@@ -637,9 +659,11 @@ class Auth:
             print(f"{__name__} method - {str(e)}: {type(e).__name__}")
 
     @staticmethod
-    def save_avatar_from_url(url: str, output_path: str):
+    def save_avatar_from_url(external_url: str, output_path: str):
+        """Saves user avatar from a URL to the specified output path."""
         import requests
-        response = requests.get(url, stream=True)
+        makedirs(os.path.dirname(output_path), exist_ok=True)
+        response = requests.get(external_url, stream=True)
 
         if response.status_code == 200:
             with open(output_path, "wb") as file:
@@ -647,7 +671,7 @@ class Auth:
                     file.write(chunk)
             print(f"Avatar saved to {output_path}")
         else:
-            print("Failed to download image:", response.status_code)
+            print(f"Failed to download image: {external_url}", response.status_code)
 
     @staticmethod
     def verify_password(encrypted_pwd, input_password) -> bool:
@@ -677,7 +701,7 @@ class AuthService(ABC):
     """
 
     @abstractmethod
-    async def sign_up(self, request: PyonirRequest) -> AuthResponse:
+    async def sign_up(self, request: BaseRequest) -> AuthResponse:
         """
         Handles the user sign-up process for the authentication system.
         ---
@@ -697,7 +721,7 @@ class AuthService(ABC):
                     message: Unauthorized access. Please log in.
         ---
         Args:
-            request (PyonirRequest):
+            request (BaseRequest):
                 The incoming request object containing authentication data,
                 including `authorizer` with `user_creds` (email and password) and
                 a `response` object to be returned to the client.
@@ -716,7 +740,7 @@ class AuthService(ABC):
         return authorizer.response
 
     @abstractmethod
-    async def sign_in(self, request: PyonirRequest) -> AuthResponse:
+    async def sign_in(self, request: BaseRequest) -> AuthResponse:
         """
         Authenticate a user and return a JWT or session token.
         ---
@@ -727,7 +751,7 @@ class AuthService(ABC):
                     status_code: 200
                     message: You have signed in successfully.
         ---
-        :param request: PyonirRequest - The web request
+        :param request: BaseRequest - The web request
         :return: AuthResponse - A JWT or session token if authentication is successful, otherwise None.
         """
         authorizer = request.auth
@@ -736,7 +760,7 @@ class AuthService(ABC):
         return authorizer.response
 
     @abstractmethod
-    async def sign_out(self, request: PyonirRequest) -> AuthResponse:
+    async def sign_out(self, request: BaseRequest) -> AuthResponse:
         """
         Invalidate a user's active session or token.
         ---
@@ -744,7 +768,7 @@ class AuthService(ABC):
             call: {call_path}
             redirect: /sign-in
         ---
-        :param request: PyonirRequest - The web request
+        :param request: BaseRequest - The web request
         :return: bool - True if sign_out succeeded, otherwise False.
         """
         authorizer = request.auth
@@ -752,11 +776,11 @@ class AuthService(ABC):
         return authorizer.responses.USER_SIGNED_OUT
 
     @abstractmethod
-    async def refresh_token(self, request: PyonirRequest) -> Optional[str]:
+    async def refresh_token(self, request: BaseRequest) -> Optional[str]:
         """
         Refresh an expired access token.
 
-        :param request: PyonirRequest - The web request.
+        :param request: BaseRequest - The web request.
         :return: Optional[str] - A new access token if successful, otherwise None.
         """
         authorizer = request.auth

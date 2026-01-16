@@ -40,7 +40,7 @@ class BaseRequest:
         self.path_params = dict_to_class(self.server_request.path_params,'path_params') if server_request else {}
         self.url = f"{self.path}" if server_request else {}
         self.slug = self.path.lstrip('/').rstrip('/')
-        self.query_params = self.get_params(self.server_request.url.query) if server_request else {}
+        self.query_params = self._build_params(self.server_request.url.query) if server_request else {}
         self.parts = self.slug.split('/') if self.slug else []
         self.limit = get_attr(self.query_params, 'limit', self.PAGINATE_LIMIT)
         self.model = get_attr(self.query_params, 'model')
@@ -110,6 +110,10 @@ class BaseRequest:
         flash_obj = self.server_request.session.get('__flash__') or {}
         flash_obj[key] = value
         self.server_request.session['__flash__'] = flash_obj
+
+    def query_param(self, key: str, default: any = None) -> any:
+        """Returns data from query parameters"""
+        return getattr(self.query_params, key, default)
 
     def from_session(self, session_key: str) -> any:
         """Returns data from the session"""
@@ -265,7 +269,7 @@ class BaseRequest:
         return nheaders
 
     @staticmethod
-    def get_params(url, as_dict=False):
+    def _build_params(url, as_dict=False):
         from pyonir.core.mapper import dict_to_class
         from pyonir.core.utils import parse_url_params
         args = parse_url_params(url)

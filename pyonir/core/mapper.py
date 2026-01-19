@@ -1,5 +1,4 @@
-import os
-from dataclasses import is_dataclass
+import os, json
 from datetime import datetime
 from enum import EnumType
 from types import UnionType
@@ -150,7 +149,7 @@ def func_request_mapper(func: Callable, pyonir_request: 'BaseRequest') -> dict:
 
 def lookup_fk(value: str, data_dir: str, app_ctx: list):
     _, _, has_lookup = value.partition(LOOKUP_DATA_PREFIX+'/') if isinstance(value, str) else [None,None,None]
-    value = DeserializeFile(os.path.join(data_dir, has_lookup), app_ctx=app_ctx) if has_lookup else value
+    value = DeserializeFile(os.path.join(data_dir, has_lookup), app_ctx=app_ctx) if has_lookup else json.loads(value)
     return value
 
 def coerce_value_to_type(value: Any, target_type: Union[type, Tuple[type]], factory_fn: Callable = None) -> Any:

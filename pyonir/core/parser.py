@@ -20,6 +20,7 @@ MULTI_LN_COMMENT = '#|'
 LOOKUP_EMBED_PREFIX = '$'
 LOOKUP_DIR_PREFIX = '$dir'
 LOOKUP_DATA_PREFIX = '$data'
+LOOKUP_CALLER_PREFIX = '$call'
 FILTER_KEY = '@filter'
 VIRTUAL_ROUTES_FILENAME: str = '.virtual_routes'
 
@@ -547,7 +548,8 @@ def process_lookups(value_str: str, file_ctx: DeserializeFile = None) -> Optiona
     file_name: str = file_ctx.file_name
 
     value_str = value_str.strip()
-    has_lookup = value_str.startswith((LOOKUP_DIR_PREFIX, LOOKUP_DATA_PREFIX))
+    has_lookup = value_str.startswith((LOOKUP_DIR_PREFIX, LOOKUP_DATA_PREFIX, LOOKUP_CALLER_PREFIX))
+
 
     if has_lookup:
         from pyonir.core.utils import parse_url_params
@@ -555,10 +557,19 @@ def process_lookups(value_str: str, file_ctx: DeserializeFile = None) -> Optiona
         _query_params = value_str.split("?").pop() if "?" in value_str else False
         query_params = parse_url_params(_query_params) if _query_params else {}
         has_attr_path = value_str.split("#")[-1] if "#" in value_str else ''
+        is_caller = value_str.strip().startswith(LOOKUP_CALLER_PREFIX)
         value_str = value_str.replace(f"{LOOKUP_DIR_PREFIX}/", "") \
             .replace(f"{LOOKUP_DATA_PREFIX}/", "") \
+            .replace(f"{LOOKUP_CALLER_PREFIX}/", "") \
             .replace(f"?{_query_params}", "") \
             .replace(f'#{has_attr_path}', '')
+
+        if is_caller:
+            from pyonir import Site
+            module_path = value_str.strip().replace(f"{LOOKUP_CALLER_PREFIX}/", "")
+            func = Site.load_function_from_path(module_path) if Site else None
+            data = func() if callable(func) else None
+            return data
 
         value_str = value_str.replace('../', '').replace('/*', '')
         lookup_fpath = os.path.join(base_path, *value_str.split("/"))
@@ -603,9 +614,7 @@ def deserialize_line(line_value: str, container_type: Any = None, file_ctx: Dese
         return True
     elif isinstance(container_type, list):
         return [deserialize_line(v, file_ctx=file_ctx)  for v in line_value.split(', ')]
-    elif line_value.startswith((LOOKUP_DIR_PREFIX, LOOKUP_DATA_PREFIX)):
-        # if file_ctx and file_ctx.is_virtual_route:
-        #     return line_value
+    elif line_value.startswith((LOOKUP_DIR_PREFIX, LOOKUP_DATA_PREFIX, LOOKUP_CALLER_PREFIX)):
         if '{' in line_value:
             line_value = file_ctx.process_site_filter('pyformat', line_value, file_ctx.__dict__)
         return process_lookups(line_value, file_ctx=file_ctx)

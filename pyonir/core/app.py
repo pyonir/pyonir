@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from typing import Optional, Generator, List
+from typing import Optional, Generator, List, Callable
 
 from pyonir.core.utils import get_attr, load_env, generate_id, merge_dict
 
@@ -581,6 +581,13 @@ class BaseApp(Base):
         self.TemplateEnvironment.load_template_path(app_active_theme.jinja_template_path, priority=True)
 
     # RUNTIME
+    def load_function_from_path(self, module_path: str) -> Optional[Callable]:
+        """Loads a function resolver from a module path"""
+        app_ctx = list(filter(lambda p: p.name == module_path.split('.')[0], self.activated_plugins))
+        app_ctx = app_ctx[0] if len(app_ctx) else self
+        resolver = app_ctx.reload_resolver(module_path)
+        return resolver
+
     def load_static_path(self,url: str, path: str) -> None:
         """Loads a static file path into the application server"""
         if os.path.exists(path):

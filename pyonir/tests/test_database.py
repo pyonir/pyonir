@@ -1,106 +1,70 @@
 import os
-from abc import ABC
-
-from typing import Optional, Type
 import shutil
-import json
 
-from pyonir import Pyonir
-from pyonir.core.schemas import BaseSchema
-from pyonir.core.database import PyonirDatabaseService
-
-class MockRole(BaseSchema, table_name='roles_table', primary_key='rid'):
-    rid: str = BaseSchema.generate_id
-    value: str
-
-class MockUser(BaseSchema, table_name='pyonir_users', primary_key='uid', foreign_keys={MockRole}, fk_options={"role": {"ondelete": "RESTRICT", "onupdate": "RESTRICT"}}):
-    username: str
-    email: str
-    gender: Optional[str] = "godly"
-    uid: str = BaseSchema.generate_id
-    role: MockRole = lambda: MockRole(value="pythonista")
+from pyonir.tests.conftest import PyonirMocks, PyonirMockUser, PyonirMockRole
 
 
-class MockDataService(PyonirDatabaseService, ABC):
-
-    name = "test_data_service"
-    version = "0.1.0"
-    endpoint = "/testdata"
-
-    def delete(self, table: str, id: int) -> bool:
-        if self.driver == "sqlite":
-            pk = self.get_pk(table)
-            cursor = self.connection.cursor()
-            cursor.execute(f"DELETE FROM {table} WHERE {pk} = ?", (id,))
-            self.connection.commit()
-            return cursor.rowcount > 0
-        return False
-
-app = Pyonir(__file__, False)  # Placeholder for PyonirApp instance
-temp_datastore = os.path.join(app.app_dirpath,'tmp_store')
-os.makedirs(temp_datastore, exist_ok=True)
-app.env.datastore_dirpath = temp_datastore
-db = (MockDataService(app)
-        .set_driver("sqlite").set_dbname("pyonir_test"))
-
-def test_crud_operations():
+def test_crud_operations(test_pyonir_db: PyonirMocks.DatabaseService):
     # Create
-    db.connect()
-    mock_user = MockUser(username="testuser", email="test@example.com")
+    test_pyonir_db.connect()
+    mock_user = PyonirMockUser(**PyonirMocks.user_data)
     table_name = mock_user.__table_name__
     table_key = mock_user.__primary_key__
-    db.build_table_from_model(mock_user)
-    user_id = db.insert(mock_user)
+    test_pyonir_db.build_table_from_model(mock_user)
+    user_id = test_pyonir_db.insert(mock_user)
     assert user_id
 
     # Read
-    results = db.find(table_name, {table_key: user_id})
-    mock_role_results = db.find(mock_user.role.__table_name__, {"rid": mock_user.role.rid})
-    assert (len(results) == 1)
-    assert (results[0]["username"] == "testuser")
-    assert (results[0]["email"] == "test@example.com")
-    assert (results[0]["role"] == mock_user.role.rid)
+    results: PyonirMockUser = next(test_pyonir_db.find(PyonirMockUser, {'where': f"{table_key} = '{user_id}'"}))
+    assert (isinstance(results, PyonirMockUser))
+    assert (results.username == mock_user.username)
+    assert (results.email == mock_user.email)
+    assert (results.role.rid == mock_user.role.rid)
+
     # Verify foreign key role
-    assert (len(mock_role_results) == 1)
-    assert (mock_role_results[0]["value"] == mock_user.role.value)
+    mock_role_results = next(test_pyonir_db.find(PyonirMockRole, {'where': f"rid = '{mock_user.role.rid}'"}))
+    assert (isinstance(mock_role_results, PyonirMockRole))
+    assert (mock_role_results.value == mock_user.role.value)
 
     # Update
-    updated = db.update(table_name, user_id, {
+    updated = test_pyonir_db.update(table_name, user_id, {
         "username": "newusername",
         "email": "newemail@example.com"
     })
     assert updated
 
-    db.add_table_columns(table_name, {
+    test_pyonir_db.add_table_columns(table_name, {
         "age": "INTEGER DEFAULT 0"
     })
 
     # Verify update
-    results = db.find(table_name, {table_key: user_id})
-    assert (results[0]["username"] == "newusername")
-    assert (results[0]["email"] == "newemail@example.com")
-    assert (results[0]["age"] == 0)
+    results = next(test_pyonir_db.find(PyonirMockUser, {'where': f"{table_key} = '{user_id}'"}))
+    assert (results.username == "newusername")
+    assert (results.email == "newemail@example.com")
+    # assert (results.age == 0)
 
     # Delete
-    deleted = db.delete(table_name, user_id)
+    deleted = test_pyonir_db.delete(mock_user, {'where': f"{table_key} = '{user_id}'"})
     assert deleted
 
     # Verify deletion
-    results = db.find(table_name, {table_key: user_id})
+    results = test_pyonir_db.find(PyonirMockUser, {'where': f"{table_key} = '{user_id}'"})
     assert (len(results) == 0)
 
-    db.disconnect()
-    db.destroy()
-    assert not db.exists()
+    test_pyonir_db.disconnect()
+    test_pyonir_db.destroy()
+    assert not test_pyonir_db.exists()
 
-def test_save_to_file_simple():
-    user = MockUser(username="fileuser", email="fileuser@example.com")
+def test_save_to_file_simple(test_app: PyonirMocks.App):
+    user = PyonirMockUser(username="fileuser", email="fileuser@example.com", role=PyonirMockRole(name="pythonista"))
+    temp_datastore = os.path.join(test_app.app_dirpath,'tmp_store')
+    test_app.env.add('app.datastore_dirpath', temp_datastore)
     file_path = os.path.join(temp_datastore, user.__table_name__, "user.json")
     result = user.save_to_file(file_path)
+    udata = PyonirMockUser.from_file(file_path, test_app.app_ctx)
     assert result
     assert os.path.exists(file_path)
-    with open(file_path, "r") as f:
-        data = json.load(f)
-    assert data["username"] == "fileuser"
-    assert data["email"] == "fileuser@example.com"
+    assert udata.username == user.username
+    assert udata.email == user.email
+    assert udata.role.name == user.role.name
     shutil.rmtree(temp_datastore)

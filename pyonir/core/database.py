@@ -3,7 +3,7 @@ import sqlite3
 from abc import abstractmethod
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, Dict, Optional, Type, Union, Iterator, Generator, List
+from typing import Any, Dict, Optional, Type, Union, Iterator, Generator, List, Callable, Tuple, Iterable
 from urllib.parse import quote_plus
 
 from sortedcontainers import SortedList
@@ -105,6 +105,147 @@ class DatabaseConfig(BaseSchema):
         "change_me"
     """
 
+
+class PyonirDBQuery:
+    def __init__(self, db_service: 'PyonirDatabaseService'):
+        self.db_service = db_service
+        self.sql: str = ""
+        self._model: BaseSchema = None
+        self._model_aliases = {}
+        self._table = None
+        self._alias = None
+        self._use_transaction: bool = False
+        self._delete = []
+        self._columns = []
+        self._joins = []
+        self._where = []
+        self._where_func: Tuple[Callable, Any] = None
+        self._params = []
+        self._order_by = []
+        self._limit = None
+
+    def table(self, model: type[BaseSchema], alias: Optional[str] = None):
+        self._model = model
+        self._table = model.__table_name__
+        self._alias = alias or self._table[0]
+        self._model_aliases[model] = self._alias
+        return self
+
+    def select(self, columns: Optional[Iterable[str]] = None):
+        prefix = (self._alias or self._table)
+        columns = columns or self._model.__table_columns__
+        for col in columns:
+            if col in self._model._foreign_key_names:
+                # skip foreign key columns for now
+                continue
+            self._columns.append(f"{prefix}.{col}")
+        return self
+
+    def join_all(self, kind="INNER"):
+        for fk_name, fk_type in getattr(self._model, '__foreign_keys__', []):
+            fk_model = fk_type if isinstance(fk_type, type) and issubclass(fk_type, BaseSchema) else None
+            if not fk_model: continue
+            table_alias = fk_model.__table_name__[0]
+            fk_pk = get_attr(fk_model,'__primary_key__','id')
+            on_expr = f"{self._model_aliases[self._model]}.{fk_name} = {table_alias}.{fk_pk}"
+            self.join(fk_model, on=on_expr, json_object=(fk_name,) + tuple(fk_model.__table_columns__), alias=table_alias, kind=kind)
+        return self
+
+    def join(self, model: type[BaseSchema], on: str, kind="INNER", alias: str = None, json_object: tuple[str] = None):
+        table_alias = alias or model.__table_name__[0]
+        self._model_aliases[model] = table_alias
+        self._joins.append(
+            f"{kind} JOIN {model.__table_name__} {table_alias} ON {on}"
+        )
+        # Optional JSON object projection
+        if json_object:
+            json_alias, *json_cols = json_object
+            parts = []
+            for col in json_cols:
+                parts.append(f"'{col}', {table_alias}.{col}")
+
+            json_sql = f"json_object({', '.join(parts)}) AS {json_alias}"
+            self._columns.append(json_sql)
+        return self
+
+    def where(self, condition: Union[str, Callable], params: Dict = None):
+        if not condition:
+            return self
+        if callable(condition):
+            # condition param arguments will always contain the list item and executed during mapping
+            self._where_func = (condition, params)
+        self._where.append(condition)
+        return self
+
+    def order_by(self, column: str, direction="ASC"):
+        prefix = self._alias or self._table
+        self._order_by.append(f"{prefix}.{column.name} {direction}")
+        return self
+
+    def limit(self, value: int):
+        self._limit = value
+        return self
+
+    def build(self):
+        sql = self._delete if self._delete else ["SELECT", ", ".join(self._columns), "FROM",
+               f"{self._table} {self._alias}" if self._alias else self._table]
+
+        if self._joins:
+            sql.extend(self._joins)
+
+        if self._where and len(self._where):
+            sql.append("WHERE")
+            sql.append(" AND ".join(self._where))
+
+        if self._order_by:
+            sql.append("ORDER BY")
+            sql.append(", ".join(self._order_by))
+
+        if self._limit is not None:
+            sql.append("LIMIT ?")
+            self._params.append(self._limit)
+
+        self.sql = " ".join(sql)
+        return self
+
+    def reset(self):
+        self._model_aliases = {}
+        self._table = None
+        self._alias = None
+        self._delete = []
+        self._columns = []
+        self._joins = []
+        self._where = []
+        self._params = []
+        self._order_by = []
+        self._limit = None
+        self.sql = ""
+        return self
+
+    def delete(self, model: type[BaseSchema]):
+        self.table(model)
+        self._delete.append(f"""DELETE FROM {self._table}""")
+        return self
+
+    def execute(self) -> Iterator[any]:
+        if not self.db_service.connection:
+            raise RuntimeError("Database connection is not established.")
+        if not self.sql:
+            self.build()
+        cursor = self.db_service.connection.cursor()
+        cursor.execute(self.sql, self._params)
+        if self._delete:
+            self.db_service.connection.commit()
+            yield cursor.rowcount
+            return
+        for row in cursor.fetchall():
+            v = dict(row)
+            if self._where_func:
+                func, fparams = self._where_func
+                is_valid = func(v, fparams)
+                if not is_valid: continue
+            yield self._model(**v)
+
 class PyonirDatabaseService:
     """Database service with env-based config."""
     _drivers = Driver
@@ -114,8 +255,18 @@ class PyonirDatabaseService:
         dc = cls_mapper(db_env_configs, DatabaseConfig)
         self.connection: Optional[sqlite3.Connection] = None
         self.app = app
+        self._query: PyonirDBQuery = None
         self._datastore_dirpath: str = ""
         self._dbconfig: DatabaseConfig = dc
+
+    @property
+    def query(self) -> PyonirDBQuery:
+        """Get a new query builder instance."""
+        if not self._query:
+            self._query = PyonirDBQuery(self)
+        else:
+            self._query.reset()
+        return self._query
 
     @property
     def datastore_path(self):
@@ -399,24 +550,22 @@ class PyonirDatabaseService:
 
 
     @abstractmethod
-    def find(self, table: str, filter: Dict = None) -> Any:
-        results = []
+    def find(self, entity: Type[BaseSchema], options: dict = None) -> Any:
+        """Find entity rows using entity's table name and options."""
+        if not options:
+            options = {}
+        where: Union[Callable, str] = options.get('where')
+        kind: str = options.get('join_kind', 'LEFT')
+        select: Optional[tuple] = options.get('select')
+        self.query.reset()
+        return self.query.table(entity).select(select).join_all(kind=kind).where(where).execute()
 
-        if self.driver == Driver.SQLITE:
-            where_clause = ''
-            params = ()
-            if filter:
-                where_clause = 'WHERE ' + ' AND '.join(f"{k} = ?" for k in filter)
-                params = tuple(filter.values())
-            query = f"SELECT * FROM {table} {where_clause}"
-            cursor = self.connection.cursor()
-            cursor.execute(query, params)
-            results = [dict(row) for row in cursor.fetchall()]
-
-        elif self.driver == Driver.FILE_SYSTEM:
-            pass
-
-        return results
+    @abstractmethod
+    def delete(self, entity: Type[BaseSchema], options: dict = None) -> bool:
+        """Delete entity rows using entity's table name and options."""
+        where: Union[Callable, str] = options.get('where')
+        result = self.query.delete(entity).where(where).execute()
+        return any(result)
 
     @abstractmethod
     def update(self, table: str, id: Any, data: Dict) -> bool:
@@ -433,35 +582,6 @@ class PyonirDatabaseService:
             return cursor.rowcount > 0
         return False
 
-    @abstractmethod
-    def delete(self, table: str, key_value: Any) -> bool:
-        """Delete entity from backend using primary key."""
-        if self.driver == Driver.SQLITE:
-            if not self.connection:
-                raise ValueError("Database connection is not established.")
-
-            # Get schema class to find primary key
-            schema_cls = None
-            for row in self.connection.execute(f"SELECT * FROM {table} LIMIT 1"):
-                schema_cls = type(table.capitalize(), (BaseSchema,), {k: None for k in dict(row).keys()})
-                break
-
-            pk_field = getattr(schema_cls, '_primary_key', 'id') if schema_cls else 'id'
-
-            # Build DELETE query
-            query = f"DELETE FROM {table} WHERE {pk_field} = ?"
-            values = (key_value,)
-
-            try:
-                cursor = self.connection.cursor()
-                cursor.execute(query, values)
-                self.connection.commit()
-                return cursor.rowcount > 0
-            except sqlite3.Error as e:
-                print(f"[ERROR] SQLite delete failed: {e}")
-                return False
-
-        return False
 
 
 class CollectionQuery(AbstractFSQuery):

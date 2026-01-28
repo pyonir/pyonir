@@ -88,11 +88,13 @@ class BaseSchema:
                 is_opt = is_optional_type(field_type)
                 has_correct_type = (not is_opt and isinstance(value, field_type)) or (value is None and (type_factory is None or callable(type_factory)))
                 if field_name in self._foreign_key_names:
-                    value = type_factory() if type_factory else cls_mapper(value, field_type, is_fk=True) if not has_correct_type else value
+                    value = type_factory() if not value and type_factory else cls_mapper(value, field_type, is_fk=True) if not has_correct_type else value
                 else:
                     value = coerce_value_to_type(value, field_type, factory_fn=type_factory) if (value is not None) or type_factory else None
             setattr(self, field_name, value)
-
+        if not self.__frozen__ and data:
+            # Non frozen instances may include attributes not present on the instance class
+            pass
         self._errors = []
         self.validate_fields()
         self._after_init()
@@ -131,10 +133,11 @@ class BaseSchema:
         from pyonir.core.utils import create_file
         from pyonir.core.parser import LOOKUP_DATA_PREFIX
         from pyonir import Site
-        # file_path = app_datastore if Site and not file_path else file_path
+        assert (Site.datastore_dirpath, "Datastore directory path is not configured in the Site.")
         active_user = getattr(Site.server.request, 'active_user', None)
         filename_as_pk = os.path.basename(file_path).split('.')[0]
         schema_pk_value = getattr(self, self.__primary_key__, None) if self.__primary_key__!='id' else filename_as_pk
+        file_data = self.to_dict(obfuscate=False, with_extras=False)
         if self.__foreign_keys__:
             app_datastore = Site.datastore_dirpath if Site else os.path.dirname(file_path)
             for k, fk_type in self.__foreign_keys__:
@@ -146,8 +149,9 @@ class BaseSchema:
                     fk_entry_name = (fk_pk_value if fk_pk_value and fk_pk_value!='id' else schema_pk_value) + '.json'
                     fk_file_path = os.path.join(data_path, fk_entry_name)
                     fk_schema_inst.save_to_file(fk_file_path)
-                    setattr(self,k, f"{LOOKUP_DATA_PREFIX}/{fk_schema_inst.__table_name__}/{fk_entry_name}")
-        return create_file(file_path, self.to_dict(obfuscate=False, with_extras=False))
+                    file_data[k] = f"{LOOKUP_DATA_PREFIX}/{fk_type.__table_name__}/{fk_entry_name}"
+                    # setattr(self,k, f"{LOOKUP_DATA_PREFIX}/{fk_schema_inst.__table_name__}/{fk_entry_name}")
+        return create_file(file_path, file_data)
 
     def save_to_session(self, request: 'PyonirRequest', key: str = None, value: any = None) -> None:
         """Convert instance to a serializable dict."""

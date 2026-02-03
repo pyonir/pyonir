@@ -61,6 +61,16 @@ class TemplateEnvironment(Environment):
         self.filters.update({name: filter})
         pass
 
+    def render_python_string(self, template_string: str, **context) -> str:
+        """Renders a Jinja template string with the provided context."""
+        context = {} or dict(context)
+        context.update(self.globals)
+        try:
+            return template_string.format(**context)
+        except (KeyError, AttributeError) as e:
+            # print('[pyformatter]', e, string)
+            return template_string
+
 @dataclass
 class Theme:
     _orm_options = {'mapper': {'theme_dirname': 'file_dirname', 'theme_dirpath': 'file_dirpath'}}

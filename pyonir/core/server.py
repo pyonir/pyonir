@@ -449,15 +449,13 @@ class BaseServer(Starlette):
         async def dec_wrapper(star_req):
             from pyonir.core.authorizer import PyonirBaseRequest
             pyonir_request: PyonirBaseRequest = star_req.state.pyonir_request
+            self.request = pyonir_request
             await pyonir_request.set_request_input()
             await pyonir_request.set_page_file()
             pyonir_request.security.responses.load_responses(pyonir_request.file.data)
             if pyonir_request.security.is_denied:
                 return self.serve_redirect(pyonir_request.security.redirect_to or '/')
             res = await pyonir_request.build_response(pyonir_request.file_resolver or dec_func)
-            # pyonir_request = BaseRequest(star_req, self.app)
-            # res = await self.build_response(pyonir_request, dec_func)
-            # self.app.reload_module(dec_func)
             return res
 
         if dec_func:
@@ -707,9 +705,11 @@ class BaseRestResponse:
         return Response(content=content, media_type=media_type) if content else None
 
     def to_dict(self) -> dict:
+        """Converts the response to a dictionary."""
+        from pyonir import Site
         return {
             'status_code': self.status_code,
-            'message': self.message,
+            'message': Site.TemplateEnvironment.render_python_string(self.message or ''),
             'data': self.data
         }
 

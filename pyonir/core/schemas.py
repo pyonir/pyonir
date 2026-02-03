@@ -10,8 +10,8 @@ T = TypeVar("T")
 
 def get_active_user() -> str:
     from pyonir import Site
-    if Site and Site.server and Site.server.request and Site.server.request.auth and Site.server.request.auth.user:
-        return Site.server.request.auth.user.uid
+    if Site and Site.server.is_active and Site.server.request.request_input:
+        return Site.server.request.security.user and Site.server.request.security.user.uid
     return "unknown_user"
 
 class BaseSchema:
@@ -135,8 +135,6 @@ class BaseSchema:
         from pyonir import Site
         if not file_path and hasattr(self, 'file_path'):
             file_path = getattr(self, 'file_path', None)
-        assert (file_path, "File path must be provided to save the schema instance.")
-        assert (Site.datastore_dirpath, "Datastore directory path is not configured in the Site.")
         active_user = getattr(Site.server.request, 'active_user', None)
         filename_as_pk = os.path.basename(file_path).split('.')[0]
         schema_pk_value = getattr(self, self.__primary_key__, None) if self.__primary_key__!='id' else filename_as_pk

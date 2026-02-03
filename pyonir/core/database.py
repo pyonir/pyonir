@@ -228,6 +228,7 @@ class PyonirDBQuery:
         return self
 
     def execute(self) -> Iterator[any]:
+        self.db_service.connect()
         if not self.db_service.connection:
             raise RuntimeError("Database connection is not established.")
         if not self.sql:
@@ -374,19 +375,19 @@ class PyonirDatabaseService:
         cursor.execute(f"PRAGMA table_info({table_name});")
         return {row[1]: row[2] for row in cursor.fetchall()}
 
-    def get_table_pk(self, table: str, with_columns: bool = False):
-        cursor = self.connection.cursor()
-        cursor.execute(f"PRAGMA table_info('{table}')")
-        pk = "id"
-        columns = {}
-        for col in cursor.fetchall():
-            cid, name, type_, notnull, dflt_value, pk = col
-            columns[name] = type_
-            if pk == 1:
-                pk = name
-                if not with_columns: break
-        columns.update({"__pk__": pk})
-        return pk if not with_columns else columns
+    # def get_table_pk(self, table: str, with_columns: bool = False):
+    #     cursor = self.connection.cursor()
+    #     cursor.execute(f"PRAGMA table_info('{table}')")
+    #     pk = "id"
+    #     columns = {}
+    #     for col in cursor.fetchall():
+    #         cid, name, type_, notnull, dflt_value, pk = col
+    #         columns[name] = type_
+    #         if pk == 1:
+    #             pk = name
+    #             if not with_columns: break
+    #     columns.update({"__pk__": pk})
+    #     return pk if not with_columns else columns
 
     def rename_table_columns(self, table_name: str, rename_map: dict):
         """
@@ -498,10 +499,13 @@ class PyonirDatabaseService:
             raise ValueError(f"Cannot destroy unknown driver or non-existent database: {self.driver}:{self.url}")
 
     def connect(self):
+        if self.connection:
+            return self
         if not self.url:
             raise ValueError("Database must be set before connecting")
 
         if self.driver.startswith(Driver.SQLITE):
+            Path(os.path.dirname(self.url)).mkdir(parents=True, exist_ok=True)
             print(f"[DEBUG] Connecting to SQLite database at {self.url}")
             self.connection = sqlite3.connect(self.url)
             self.connection.row_factory = sqlite3.Row
@@ -520,7 +524,7 @@ class PyonirDatabaseService:
         return self
 
     @abstractmethod
-    def insert(self, entity: Type[BaseSchema], table: str = None) -> Any:
+    def insert(self, entity: type[BaseSchema], table: str = None) -> Any:
         """Insert entity into backend."""
 
         if self.driver == Driver.FILE_SYSTEM:

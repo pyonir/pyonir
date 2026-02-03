@@ -128,11 +128,14 @@ class BaseSchema:
         self._errors = []
         self.validate_fields()
 
-    def save_to_file(self, file_path: str) -> bool:
+    def save_to_file(self, file_path: str = None) -> bool:
         """Saves the user data to a file in JSON format"""
         from pyonir.core.utils import create_file
         from pyonir.core.parser import LOOKUP_DATA_PREFIX
         from pyonir import Site
+        if not file_path and hasattr(self, 'file_path'):
+            file_path = getattr(self, 'file_path', None)
+        assert (file_path, "File path must be provided to save the schema instance.")
         assert (Site.datastore_dirpath, "Datastore directory path is not configured in the Site.")
         active_user = getattr(Site.server.request, 'active_user', None)
         filename_as_pk = os.path.basename(file_path).split('.')[0]
@@ -152,10 +155,6 @@ class BaseSchema:
                     file_data[k] = f"{LOOKUP_DATA_PREFIX}/{fk_type.__table_name__}/{fk_entry_name}"
                     # setattr(self,k, f"{LOOKUP_DATA_PREFIX}/{fk_schema_inst.__table_name__}/{fk_entry_name}")
         return create_file(file_path, file_data)
-
-    def save_to_session(self, request: 'PyonirRequest', key: str = None, value: any = None) -> None:
-        """Convert instance to a serializable dict."""
-        request.server_request.session[key or self.__class__.__name__.lower()] = value
 
     def to_dict(self, obfuscate:bool = True, with_extras: bool = False) -> dict:
         """Dictionary representing the instance"""
@@ -190,7 +189,7 @@ class BaseSchema:
             columns.append(name)
             v = getattr(self, name)
             is_optional_schema = isinstance(v, BaseSchema) and is_optional_type(_)
-            v = json.dumps(v, default=json_serial) if is_optional_schema or isinstance(v,(dict, list, tuple, set)) else v
+            v = json.dumps(v, default=json_serial) if is_optional_schema or isinstance(v,(BaseSchema, dict, list, tuple, set)) else v
             if (name, _) in self.__foreign_keys__:
                 v = get_attr(v, v.__primary_key__)
             values.append(v)

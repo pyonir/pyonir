@@ -3,7 +3,8 @@ from __future__ import annotations
 import os
 from typing import Optional, Generator, List, Callable
 
-from pyonir.core.utils import get_attr, load_env, generate_id, merge_dict
+from pyonir.core.loaders import import_module
+from pyonir.core.utils import get_attr, load_env, merge_dict
 
 from pyonir.pyonir_types import PyonirThemes, EnvConfig, PyonirHooks, PyonirRoute, PyonirRouters, \
     VIRTUAL_ROUTES_FILENAME, AbstractFSQuery
@@ -390,6 +391,71 @@ class BasePlugin(Base):
         plugin_env_configs = getattr(self.app.env, self.name)
         return plugin_env_configs
 
+class PluginManager:
+    def __init__(self, app: BaseApp):
+        self._app = app
+        self.installed_plugins = {}
+
+    @property
+    def app_ctx(self) -> BaseApp:
+        return self._app
+
+    @property
+    def activated_plugins(self) -> List[BasePlugin]:
+        """Returns a list of currently activated plugins"""
+        return [plg for plg in self.installed_plugins.values() if plg]
+
+    def install_plugin(self, plugin_class: callable):
+        """Installs a plugin"""
+        plugin_id = f"{plugin_class.__module__}.{plugin_class.__name__}"
+        if plugin_id in self.installed_plugins:
+            return
+        self.installed_plugins[plugin_id] = None
+        self.activate_plugin(plugin_id)
+
+    def activate_plugins(self):
+        """Active all plugins based on application settings"""
+        for plg_id, plugin_ins in dict(self.installed_plugins).items():
+            self.activate_plugin(plg_id)
+
+    def activate_plugin(self, plugin_module_path: str):
+        """Activates an installed plugin and adds to set of activated plugins"""
+        from pyonir.core.utils import get_attr
+        plg_ins = self.installed_plugins.get(plugin_module_path)
+        if plg_ins: return
+        module_path, plg_cls_name = plugin_module_path.rsplit('.', 1)
+        plg_cls = import_module(module_path, plg_cls_name)
+        if plg_cls:
+            plg_ins = plg_cls(self.app_ctx)
+            self.installed_plugins[plugin_module_path] = plg_ins
+
+    def deactivate_plugin(self, plugin_module_path: str):
+        """Deactivates a plugin and removes it from the set of activated plugins"""
+        plg_ins = self.installed_plugins.get(plugin_module_path)
+        if plg_ins:
+            # Optional: give plugin a chance to clean up
+            if hasattr(plg_ins, "teardown"):
+                plg_ins.teardown()
+            self.installed_plugins[plugin_module_path] = None
+
+    def run_plugins(self, hook: PyonirHooks, data_value=None):
+        """Run plugin hooks"""
+        if not hook or not self.installed_plugins: return
+        hook = hook.lower()
+        for plg_id, plg in self.installed_plugins.items():
+            if not plg or not hasattr(plg, hook): continue
+            hook_method = getattr(plg, hook)
+            hook_method(data_value, self.app_ctx)
+
+    async def run_async_plugins(self, hook: PyonirHooks, data_value=None):
+        """Run async plugin hooks"""
+        if not hook or not self.installed_plugins: return
+        hook_method_name = hook.lower()
+        for plg_id, plg in self.installed_plugins.items():
+            if not plg or not hasattr(plg, hook_method_name): continue
+            hook_method = getattr(plg, hook_method_name)
+            await hook_method(data_value, self.app_ctx)
+
 class BaseApp(Base):
     # Default config settings
     EXTENSIONS = {"file": ".md", "settings": ".json"}
@@ -432,16 +498,17 @@ class BaseApp(Base):
         from pyonir import __version__
         DeserializeFile._routes_dirname = self.PAGES_DIRNAME
         self.VERSION = __version__
-        self.SECRET_SAUCE = generate_id()
-        self.SESSION_KEY = f"{self.name}_session"
+        # self.SECRET_SAUCE = generate_id()
+        # self.SESSION_KEY = f"{self.name}_session"
 
 
         self.app_entrypoint: str = app_entrypoint # application main.py file or the initializing file
         self.app_dirpath: str = os.path.dirname(app_entrypoint) # application main.py file or the initializing file
         self.name: str = os.path.basename(self.app_dirpath) # directory name of application
         self.themes: Optional[PyonirThemes] = None # application themes
-        self.plugins_installed = {}
-        self._plugins_activated: set = set()
+        self.plugin_manager: PluginManager = PluginManager(self)
+        # self.plugins_installed = {}
+        # self._plugins_activated: set = set()
         self._resolvers = {}
         self._configs: object = None
         self._env: EnvConfig = load_env(os.path.join(self.app_dirpath, '.env'))
@@ -461,6 +528,10 @@ class BaseApp(Base):
             'md': parse_markdown
         }
         self.apply_globals()
+
+    @property
+    def session_key(self) -> str:
+        return f"{self.name}_session"
 
     @property
     def env(self) -> EnvConfig: return self._env
@@ -504,7 +575,7 @@ class BaseApp(Base):
 
     @property
     def activated_plugins(self) -> frozenset[BasePlugin]:
-        return frozenset(self._plugins_activated)
+        return frozenset(self.plugin_manager.activated_plugins)
 
     # FILES
     @property
@@ -558,8 +629,8 @@ class BaseApp(Base):
     def install_sys_plugins(self):
         """Install pyonir system plugins"""
         from pyonir.libs.plugins.navigation import Navigation
-        self.install_plugin(Navigation, 'pyonir_navigation')
-        self._plugins_activated.add(Navigation(self))
+        self.plugin_manager.install_plugin(Navigation)
+        # self._plugins_activated.add(Navigation(self))
 
     def configure_themes(self):
         """The Configures themes for application"""
@@ -595,6 +666,7 @@ class BaseApp(Base):
 
     def load_routes(self, routes: List[PyonirRoute], endpoint: str = '') -> None:
         """Loads a list of routes into the application server"""
+        self.server.mount(self.frontend_assets_route, self.server.create_static_route(self.frontend_assets_dirpath))
         self.server.init_app_routes(routes, endpoint)
 
     def load_routers(self, routers: PyonirRouters):
@@ -609,62 +681,64 @@ class BaseApp(Base):
         if global_vars:
             self.TemplateEnvironment.globals.update(global_vars)
 
-    def install_plugin(self, plugin_class: callable, plugin_directory_name: str = None):
-        """Installs and activates a plugin"""
-        plugin_directory_name = plugin_class.__module__.split('.')[1:2].pop() if not plugin_directory_name else plugin_directory_name
-        self.plugins_installed[plugin_directory_name] = plugin_class
-        self.activate_plugin(plugin_directory_name)
-
-    def activate_plugins(self):
-        """Active plugins enabled based on settings"""
-        from pyonir.core.utils import get_attr
-        has_plugin_configured = get_attr(self.configs, 'app.enabled_plugins', None)
-        if not has_plugin_configured: return
-        for plg_id, plugin in self.plugins_installed.items():
-            self.activate_plugin(plg_id)
-
-    def activate_plugin(self, plugin_name: str):
-        """Activates an installed plugin and adds to set of activated plugins"""
-        plg_cls = self.plugins_installed.get(plugin_name)
-        has_plugin_configured = plugin_name in (get_attr(self.configs, 'app.enabled_plugins') or [])
-        if plg_cls is None or not has_plugin_configured:
-            self.deactivate_plugin(plugin_name)
-            return
-        self._plugins_activated.add(plg_cls(self))
-
-    def deactivate_plugin(self, plugin_name: str):
-        """Deactivates a plugin and removes it from the set of activated plugins"""
-        plg_cls = self.plugins_installed.get(plugin_name)
-        if plg_cls is None: return
-
-        # Find the active plugin instance of this class
-        to_remove = None
-        for plugin in self._plugins_activated:
-            if isinstance(plugin, plg_cls):
-                to_remove = plugin
-                break
-
-        if to_remove:
-            # Optional: give plugin a chance to clean up
-            if hasattr(to_remove, "teardown"):
-                to_remove.teardown()
-            self._plugins_activated.remove(to_remove)
-
-    def run_plugins(self, hook: PyonirHooks, data_value=None):
-        if not hook or not self._plugins_activated: return
-        hook = hook.lower()
-        for plg in self._plugins_activated:
-            if not hasattr(plg, hook): continue
-            hook_method = getattr(plg, hook)
-            hook_method(data_value, self)
-
-    async def run_async_plugins(self, hook: PyonirHooks, data_value=None):
-        if not hook or not self._plugins_activated: return
-        hook_method_name = hook.lower()
-        for plg in self._plugins_activated:
-            if not hasattr(plg, hook_method_name): continue
-            hook_method = getattr(plg, hook_method_name)
-            await hook_method(data_value, self)
+    # def install_plugin(self, plugin_class: callable, plugin_directory_name: str = None):
+    #     """Installs and activates a plugin"""
+    #     plugin_directory_name = plugin_class.__module__.split('.')[1:2].pop() if not plugin_directory_name else plugin_directory_name
+    #     self.plugins_installed[plugin_directory_name] = plugin_class
+    #     self.activate_plugin(plugin_directory_name)
+    #
+    # def activate_plugins(self):
+    #     """Active plugins enabled based on settings"""
+    #     from pyonir.core.utils import get_attr
+    #     has_plugin_configured = get_attr(self.configs, 'app.enabled_plugins', None)
+    #     if not has_plugin_configured: return
+    #     for plg_id, plugin in self.plugins_installed.items():
+    #         self.activate_plugin(plg_id)
+    #
+    # def activate_plugin(self, plugin_name: str):
+    #     """Activates an installed plugin and adds to set of activated plugins"""
+    #     plg_cls = self.plugins_installed.get(plugin_name)
+    #     has_plugin_configured = plugin_name in (get_attr(self.configs, 'app.enabled_plugins') or [])
+    #     if plg_cls is None or not has_plugin_configured:
+    #         self.deactivate_plugin(plugin_name)
+    #         return
+    #     plgn = plg_cls(self)
+    #     if plgn in self._plugins_activated: return
+    #     self._plugins_activated.add(plgn)
+    #
+    # def deactivate_plugin(self, plugin_name: str):
+    #     """Deactivates a plugin and removes it from the set of activated plugins"""
+    #     plg_cls = self.plugins_installed.get(plugin_name)
+    #     if plg_cls is None: return
+    #
+    #     # Find the active plugin instance of this class
+    #     to_remove = None
+    #     for plugin in self._plugins_activated:
+    #         if isinstance(plugin, plg_cls):
+    #             to_remove = plugin
+    #             break
+    #
+    #     if to_remove:
+    #         # Optional: give plugin a chance to clean up
+    #         if hasattr(to_remove, "teardown"):
+    #             to_remove.teardown()
+    #         self._plugins_activated.remove(to_remove)
+    #
+    # def run_plugins(self, hook: PyonirHooks, data_value=None):
+    #     if not hook or not self._plugins_activated: return
+    #     hook = hook.lower()
+    #     for plg in self._plugins_activated:
+    #         if not hasattr(plg, hook): continue
+    #         hook_method = getattr(plg, hook)
+    #         hook_method(data_value, self)
+    #
+    # async def run_async_plugins(self, hook: PyonirHooks, data_value=None):
+    #     if not hook or not self._plugins_activated: return
+    #     hook_method_name = hook.lower()
+    #     for plg in self._plugins_activated:
+    #         if not hasattr(plg, hook_method_name): continue
+    #         hook_method = getattr(plg, hook_method_name)
+    #         await hook_method(data_value, self)
 
     def parse_jinja(self, string, context=None) -> str:
         """Render jinja template fragments"""
@@ -696,7 +770,7 @@ class BaseApp(Base):
         # self.apply_globals()
         # Initialize Application settings and templates
         self.install_sys_plugins()
-        self.activate_plugins()
+        self.plugin_manager.activate_plugins()
         # self.collect_virtual_routes()
 
         # Run uvicorn server

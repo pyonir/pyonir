@@ -362,7 +362,7 @@ class BaseServer(Starlette):
         \n\t- NGINX config: {self.app.nginx_config_filepath} \
         \n\t- System Version: {sys.version_info}")
         print(uvicorn_options)
-        self.app.run_plugins(PyonirHooks.AFTER_INIT)
+        self.app.plugin_manager.run_plugins(PyonirHooks.AFTER_INIT)
         # self.app.run_hooks(PyonirHooks.AFTER_INIT)
         self.is_active = True
         uvicorn.run(self.app.server, **uvicorn_options)
@@ -379,8 +379,6 @@ class BaseServer(Starlette):
     @staticmethod
     def init_pyonir_endpoints(app: BaseApp):
         from pyonir.tests.backend.demo_controller import pyonir_ws_handler, pyonir_index
-        # app.server.create_route(pyonir_ws_handler, "/sysws", ws=True)
-        # app.server.create_route(pyonir_index, "/", methods='*')
         app.server.create_route(pyonir_index, "/{path:path}", methods='*')
 
     @staticmethod
@@ -449,8 +447,16 @@ class BaseServer(Starlette):
             return self.add_websocket_route(path, dec_func, dec_func.__name__)
 
         async def dec_wrapper(star_req):
-            pyonir_request = BaseRequest(star_req, self.app)
-            res = await self.build_response(pyonir_request, dec_func)
+            from pyonir.core.authorizer import PyonirBaseRequest
+            pyonir_request: PyonirBaseRequest = star_req.state.pyonir_request
+            await pyonir_request.set_request_input()
+            await pyonir_request.set_page_file()
+            pyonir_request.security.responses.load_responses(pyonir_request.file.data)
+            if pyonir_request.security.is_denied:
+                return self.serve_redirect(pyonir_request.security.redirect_to or '/')
+            res = await pyonir_request.build_response(pyonir_request.file_resolver or dec_func)
+            # pyonir_request = BaseRequest(star_req, self.app)
+            # res = await self.build_response(pyonir_request, dec_func)
             # self.app.reload_module(dec_func)
             return res
 
@@ -466,16 +472,18 @@ class BaseServer(Starlette):
         from starlette.middleware.sessions import SessionMiddleware
         from starlette.middleware.trustedhost import TrustedHostMiddleware
         # from starlette.middleware.gzip import GZipMiddleware
+        from pyonir.core.authorizer import PyonirRequestMiddleware
 
+        self.add_middleware(PyonirRequestMiddleware)
         self.add_middleware(TrustedHostMiddleware)
         # star_app.add_middleware(GZipMiddleware, minimum_size=500)
         self.add_middleware(SessionMiddleware,
                                 https_only=False,
-                                secret_key=self.app.SECRET_SAUCE,
-                                session_cookie=self.app.SESSION_KEY,
+                                secret_key=self.app.salt,
+                                session_cookie=self.app.session_key,
                                 same_site='lax'
                                 )
-        self.add_middleware(CSRFProtectMiddleware, csrf_secret=self.app.SECRET_SAUCE)
+        self.add_middleware(CSRFProtectMiddleware, csrf_secret=self.app.salt)
 
     def get_virtual(self, url: str, virtual_data: dict = None) -> Union[tuple[str, dict, dict, dict], tuple[None, None, None, dict]]:
         """Performs url pattern matching against virtual routes and returns vitual page data and new path parameter values."""
@@ -515,7 +523,7 @@ class BaseServer(Starlette):
         pyonir_request.set_app_context()
         req_file = pyonir_request.resolve_request_to_file(pyonir_request.app_ctx_ref)
         pyonir_request.file = req_file
-        # app_ctx.apply_virtual_routes(pyonir_request) # disabled virtual routes in favor of module
+
         resolver = pyonir_request.process_resolver(pyonir_request)
         custom_response_headers = get_attr(pyonir_request.file.data, '@response.headers', {})
 
@@ -671,27 +679,32 @@ class BaseRestResponse:
     _headers: dict = field(default_factory=dict)
 
     @property
+    def is_ok(self) -> bool:
+        """Indicates if the response status code represents a successful request."""
+        return 200 <= self.status_code < 300
+
+    @property
     def headers(self): return self._headers
 
     @property
-    def content(self) -> 'Response':
+    def content(self) -> Optional['Response']:
         from starlette.responses import Response, StreamingResponse
         content = ''
         media_type = self._media_type
         if self._file_response:
             self._media_type = 'static'
             return self._file_response
-        if self._stream:
+        elif self._stream:
             media_type = EVENT_RES
             content = StreamingResponse(content=self._stream, media_type=EVENT_RES)
-        if self._html:
+        elif self._html:
             media_type = TEXT_RES
             content = self._html
-        if self.data:
+        else:
             media_type = JSON_RES
             content = self.to_json()
         self._media_type = media_type
-        return Response(content=content, media_type=media_type)
+        return Response(content=content, media_type=media_type) if content else None
 
     def to_dict(self) -> dict:
         return {
@@ -740,7 +753,7 @@ class BaseRestResponse:
             for key, value in self.headers.items():
                 res.headers[key] = str(value)
 
-        return self.content
+        return res
 
     def set_server_response(self):
         """Renders the starlette web response"""

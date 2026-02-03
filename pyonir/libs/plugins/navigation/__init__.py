@@ -34,7 +34,7 @@ class Navigation(PyonirPlugin):
         self.menus = {}
         self.active_page = None
         self.build_navigation(app=app)
-        self.after_init(None, app)
+        # self.after_init(None, app)
         # include navigation template example
         app.TemplateEnvironment.load_template_path(os.path.join(os.path.dirname(__file__), 'templates'))
         self.add_menus_to_environment(app)
@@ -45,7 +45,7 @@ class Navigation(PyonirPlugin):
 
     async def on_request(self, request: PyonirRequest, app: Pyonir):
         """Executes task on web request"""
-        refresh_nav = bool(getattr(request.query_params,'rnav', None))
+        refresh_nav = bool(getattr(request.request_input.body,'rnav', None))
         curr_nav = app.TemplateEnvironment.globals.get('navigation')
         if curr_nav and not refresh_nav: return None
         self.active_page = request.path
@@ -58,12 +58,11 @@ class Navigation(PyonirPlugin):
 
     def build_plugins_navigation(self, app: Pyonir):
         """Scans activated plugins for pages used for navigation"""
-        if app.activated_plugins:
-            for plgn in app.activated_plugins:
-                if isinstance(plgn, Navigation):continue
-                if not hasattr(plgn, 'pages_dirpath'): continue
-                self.build_navigation(plgn)
-                pass
+        for plgn_id, plgn in app.plugin_manager.installed_plugins.items():
+            if not plgn or isinstance(plgn, Navigation):continue
+            if not hasattr(plgn, 'pages_dirpath'): continue
+            self.build_navigation(plgn)
+            pass
 
     def build_navigation(self, app: Pyonir):
         # from pyonir.core.utils import query_files
@@ -86,7 +85,9 @@ class Navigation(PyonirPlugin):
         result = group_by_menu(file_list)
         # merge menus
         main_ref = self.menus.get(self.app.name, {})
-        for k,v in main_ref.items():
-            if result.get(k):
-                main_ref[k] += (result[k])
+        if main_ref:
+            for k,v in main_ref.items():
+                if result.get(k):
+                    main_ref[k] += result[k]
+            self.menus[self.app.name] = main_ref
         self.menus[app.name] = result

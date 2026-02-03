@@ -38,7 +38,8 @@ def unwrap_optional(tp):
     """Unwrap Optional[T] → T, else return tp unchanged"""
     origin_tp = get_origin(tp)
     if is_mappable_type(origin_tp):
-        key_tp, value_tp = get_args(tp)
+        arg_tuple = get_args(tp)
+        key_tp, value_tp = arg_tuple if len(arg_tuple) == 2 else (None, None)
         return origin_tp, key_tp, get_args(value_tp)
     if is_iterable(origin_tp):
         value_tps = get_args(tp)
@@ -112,17 +113,17 @@ def set_attr(target: object, attr: str, value: Any):
 is_sqlmodel_field = lambda t: callable(getattr(t,'default_factory', None))
 is_sqlmodel = lambda t: isinstance(t, type) and issubclass(t, SQLModel)
 
-def func_request_mapper(func: Callable, pyonir_request: 'BaseRequest') -> dict:
+def func_request_mapper(func: Callable, pyonir_request: 'PyonirRequest') -> dict:
     """Map request data to function parameters"""
     from pyonir import PyonirRequest
     from pyonir import Pyonir
-    from pyonir.core import Auth
+    from pyonir.core.authorizer import PyonirSecurity
     import inspect
     # param_type_map = collect_type_hints(func)
-    default_args = {}
-    default_args.update(**pyonir_request.path_params.__dict__)
-    default_args.update(**pyonir_request.query_params.__dict__)
-    default_args.update(**pyonir_request.form)
+    default_args = pyonir_request.request_input.body
+    # default_args.update(**pyonir_request.path_params.__dict__)
+    # default_args.update(**pyonir_request.query_params.__dict__)
+    # default_args.update(**pyonir_request.form)
     cls_args = {}
 
 
@@ -137,9 +138,9 @@ def func_request_mapper(func: Callable, pyonir_request: 'BaseRequest') -> dict:
             param.default if param.default is not inspect.Parameter.empty else None
         )
         if param_type in (Pyonir, PyonirRequest):
-            param_value = pyonir_request.app if param_type == Pyonir else pyonir_request
-        elif issubclass(param_type, Auth):
-            param_value = param_type(pyonir_request, pyonir_request.app)
+            param_value = pyonir_request.pyonir_app if param_type == Pyonir else pyonir_request
+        elif issubclass(param_type, PyonirSecurity):
+            param_value = param_type(pyonir_request)
         else:
             param_value = cls_mapper(param_value, param_type) if param_value else default
         set_attr(cls_args, name, param_value)
@@ -149,7 +150,7 @@ def func_request_mapper(func: Callable, pyonir_request: 'BaseRequest') -> dict:
 
 def lookup_fk(value: str, data_dir: str, app_ctx: list):
     _, _, has_lookup = value.partition(LOOKUP_DATA_PREFIX+'/') if isinstance(value, str) else [None,None,None]
-    value = DeserializeFile(os.path.join(data_dir, has_lookup), app_ctx=app_ctx) if has_lookup else json.loads(value)
+    value = DeserializeFile(os.path.join(data_dir, has_lookup), app_ctx=app_ctx) if has_lookup else json.loads(value) if isinstance(value, str) else value
     return value
 
 def coerce_value_to_type(value: Any, target_type: Union[type, Tuple[type]], factory_fn: Callable = None) -> Any:

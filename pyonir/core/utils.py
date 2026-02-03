@@ -237,14 +237,6 @@ def expand_dotted_keys(flat_data: dict, return_as_dict: bool = False):
 
     return root
 
-def import_module(pkg_path: str, callable_name: str) -> Callable:
-    """Imports a module and returns the callable by name"""
-    import importlib
-    mod_pkg = importlib.import_module(pkg_path)
-    importlib.reload(mod_pkg)
-    mod = get_attr(mod_pkg, callable_name, None)
-    return mod
-
 def get_module(pkg_path: str, callable_name: str) -> tuple[Any, Callable]:
     import importlib
     spec = importlib.util.spec_from_file_location(callable_name, pkg_path)
@@ -320,10 +312,6 @@ def copy_assets(src: str, dst: str, purge: bool = True):
             shutil.copytree(src, dst, ignore=ignore_patterns('__pycache__', '*.pyc', 'tmp*', 'node_modules', '.*'))
     except Exception as e:
         raise
-
-def generate_id():
-    import uuid
-    return str(uuid.uuid1())
 
 def dict_to_class(data: dict, name: Union[str, callable] = None, deep: bool = True) -> object:
     """

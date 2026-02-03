@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import os, sys
 from pyonir.core.app import BaseApp, Optional
+from pyonir.core.authorizer import PyonirBaseRequest
 from pyonir.core.utils import get_version
 from pyonir.core.app import BaseApp, BasePlugin
 from pyonir.core.database import CollectionQuery
@@ -23,7 +24,7 @@ Site: Optional[BaseApp] = None
 
 
 class PyonirServer(BaseServer): pass
-class PyonirRequest(BaseRequest): pass
+class PyonirRequest(PyonirBaseRequest): pass
 class PyonirCollection(CollectionQuery): pass
 class PyonirSchema(BaseSchema): pass
 class PyonirPlugin(BasePlugin): pass

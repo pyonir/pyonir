@@ -511,7 +511,8 @@ def parse_ref_to_files(filepath, file_name, app_ctx, attr_path: str = None, quer
     if query_params is None:
         query_params = {}
     from pyonir.core.database import CollectionQuery, DeserializeFile
-    from pyonir.core.utils import get_attr, import_module
+    from pyonir.core.utils import get_attr
+    from pyonir.core.loaders import import_module
     from pyonir.core.schemas import GenericQueryModel
     as_dir = os.path.isdir(filepath)
     if as_dir:

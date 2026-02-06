@@ -630,7 +630,6 @@ class BaseApp(Base):
         """Install pyonir system plugins"""
         from pyonir.libs.plugins.navigation import Navigation
         self.plugin_manager.install_plugin(Navigation)
-        # self._plugins_activated.add(Navigation(self))
 
     def configure_themes(self):
         """The Configures themes for application"""
@@ -681,65 +680,6 @@ class BaseApp(Base):
         if global_vars:
             self.TemplateEnvironment.globals.update(global_vars)
 
-    # def install_plugin(self, plugin_class: callable, plugin_directory_name: str = None):
-    #     """Installs and activates a plugin"""
-    #     plugin_directory_name = plugin_class.__module__.split('.')[1:2].pop() if not plugin_directory_name else plugin_directory_name
-    #     self.plugins_installed[plugin_directory_name] = plugin_class
-    #     self.activate_plugin(plugin_directory_name)
-    #
-    # def activate_plugins(self):
-    #     """Active plugins enabled based on settings"""
-    #     from pyonir.core.utils import get_attr
-    #     has_plugin_configured = get_attr(self.configs, 'app.enabled_plugins', None)
-    #     if not has_plugin_configured: return
-    #     for plg_id, plugin in self.plugins_installed.items():
-    #         self.activate_plugin(plg_id)
-    #
-    # def activate_plugin(self, plugin_name: str):
-    #     """Activates an installed plugin and adds to set of activated plugins"""
-    #     plg_cls = self.plugins_installed.get(plugin_name)
-    #     has_plugin_configured = plugin_name in (get_attr(self.configs, 'app.enabled_plugins') or [])
-    #     if plg_cls is None or not has_plugin_configured:
-    #         self.deactivate_plugin(plugin_name)
-    #         return
-    #     plgn = plg_cls(self)
-    #     if plgn in self._plugins_activated: return
-    #     self._plugins_activated.add(plgn)
-    #
-    # def deactivate_plugin(self, plugin_name: str):
-    #     """Deactivates a plugin and removes it from the set of activated plugins"""
-    #     plg_cls = self.plugins_installed.get(plugin_name)
-    #     if plg_cls is None: return
-    #
-    #     # Find the active plugin instance of this class
-    #     to_remove = None
-    #     for plugin in self._plugins_activated:
-    #         if isinstance(plugin, plg_cls):
-    #             to_remove = plugin
-    #             break
-    #
-    #     if to_remove:
-    #         # Optional: give plugin a chance to clean up
-    #         if hasattr(to_remove, "teardown"):
-    #             to_remove.teardown()
-    #         self._plugins_activated.remove(to_remove)
-    #
-    # def run_plugins(self, hook: PyonirHooks, data_value=None):
-    #     if not hook or not self._plugins_activated: return
-    #     hook = hook.lower()
-    #     for plg in self._plugins_activated:
-    #         if not hasattr(plg, hook): continue
-    #         hook_method = getattr(plg, hook)
-    #         hook_method(data_value, self)
-    #
-    # async def run_async_plugins(self, hook: PyonirHooks, data_value=None):
-    #     if not hook or not self._plugins_activated: return
-    #     hook_method_name = hook.lower()
-    #     for plg in self._plugins_activated:
-    #         if not hasattr(plg, hook_method_name): continue
-    #         hook_method = getattr(plg, hook_method_name)
-    #         await hook_method(data_value, self)
-
     def parse_jinja(self, string, context=None) -> str:
         """Render jinja template fragments"""
         if not self.TemplateEnvironment or not string: return string
@@ -767,11 +707,9 @@ class BaseApp(Base):
     def run(self, uvicorn_options: dict = None):
         """Runs the Uvicorn webserver"""
 
-        # self.apply_globals()
         # Initialize Application settings and templates
         self.install_sys_plugins()
         self.plugin_manager.activate_plugins()
-        # self.collect_virtual_routes()
 
         # Run uvicorn server
         if self.SSG_IN_PROGRESS: return

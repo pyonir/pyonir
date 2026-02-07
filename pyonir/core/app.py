@@ -570,8 +570,9 @@ class BaseApp(Base):
 
     @property
     def domain(self) -> str:
-        host = f"{self.host}:{self.port}" if self.is_dev else self.domain_name
-        return f"{self.protocol}://{host}"
+        if self.is_dev:
+            return self.host
+        return f"{self.protocol}://{self.domain_name}"
 
     @property
     def activated_plugins(self) -> frozenset[BasePlugin]:

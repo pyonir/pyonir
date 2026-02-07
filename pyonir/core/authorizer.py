@@ -3,12 +3,9 @@ from __future__ import annotations
 import inspect
 import os, base64
 from abc import abstractmethod
-from dataclasses import dataclass
-from http.client import responses
+from dataclasses import dataclass, field
 from typing import Tuple, Any, Dict, Optional, Union, Callable, Type
 from enum import Enum, StrEnum
-
-from starlette_wtf import csrf_token
 
 from pyonir.core.mapper import func_request_mapper
 from pyonir.core.parser import DeserializeFile, VIRTUAL_ROUTES_FILENAME
@@ -21,7 +18,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.requests import Request as StarletteRequest
 
-from pyonir.pyonir_types import PyonirHooks
+from pyonir.pyonir_types import PyonirHooks, EVENT_RES, TEXT_RES, JSON_RES
 
 INVALID_EMAIL_MESSAGE: str = "Invalid email address format"
 INVALID_PASSWORD_MESSAGE: str = "Incorrect password"
@@ -115,7 +112,153 @@ def format_time_remaining(time_remaining: Union[int, float]) -> str:
         time_str = f"{secs}s"
     return time_str
 
-class PyonirAuthResponse(BaseRestResponse):
+@dataclass
+class PyonirBaseRestResponse:
+    """Represents a REST response from the server."""
+
+    status_code: int = 000
+    """HTTP status code of the response, e.g., 200 for success, 404 for not found."""
+
+    message: str = ''
+    """Response message, typically a string describing the result of the request."""
+
+    data: dict = field(default_factory=dict)
+    """Response data, typically a dictionary containing the response payload."""
+
+    _cookies: list = field(default_factory=list)
+    _html: str = None
+    _stream: any = None
+    _media_type: str = None
+    _file_response: any = None
+    # _server_response: object = None
+    _redirect_response = None
+    _headers: dict = field(default_factory=dict)
+
+    @property
+    def is_redirect(self):
+        return self._redirect_response
+
+    @property
+    def is_ok(self) -> bool:
+        """Indicates if the response status code represents a successful request."""
+        return 200 <= self.status_code < 300
+
+    @property
+    def headers(self): return self._headers
+
+    @property
+    def content(self) -> Optional['Response']:
+        from starlette.responses import Response, StreamingResponse
+        content = ''
+        media_type = self._media_type
+        if self._file_response:
+            self._media_type = 'static'
+            return self._file_response
+        elif self._stream:
+            media_type = EVENT_RES
+            content = StreamingResponse(content=self._stream, media_type=EVENT_RES)
+        elif self._html:
+            media_type = TEXT_RES
+            content = self._html
+        else:
+            media_type = JSON_RES
+            content = self.to_json()
+        self._media_type = media_type
+        return Response(content=content, media_type=media_type) if content else None
+
+    def to_dict(self, context_data: dict = None) -> dict:
+        """Converts the response to a dictionary."""
+        from pyonir import Site
+        return {
+            'status_code': self.status_code,
+            'message': Site.TemplateEnvironment.render_python_string(self.message or ''),
+            'data': self.data,
+            **(context_data or {})
+        }
+
+    def to_json(self) -> str:
+        """Converts the response to a JSON serializable dictionary."""
+        from pyonir.core.utils import json_serial
+        import json
+        return json.dumps(self.to_dict(), default=json_serial)
+
+    # def render(self):
+    #     return self._server_response
+
+    def set_header(self, key, value):
+        """Sets header values"""
+        self._headers[key] = value
+        return self
+
+    def set_json(self, value: dict):
+        # json = request.file.output_json()
+        self.data = value
+        return self
+
+    def set_html(self, value: str):
+        """Sets the html response value"""
+        self._html = value
+        return self
+
+    def set_file_response(self, value: any):
+        """Sets the file response value"""
+        from starlette.responses import PlainTextResponse
+        self._file_response = value or PlainTextResponse("File not found", status_code=404)
+
+    def set_redirect_response(self, url: str, code: int):
+        from starlette.responses import RedirectResponse
+        res = RedirectResponse(url, status_code=code)
+        self._redirect_response = res
+
+    def build(self):
+        """Builds the response object"""
+        from starlette.exceptions import HTTPException
+        if self.status_code >= 400:
+            raise HTTPException(status_code=self.status_code, detail=self.message or "An error occurred")
+        self.set_header('Server', 'Pyonir Web Framework')
+        res = self.content
+        if self.headers and res.headers:
+            for key, value in self.headers.items():
+                res.headers[key] = str(value)
+        if self._redirect_response:
+            return self._redirect_response
+        return res
+
+    # def set_server_response(self):
+    #     """Renders the starlette web response"""
+    #     from starlette.responses import Response, StreamingResponse
+    #
+    #     if self._media_type == EVENT_RES and self._stream:
+    #         return StreamingResponse(content=self._stream, media_type=EVENT_RES)
+    #
+    #     content = self._html if self._html else self.to_json()
+    #     media_type = TEXT_RES if self._html else JSON_RES
+    #     self._server_response = Response(content=content, media_type=media_type)
+    #     if self._headers:
+    #         self._server_response.headers.update(self._headers)
+
+    def set_media(self, media_type: str):
+        self._media_type = media_type
+
+    def set_cookie(self, cookie: dict):
+        """
+        :param cookie:
+            key="access_token"
+            value=jwt_token,
+            httponly=True,
+            secure=True,
+            samesite="strict",
+            max_age=3600,
+        :return:
+        """
+        self._cookies.append(cookie)
+
+    def set_headers_from_dict(self, headers: dict):
+        """Sets multiple header values from a dictionary"""
+        if headers:
+            self._headers.update(headers)
+
+class PyonirAuthResponse(PyonirBaseRestResponse):
     """
     Represents a standardized authentication response.
 
@@ -132,6 +275,11 @@ class PyonirAuthResponse(BaseRestResponse):
 
 class DefaultPyonirAuthResponses:
     """Enum-like class that provides standardized authentication responses."""
+    SERVER_OK = PyonirAuthResponse(
+        message="Server Ok",
+        status_code=200
+    )
+    """PyonirAuthResponse: Indicates general server status of ok"""
 
     ERROR = PyonirAuthResponse(
         message="Authentication failed",
@@ -272,6 +420,7 @@ class PyonirUser(BaseSchema, table_name='users'):
         from pyonir import Site
         if not self.uid:
             self.uid = generate_user_id(self.email, Site.salt, 16) if self.email else BaseSchema.generate_id()
+            self.created_by = self.uid
 
     @staticmethod
     def map_to_role(role_value: str) -> Role:
@@ -322,7 +471,7 @@ class RequestInput(BaseSchema):
     @classmethod
     async def from_request(cls, request: StarletteRequest) -> 'RequestInput':
         """Extracts user credentials from the incoming request."""
-        pyonir_app: BaseApp = request.app.app
+        pyonir_app: BaseApp = request.app.pyonir_app
         headers = dict(request.headers)
         cookies = dict(request.cookies)
         session = dict(request.session)
@@ -389,7 +538,7 @@ class PyonirSecurity:
 
     def __init__(self, request: PyonirBaseRequest):
         self._request: PyonirBaseRequest = request
-        self._user: PyonirUser = None
+        self._user: Optional[PyonirUser] = None
         self._signin_attempts: int = 0
         self._signin_locked_until: str = ''
         self._redirect_route = '/'
@@ -428,7 +577,7 @@ class PyonirSecurity:
     @property
     def user(self) -> Optional[Type[PyonirUser]]:
         if not self._user:
-            self._user = self.get_authenticated_user()
+            self._user = self.get_authenticated_user(AuthMethod.SESSION)
         return self._user
 
     @property
@@ -456,10 +605,10 @@ class PyonirSecurity:
     def creds(self):
         return self.request.request_input
 
-    def _get_user_profile(self, user_email: str = None) -> Optional[PyonirUser]:
+    def get_user_profile(self, user_email: str = None) -> Optional[PyonirUser]:
         """Pyonir queries the file system for user account based on the provided credentials"""
         # access user guid from session or email if available
-        uid = self.request.request_input.session_id if self.has_session else generate_user_id(from_email=user_email, salt=self.pyonir_app.salt)
+        uid = self.request.request_input.session_id if self.has_session else generate_user_id(from_email=user_email or self.creds.email, salt=self.pyonir_app.salt)
         # directory path to query a user profile from file system
         user_account_path = os.path.join(self.pyonir_app.datastore_dirpath, self.user_model.__table_name__, uid or '', 'profile.json')
         user_account = self.user_model.from_file(user_account_path, app_ctx=self.request.app_ctx_ref.app_ctx) if os.path.exists(user_account_path) else None
@@ -502,7 +651,7 @@ class PyonirSecurity:
 
     def set_signin_attempt(self):
         """Increments the sign-in attempts counter in the session."""
-        if self.request.server_request and self.request.server_request.session:
+        if self.request.server_request:
             current_attempts = self.request.server_request.session.get('signin_attempts', 0)
             self.request.server_request.session['signin_attempts'] = current_attempts + 1
 
@@ -523,9 +672,8 @@ class PyonirSecurity:
             fmt_remaining = format_time_remaining(time_remaining)
             print(fmt_remaining)
             if time_remaining <= 0:
-                print("time expired!!")
-                self.session['login_attempts'] = 0
-                self.session.pop('signin_locked_until')
+                print("lockout time expired!!")
+                self.reset_signin_attempts()
                 return fmt_remaining, True
             return fmt_remaining, False
         return '', False
@@ -533,8 +681,9 @@ class PyonirSecurity:
     def reset_signin_attempts(self):
         """Resets the sign-in attempts counter in the session."""
         if self.session:
-            self.session['signin_attempts'] = 0
-            self.session.pop('signin_locked_until', None)
+            del self.session['signin_attempts']
+            if self.session.get('signin_locked_until'):
+                del self.session['signin_locked_until']
 
     def create_jwt(self, user_id: str = None, user_role: str = '', exp_time=None):
         """Returns session jwt object based on profile info"""
@@ -557,16 +706,16 @@ class PyonirSecurity:
         cls._user_model = model
 
     @abstractmethod
-    def get_authenticated_user(self) -> Optional[PyonirUser]:
+    def get_authenticated_user(self, flow: AuthMethod = None) -> Optional[PyonirUser]:
         """Retrieves the user associated with the request based on credentials."""
         # check user credentials
-        flow = self.request.request_input.flow
+        flow = flow or self.request.request_input.flow
         creds = self.request.request_input
         salt = self.pyonir_app.salt
 
         if flow in {AuthMethod.BASIC, AuthMethod.BODY}:
             # check creds with datasource
-            _user: PyonirUser = self._get_user_profile(creds.email)
+            _user: PyonirUser = self.get_user_profile(creds.email)
             if not _user: return None
             requested_passw = self.harden_password(salt, creds.password, _user.auth_token)
             has_valid_creds = check_pass(_user.meta.password, requested_passw)
@@ -577,7 +726,7 @@ class PyonirSecurity:
             if not self.has_session:
                 self.session.clear()
                 return None
-            return self._get_user_profile()
+            return self.get_user_profile()
 
         elif flow == AuthMethod.BEARER:
             pass
@@ -626,7 +775,7 @@ class PyonirBaseRequest:
             self.path = self.path.replace(app.API_ROUTE, '')  # normalize api path
 
         # application context
-        self.flashes: dict = self.get_flash_messages() if server_request else {}
+        self.flashes: dict = self.get_flash_messages() if server_request and not self.is_static else {}
         self._app_ctx_ref = None
 
         # Update template globals for request
@@ -663,13 +812,17 @@ class PyonirBaseRequest:
     @property
     def user(self) -> Optional[Type[PyonirUser]]:
         """Returns the authenticated user for the current request"""
-        return self.security.user if self.security else None
+        return self.security.user or self.security.get_authenticated_user(AuthMethod.SESSION)
 
     @property
     def session_token(self):
         """Returns active csrf token for user session"""
         if self.server_request and self.server_request.session:
             return self.server_request.session.get('csrf_token')
+
+    @property
+    def session(self):
+        return self.server_request.session
 
     @property
     def redirect_to(self):
@@ -852,9 +1005,11 @@ class PyonirBaseRequest:
 
     def get_flash_messages(self) -> dict:
         """Pops and returns all flash messages from session"""
-        if self.server_request and self.server_request.session:
+        if self.server_request:
             session_data = self.server_request.session
-            flashes = session_data.pop('__flash__') if session_data.get('__flash__') else {}
+            flashes = session_data.get('__flash__') or {}
+            if flashes:
+                del session_data['__flash__']
             return flashes
         return {}
 
@@ -888,11 +1043,10 @@ class PyonirRequestMiddleware(BaseHTTPMiddleware):
         super().__init__(app)
 
     async def dispatch(self, request: Request, call_next):
-        pyonir_app = request.app.app
-        if not isinstance(pyonir_app, BaseApp):
-            return await call_next(request)
-        pyonir_request: PyonirBaseRequest = PyonirBaseRequest(request, pyonir_app)
-        request.state.pyonir_request = pyonir_request
+        pyonir_app = request.app.pyonir_app
+        if isinstance(pyonir_app, BaseApp):
+            pyonir_request: PyonirBaseRequest = PyonirBaseRequest(request, pyonir_app)
+            request.state.pyonir_request = pyonir_request
         return await call_next(request)
 
 class PyonirAuthService:
@@ -913,7 +1067,7 @@ class PyonirAuthService:
                 status_code: 409
                 message: An account with this email already exists. Please use a different email or <a href="/sign-in">Sign In</a>.
             success:
-                status_code: 200
+                status_code: 201
                 message: Account created successfully with {user.email}.Try signing in to your account. here <a href="/sign-in">Sign In</a>.
             error:
                 status_code: 400
@@ -935,12 +1089,12 @@ class PyonirAuthService:
         """
         authorizer = request.security
         if authorizer.creds.is_valid():
-            existing_user = authorizer.user
+            existing_user = authorizer.get_user_profile()
             if existing_user:
                 response = authorizer.responses.ACCOUNT_EXISTS
                 response.status_code = 409
             else:
-                response = authorizer.responses.SUCCESS
+                response = authorizer.responses.SERVER_OK
         else:
             response = authorizer.responses.ERROR
             response.status_code = 400

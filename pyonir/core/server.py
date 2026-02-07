@@ -3,6 +3,8 @@ import os
 from dataclasses import dataclass, field
 from typing import Optional, Union, Tuple, Callable, get_type_hints, OrderedDict, Any, List
 
+from starlette.responses import PlainTextResponse
+
 from pyonir.core.utils import get_attr, merge_dict
 from starlette.applications import Starlette
 from starlette.requests import Request as StarletteRequest
@@ -61,8 +63,6 @@ class BaseRequest:
         self.app = app
         self.auth: Optional[Auth] = None
         self.flashes: dict = self.get_flash_messages() if server_request else {}
-        if server_request:
-            self.server_request.session['previous_url'] = self.headers.get('referer', '')
 
     @property
     def app_ctx_ref(self):
@@ -73,10 +73,6 @@ class BaseRequest:
         """Returns active csrf token for user session"""
         if self.server_request and self.server_request.session:
             return self.server_request.session.get('csrf_token')
-
-    @property
-    def previous_url(self) -> str:
-        return self.server_request.session.pop('previous_url') or '/'
 
     @property
     def redirect_to(self):
@@ -301,7 +297,7 @@ class BaseServer(Starlette):
 
     def __init__(self, app: BaseApp):
         self.is_active = False
-        self.app = app
+        self.pyonir_app = app
         self.ws_routes = []
         self.sse_routes = []
         self.auth_routes = []
@@ -312,7 +308,6 @@ class BaseServer(Starlette):
         self.services = {}
         self.request: Optional[BaseRequest] = None
         self.virtual_routes: Optional[OrderedDict] = None
-
         self.initialize_starlette()
 
 
@@ -332,40 +327,41 @@ class BaseServer(Starlette):
         # Unix domain socket → use uds (+ optional SSL)
         uvicorn_options = uvicorn_options or {}
         if not uvicorn_options:
-            if self.app.is_dev:
+            if self.pyonir_app.is_dev:
                 uvicorn_options.update({
-                    "port": self.app.port,
-                    "host": self.app.host,
+                    "port": self.pyonir_app.port,
+                    "host": self.pyonir_app.host,
                 })
             else:
-                uvicorn_options = {'uds': self.app.unix_socket_filepath}
+                uvicorn_options = {'uds': self.pyonir_app.unix_socket_filepath}
 
-            if self.app.is_secure:
-                uvicorn_options["ssl_keyfile"] = self.app.ssl_key_file
-                uvicorn_options["ssl_certfile"] = self.app.ssl_cert_file
+            if self.pyonir_app.is_secure:
+                uvicorn_options["ssl_keyfile"] = self.pyonir_app.ssl_key_file
+                uvicorn_options["ssl_certfile"] = self.pyonir_app.ssl_cert_file
 
         # Setup logs
-        Path(self.app.logs_dirpath).mkdir(parents=True, exist_ok=True)
+        Path(self.pyonir_app.logs_dirpath).mkdir(parents=True, exist_ok=True)
         # Initialize routers
-        self.init_pyonir_endpoints(self.app)
-        print(f"/************** ASGI APP SERVER RUNNING on {'http' if self.app.is_dev else 'sock'} ****************/")
+        self.init_pyonir_endpoints(self.pyonir_app)
+        print(f"/************** ASGI APP SERVER RUNNING on {'http' if self.pyonir_app.is_dev else 'sock'} ****************/")
         print(f"\
-        \n\t- App env: {'DEV' if self.app.is_dev else 'PROD'}:{self.app.VERSION}\
-        \n\t- App name: {self.app.name}\
-        \n\t- App domain: {self.app.domain_name}\
-        \n\t- App host: {self.app.host}\
-        \n\t- App port: {self.app.port}\
-        \n\t- App sock: {self.app.unix_socket_filepath}\
-        \n\t- App ssl_key: {self.app.ssl_key_file}\
-        \n\t- App ssl_cert: {self.app.ssl_cert_file}\
+        \n\t- App env: {'DEV' if self.pyonir_app.is_dev else 'PROD'}:{self.pyonir_app.VERSION}\
+        \n\t- App name: {self.pyonir_app.name}\
+        \n\t- App domain: {self.pyonir_app.domain}\
+        \n\t- App domain_name: {self.pyonir_app.domain_name}\
+        \n\t- App host: {self.pyonir_app.host}\
+        \n\t- App port: {self.pyonir_app.port}\
+        \n\t- App sock: {self.pyonir_app.unix_socket_filepath}\
+        \n\t- App ssl_key: {self.pyonir_app.ssl_key_file}\
+        \n\t- App ssl_cert: {self.pyonir_app.ssl_cert_file}\
         \n\t- App Server: Uvicorn \
-        \n\t- NGINX config: {self.app.nginx_config_filepath} \
+        \n\t- NGINX config: {self.pyonir_app.nginx_config_filepath} \
         \n\t- System Version: {sys.version_info}")
         print(uvicorn_options)
-        self.app.plugin_manager.run_plugins(PyonirHooks.AFTER_INIT)
+        self.pyonir_app.plugin_manager.run_plugins(PyonirHooks.AFTER_INIT)
         # self.app.run_hooks(PyonirHooks.AFTER_INIT)
         self.is_active = True
-        uvicorn.run(self.app.server, **uvicorn_options)
+        uvicorn.run(self.pyonir_app.server, **uvicorn_options)
 
     def init_app_routes(self, routes: List[PyonirRoute], endpoint: str = ''):
         for path, func, methods, opts in routes:
@@ -448,13 +444,13 @@ class BaseServer(Starlette):
 
         async def dec_wrapper(star_req):
             from pyonir.core.authorizer import PyonirBaseRequest
-            pyonir_request: PyonirBaseRequest = star_req.state.pyonir_request
+            pyonir_request: PyonirBaseRequest = PyonirBaseRequest(star_req, self.pyonir_app)
             self.request = pyonir_request
             await pyonir_request.set_request_input()
             await pyonir_request.set_page_file()
             pyonir_request.security.responses.load_responses(pyonir_request.file.data)
             if pyonir_request.security.is_denied:
-                return self.serve_redirect(pyonir_request.security.redirect_to or '/')
+                self.server_response.set_redirect(pyonir_request.security.redirect_to or '/')
             res = await pyonir_request.build_response(pyonir_request.file_resolver or dec_func)
             return res
 
@@ -470,18 +466,17 @@ class BaseServer(Starlette):
         from starlette.middleware.sessions import SessionMiddleware
         from starlette.middleware.trustedhost import TrustedHostMiddleware
         # from starlette.middleware.gzip import GZipMiddleware
-        from pyonir.core.authorizer import PyonirRequestMiddleware
 
-        self.add_middleware(PyonirRequestMiddleware)
-        self.add_middleware(TrustedHostMiddleware)
         # star_app.add_middleware(GZipMiddleware, minimum_size=500)
         self.add_middleware(SessionMiddleware,
-                                https_only=False,
-                                secret_key=self.app.salt,
-                                session_cookie=self.app.session_key,
-                                same_site='lax'
-                                )
-        self.add_middleware(CSRFProtectMiddleware, csrf_secret=self.app.salt)
+                            https_only=False,
+                            domain=self.pyonir_app.domain,
+                            secret_key=self.pyonir_app.salt,
+                            session_cookie=self.pyonir_app.session_key,
+                            same_site='lax'
+                            )
+        self.add_middleware(TrustedHostMiddleware)
+        self.add_middleware(CSRFProtectMiddleware, csrf_secret=self.pyonir_app.salt)
 
     def get_virtual(self, url: str, virtual_data: dict = None) -> Union[tuple[str, dict, dict, dict], tuple[None, None, None, dict]]:
         """Performs url pattern matching against virtual routes and returns vitual page data and new path parameter values."""
@@ -493,86 +488,86 @@ class BaseServer(Starlette):
                 return vurl, vdata, has_match, wildcard_data
         return None, None, None, wildcard_data
 
-    @staticmethod
-    async def build_response(pyonir_request: BaseRequest, dec_func: callable):
-        import inspect
-        from pyonir import Site
-        from pyonir.core.auth import Auth
-        from pyonir.core.mapper import cls_mapper, func_request_mapper
-
-        default_system_router = dec_func.__name__ == 'pyonir_index' if dec_func else False
-        Site.server.request = pyonir_request
-        if not default_system_router and dec_func and Site.is_dev:
-            dec_func = pyonir_request.app.reload_module(dec_func, reload=True)
-
-        # Init Web response object
-        pyonir_response = BaseRestResponse(status_code=pyonir_request.status_code)
-
-        # Preprocess request form data
-        await pyonir_request.process_request_data()
-
-        # Init Auth handler
-        pyonir_request.auth = Auth(pyonir_request, Site)
-
-        # Update template globals for request
-        Site.TemplateEnvironment.globals['request'] = pyonir_request
-
-        # File processing for request
-        pyonir_request.set_app_context()
-        req_file = pyonir_request.resolve_request_to_file(pyonir_request.app_ctx_ref)
-        pyonir_request.file = req_file
-
-        resolver = pyonir_request.process_resolver(pyonir_request)
-        custom_response_headers = get_attr(pyonir_request.file.data, '@response.headers', {})
-
-        route_func = dec_func if not callable(resolver) else resolver
-
-        # Check resolver route security
-        security = pyonir_request.auth.security.check(pyonir_request.auth)
-        if security and not security.accepted:
-            return Site.server.serve_redirect(security.redirect_to or '/')
-
-        # Get router endpoint from map
-        is_async = inspect.iscoroutinefunction(route_func)
-        args = func_request_mapper(route_func, pyonir_request)
-        if not pyonir_request.is_static:
-            if callable(route_func):
-                pyonir_request.server_response = await route_func(**args) if is_async else route_func(**args)
-            else:
-                pyonir_request.server_response = req_file.resolver or req_file.data
-
-        # Perform redirects
-        if pyonir_request.redirect_to:
-            return Site.server.serve_redirect(pyonir_request.redirect_to)
-
-        # Derive status code
-        is_router = Site.server.url_map.get(route_func.__name__ if route_func else '') and not default_system_router
-        pyonir_request.derive_status_code(is_router_method=is_router)
-
-        # Execute plugins hooks initial request
-        await Site.run_async_plugins(PyonirHooks.ON_REQUEST, pyonir_request)
-
-        # Finalize response output
-        if isinstance(pyonir_request.server_response, BaseRestResponse):
-            pyonir_response = pyonir_request.server_response
-        elif pyonir_request.is_static:
-            pyonir_request.server_response = Site.server.resolve_static(Site, pyonir_request) or (await route_func(**args) if is_async else route_func(**args))
-            pyonir_response.set_file_response(pyonir_request.server_response)
-        else:
-            if pyonir_request.type == JSON_RES:
-                pyonir_response.set_json(pyonir_request.server_response or pyonir_request.file.data)
-            elif pyonir_request.type == TEXT_RES:
-                pyonir_response.set_html(pyonir_request.file.output_html(pyonir_request))
-            else:
-                print(f'{pyonir_request.type} doesnt have a handler')
-            pyonir_response.set_media(pyonir_request.type)
-
-        # Set headers
-        if custom_response_headers:
-            pyonir_response.set_headers_from_dict(custom_response_headers)
-
-        # Generate response
-        return pyonir_response.build()
+    # @staticmethod
+    # async def _build_response(pyonir_request: BaseRequest, dec_func: callable):
+    #     import inspect
+    #     from pyonir import Site
+    #     from pyonir.core.auth import Auth
+    #     from pyonir.core.mapper import cls_mapper, func_request_mapper
+    #
+    #     default_system_router = dec_func.__name__ == 'pyonir_index' if dec_func else False
+    #     Site.server.request = pyonir_request
+    #     if not default_system_router and dec_func and Site.is_dev:
+    #         dec_func = pyonir_request.app.reload_module(dec_func, reload=True)
+    #
+    #     # Init Web response object
+    #     pyonir_response = BaseRestResponse(status_code=pyonir_request.status_code)
+    #
+    #     # Preprocess request form data
+    #     await pyonir_request.process_request_data()
+    #
+    #     # Init Auth handler
+    #     pyonir_request.auth = Auth(pyonir_request, Site)
+    #
+    #     # Update template globals for request
+    #     Site.TemplateEnvironment.globals['request'] = pyonir_request
+    #
+    #     # File processing for request
+    #     pyonir_request.set_app_context()
+    #     req_file = pyonir_request.resolve_request_to_file(pyonir_request.app_ctx_ref)
+    #     pyonir_request.file = req_file
+    #
+    #     resolver = pyonir_request.process_resolver(pyonir_request)
+    #     custom_response_headers = get_attr(pyonir_request.file.data, '@response.headers', {})
+    #
+    #     route_func = dec_func if not callable(resolver) else resolver
+    #
+    #     # Check resolver route security
+    #     security = pyonir_request.auth.security.check(pyonir_request.auth)
+    #     if security and not security.accepted:
+    #         return Site.server.serve_redirect(security.redirect_to or '/')
+    #
+    #     # Get router endpoint from map
+    #     is_async = inspect.iscoroutinefunction(route_func)
+    #     args = func_request_mapper(route_func, pyonir_request)
+    #     if not pyonir_request.is_static:
+    #         if callable(route_func):
+    #             pyonir_request.server_response = await route_func(**args) if is_async else route_func(**args)
+    #         else:
+    #             pyonir_request.server_response = req_file.resolver or req_file.data
+    #
+    #     # Perform redirects
+    #     if pyonir_request.redirect_to:
+    #         return Site.server.serve_redirect(pyonir_request.redirect_to)
+    #
+    #     # Derive status code
+    #     is_router = Site.server.url_map.get(route_func.__name__ if route_func else '') and not default_system_router
+    #     pyonir_request.derive_status_code(is_router_method=is_router)
+    #
+    #     # Execute plugins hooks initial request
+    #     await Site.run_async_plugins(PyonirHooks.ON_REQUEST, pyonir_request)
+    #
+    #     # Finalize response output
+    #     if isinstance(pyonir_request.server_response, BaseRestResponse):
+    #         pyonir_response = pyonir_request.server_response
+    #     elif pyonir_request.is_static:
+    #         pyonir_request.server_response = Site.server.resolve_static(Site, pyonir_request) or (await route_func(**args) if is_async else route_func(**args))
+    #         pyonir_response.set_file_response(pyonir_request.server_response)
+    #     else:
+    #         if pyonir_request.type == JSON_RES:
+    #             pyonir_response.set_json(pyonir_request.server_response or pyonir_request.file.data)
+    #         elif pyonir_request.type == TEXT_RES:
+    #             pyonir_response.set_html(pyonir_request.file.output_html(pyonir_request))
+    #         else:
+    #             print(f'{pyonir_request.type} doesnt have a handler')
+    #         pyonir_response.set_media(pyonir_request.type)
+    #
+    #     # Set headers
+    #     if custom_response_headers:
+    #         pyonir_response.set_headers_from_dict(custom_response_headers)
+    #
+    #     # Generate response
+    #     return pyonir_response.build()
 
     @staticmethod
     def matching_route(route_path: str, regex_path: str, api_endpoint: str = '') -> Optional[dict]:
@@ -609,12 +604,12 @@ class BaseServer(Starlette):
             res.headers["Cross-Origin-Embedder-Policy"] = "require-corp"
         return res
 
-    @staticmethod
-    def response_renderer(value, media_type):
-        from starlette.responses import Response, StreamingResponse
-        if media_type == EVENT_RES:
-            return StreamingResponse(content=value, media_type=media_type)
-        return Response(content=value, media_type=media_type)
+    # @staticmethod
+    # def response_renderer(value, media_type):
+    #     from starlette.responses import Response, StreamingResponse
+    #     if media_type == EVENT_RES:
+    #         return StreamingResponse(content=value, media_type=media_type)
+    #     return Response(content=value, media_type=media_type)
 
     @staticmethod
     def serve_redirect(url: str, code=302):
@@ -704,13 +699,14 @@ class BaseRestResponse:
         self._media_type = media_type
         return Response(content=content, media_type=media_type) if content else None
 
-    def to_dict(self) -> dict:
+    def to_dict(self, context_data: dict = None) -> dict:
         """Converts the response to a dictionary."""
         from pyonir import Site
         return {
             'status_code': self.status_code,
             'message': Site.TemplateEnvironment.render_python_string(self.message or ''),
-            'data': self.data
+            'data': self.data,
+            **(context_data or {})
         }
 
     def to_json(self) -> str:
@@ -739,8 +735,8 @@ class BaseRestResponse:
 
     def set_file_response(self, value: any):
         """Sets the file response value"""
-        from starlette.exceptions import HTTPException
-        self._file_response = value #or HTTPException(status_code=404, detail="User not found")
+        from starlette.responses import PlainTextResponse
+        self._file_response = value or PlainTextResponse("File not found", status_code=404)
 
     def build(self):
         """Builds the response object"""
@@ -749,7 +745,7 @@ class BaseRestResponse:
             raise HTTPException(status_code=self.status_code, detail=self.message or "An error occurred")
         self.set_header('Server', 'Pyonir Web Framework')
         res = self.content
-        if self.headers:
+        if self.headers and res.headers:
             for key, value in self.headers.items():
                 res.headers[key] = str(value)
 

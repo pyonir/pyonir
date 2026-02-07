@@ -209,7 +209,7 @@ def cls_mapper(file_obj: Union[dict, DeserializeFile], cls: Union['BaseSchema', 
     fks = getattr(cls, '__foreign_keys__', set())
     # normalize data source
     nested_key = getattr(cls, '__nested_field__', None)
-    nested_data = get_attr(file_obj, nested_key) or {}
+    nested_data = get_attr(file_obj, nested_key) if nested_key else {}
     data = get_attr(file_obj, 'data') or {}
 
     # assign primary fields

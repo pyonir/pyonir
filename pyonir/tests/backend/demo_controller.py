@@ -109,13 +109,13 @@ def process_sse(data: dict) -> str:
 
 async def pyonir_docs_handler(request: PyonirRequest):
     """Documentation for every endpoint by pyonir"""
-    return {"routes": request.server_request.app.url_map, "configs": request.auth.app._env}
+    return {"routes": request.pyonir_app.url_map, "configs": request.pyonir_app._env}
 
 
 async def pyonir_sse_handler(request: PyonirRequest) -> AsyncGenerator:
     """Handles sse web request by pyonir"""
     import asyncio
-    from pyonir.core.utils import generate_id, get_attr
+    from pyonir.core.utils import get_attr
     from pyonir.core.server import EVENT_RES
     request.type = EVENT_RES  # assign the appropriate streaming headers
     # set sse client

@@ -10,9 +10,10 @@ T = TypeVar("T")
 
 def get_active_user() -> str:
     from pyonir import Site
-    if Site and Site.server.is_active and Site.server.request.request_input:
-        return Site.server.request.security.user and Site.server.request.security.user.uid
-    return "unknown_user"
+    active_uid = "unknown_user"
+    if Site and Site.server.is_active and Site.server.request.security:
+        active_uid = Site.server.request.security.user and Site.server.request.security.user.uid
+    return active_uid
 
 class BaseSchema:
     """
@@ -31,7 +32,7 @@ class BaseSchema:
     _private_keys: Optional[list[str]]
     _foreign_key_names: set[str]
 
-    created_by: str = get_active_user
+    created_by: str = ""
     created_on: datetime = staticmethod(lambda: BaseSchema.generate_date())
 
     def __init_subclass__(cls, **kwargs):
@@ -128,7 +129,38 @@ class BaseSchema:
         self._errors = []
         self.validate_fields()
 
-    def save_to_file(self, file_path: str = None) -> bool:
+    def save_to_file(self, file_path: str = None):
+        from pyonir.core.utils import create_file
+        from pyonir.core.parser import LOOKUP_DATA_PREFIX
+        from pyonir import Site
+        from pyonir.core.authorizer import PyonirUser, PyonirUserMeta
+        if not file_path:
+            file_path = self.file_path if isinstance(self, PyonirUser) else f"{self.__class__.__name__.lower()}.json"
+        _filename = os.path.basename(file_path).split('.')[0]
+        file_data = self.to_dict(obfuscate=False, with_extras=False)
+        active_user_id = get_attr(Site.server.request, 'security.user.uid') or self.created_by
+        use_filename_as_pk = active_user_id if isinstance(self, (PyonirUser, PyonirUserMeta)) else _filename
+        _pk_value = getattr(self, self.__primary_key__, use_filename_as_pk)
+        _datastore = Site.datastore_dirpath if Site else os.path.dirname(file_path)
+
+        if not self.created_by:
+            self.created_by = active_user_id
+
+        for k, fk_type in self.__foreign_keys__:
+            data_path = os.path.join(_datastore, fk_type.__table_name__)
+            fk_schema_inst = getattr(self, k, None)
+            if fk_schema_inst and hasattr(fk_schema_inst, "save_to_file"):
+                fk_schema_inst.created_by = fk_schema_inst.created_by or active_user_id
+                # use main schema pk value as the fk file name to show relationship
+                fk_file_name = (_pk_value or BaseSchema.generate_id()) + '.json'
+                fk_file_path = os.path.join(data_path, fk_file_name)
+                fk_schema_inst.save_to_file(fk_file_path)
+                # set relationship path on parent schema
+                file_data[k] = f"{LOOKUP_DATA_PREFIX}/{fk_type.__table_name__}/{fk_file_name}"
+
+        return create_file(file_path, file_data)
+
+    def xsave_to_file(self, file_path: str = None) -> bool:
         """Saves the user data to a file in JSON format"""
         from pyonir.core.utils import create_file
         from pyonir.core.parser import LOOKUP_DATA_PREFIX
@@ -183,13 +215,13 @@ class BaseSchema:
 
         columns = []
         values = []
-        for name, _ in self.__fields__:
+        for name, fkmodel in self.__fields__:
             columns.append(name)
             v = getattr(self, name)
+            if (name, fkmodel) in self.__foreign_keys__:
+                v = get_attr(v, fkmodel.__primary_key__)
             is_optional_schema = isinstance(v, BaseSchema) and is_optional_type(_)
             v = json.dumps(v, default=json_serial) if is_optional_schema or isinstance(v,(BaseSchema, dict, list, tuple, set)) else v
-            if (name, _) in self.__foreign_keys__:
-                v = get_attr(v, v.__primary_key__)
             values.append(v)
         return tuple(columns), tuple(values)
 

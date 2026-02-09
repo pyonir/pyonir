@@ -1248,7 +1248,7 @@ class PyonirAuthService:
         :return: bool - True if sign_out succeeded, otherwise False.
         """
         authorizer = request.security
-        authorizer.session.clear()
+        authorizer.end_session()
         return authorizer.responses.USER_SIGNED_OUT
 
     @staticmethod

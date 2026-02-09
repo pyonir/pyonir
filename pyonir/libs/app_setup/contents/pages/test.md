@@ -5,7 +5,7 @@ string_types: 1, true, hello, 3.14
 /some/route/{some_param:str}:
     @filter.jinja:- foo
     content: This is some content for a route with a parameter.
-error_page: $dir/pages/error-pages.md#data
+demo_page: $dir/pages/demo.md#data
 # single line comment
 basic: scalar value
 dict_value:

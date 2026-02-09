@@ -9,8 +9,8 @@ from pyonir.core.schemas import BaseSchema, GenericQueryModel
 
 from pyonir.core.mapper import cls_mapper, dict_to_class
 from pyonir.core.parser import DeserializeFile
-from pyonir.core.utils import parse_query_model_to_object
 from pyonir.libs.plugins.navigation import Menu
+from pyonir.tests.conftest import app_setup_path
 
 
 # ==== Sample classes to map into ====
@@ -55,7 +55,7 @@ class Article:
     created_on: datetime = datetime.now
     last_updated: datetime = datetime.now
 
-article_filepath = os.path.join(os.path.dirname(__file__), 'contents', 'article.md')
+article_filepath = os.path.join(app_setup_path, 'contents', 'pages', 'test.md')
 # ==== Tests ====
 def test_generic():
     generic_model = MockGeneric(foo='field1', bar='123')

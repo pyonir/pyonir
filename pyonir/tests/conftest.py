@@ -4,9 +4,11 @@ from typing import Optional
 import pytest, os
 
 from pyonir import Pyonir, BaseSchema
-from pyonir.core.database import PyonirDatabaseService
+from pyonir.core.database import PyonirDatabaseService, CollectionQuery
 from pyonir.core.authorizer import RequestInput
+from pyonir.core.parser import DeserializeFile
 
+app_setup_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'libs', 'app_setup')
 
 class PyonirMockRole(BaseSchema, table_name='roles_table', primary_key='rid'):
     rid: str = BaseSchema.generate_id
@@ -88,11 +90,20 @@ def test_app():
     Session-scoped fixture providing a global Pyonir test app.
     Other test modules can simply request `test_app` to reuse this instance.
     """
-    app = Pyonir(__file__, use_themes=False)
+    app = Pyonir(os.path.join(app_setup_path, 'main.py'), use_themes=False)
     app.env.add('app.datastore_dirpath', os.path.join(app.app_dirpath))
 
     yield app
 
+@pytest.fixture(scope="session")
+def mock_collection(test_app):
+    """Provide mock data for tests from the package init module."""
+    return CollectionQuery(test_app.pages_dirpath)
+
+@pytest.fixture(scope="session")
+def mock_file():
+    """Provide mock data for tests from the package init module."""
+    return DeserializeFile(os.path.join(app_setup_path,'contents', 'pages', 'test.md'))
 
 @pytest.fixture(scope="session")
 def mock_data():

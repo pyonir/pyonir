@@ -1,9 +1,10 @@
-import pytest
 import os
 from pyonir.core.media import BaseMedia, ImageFormat
 from pathlib import Path
 
-frontend_path = Path(os.path.join(os.path.dirname(__file__), "frontend", "static"))
+from pyonir.tests.conftest import app_setup_path
+
+frontend_path = Path(os.path.join(app_setup_path, "frontend", "public"))
 temp_media_file = os.path.join(frontend_path, "test_image.png")
 test_metadata = {
         "name": "test_image",
@@ -120,6 +121,8 @@ def test_get_media_data():
         assert 'height' in media_data
         assert media_data['width'] == 800
         assert media_data['height'] == 600
+
+    os.remove(img_path)
 
 def test_image_thumbnails():
     from pyonir import Site

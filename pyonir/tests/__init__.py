@@ -2,7 +2,6 @@ import os, json
 import textwrap
 
 from pyonir.core.parser import DeserializeFile
-from pyonir.tests.backend.demo_controller import DemoService
 from pyonir import Pyonir
 
 def generate_dataclass_from_class(cls, output_dir="types"):

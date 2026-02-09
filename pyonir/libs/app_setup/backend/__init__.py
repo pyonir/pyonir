@@ -1,6 +1,7 @@
 # this package is now discoverable by the app setup backend
-import time
+import json, time
 from typing import AsyncGenerator
+from starlette.websockets import WebSocket, WebSocketState
 
 from pyonir import PyonirRequest
 
@@ -23,6 +24,7 @@ def get_client_ua(request):
         return "safari"
 
     return "unknown"
+
 def process_sse(data: dict) -> str:
     """Formats a string and an event name in order to follow the event stream convention.
     'event: Jackson 5\\ndata: {"abc": 123}\\n\\n'
@@ -72,3 +74,53 @@ async def sse_handler(request: PyonirRequest) -> AsyncGenerator:
         await asyncio.sleep(interval)  # Wait for 5 seconds before sending the next message
         yield res
     print(f"Client {client_id} disconnected")
+
+async def pyonir_ws_handler(websocket: WebSocket, request: PyonirRequest):
+    """ws connection handler"""
+
+    async def get_data(ws: WebSocket):
+        assert ws.application_state == WebSocketState.CONNECTED and ws.client_state == WebSocketState.CONNECTED
+        wsdata = await ws.receive()
+
+        if wsdata.get('text'):
+            wsdata = wsdata['text']
+            swsdata = json.loads(wsdata)
+            swsdata['value'] = swsdata.get('value')
+            wsdata = json.dumps(swsdata)
+        elif wsdata.get('bytes'):
+            wsdata = wsdata['bytes'].decode('utf-8')
+
+        return wsdata
+
+    async def broadcast(message: str, ws_id: str = None):
+        for id, ws in ConnClients.items():
+            if active_id == id and hasattr(ws, 'send_text'): continue
+            await ws.send_text(message)
+
+    async def on_disconnect(websocket: WebSocket):
+        del ConnClients[active_id]
+        client_data.update({"action": "ON_DISCONNECTED", "id": active_id})
+        await broadcast(json.dumps(client_data))
+
+    async def on_connect(websocket: WebSocket):
+        client_data.update({"action": "ON_CONNECTED", "id": active_id})
+        await websocket.send_text(json.dumps(client_data))
+
+    ConnClients = {} if request.pyonir_app.connected_clients is None else request.pyonir_app.connected_clients
+    active_id = generate_id()
+    client_data = {}
+    await websocket.accept()  # Accept the WebSocket connection
+    print("WebSocket connection established!")
+    ConnClients[active_id] = websocket
+    await on_connect(websocket)
+    try:
+        while websocket.client_state == WebSocketState.CONNECTED:
+            # Wait for a message from the client
+            data = await get_data(websocket)
+            print(f"Received from client: {data}")
+            # Respond to the client
+            await broadcast(data)
+        await on_disconnect(data)
+    except Exception as e:
+        del ConnClients[active_id]
+        print(f"WebSocket connection closed: {active_id}")

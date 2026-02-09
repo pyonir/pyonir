@@ -5,6 +5,7 @@ import pytest, os
 
 from pyonir import Pyonir, BaseSchema
 from pyonir.core.database import PyonirDatabaseService
+from pyonir.core.authorizer import RequestInput
 
 
 class PyonirMockRole(BaseSchema, table_name='roles_table', primary_key='rid'):
@@ -56,6 +57,18 @@ class PyonirMocks:
         "uid": "NDYzZjBhNTUwYjQ2",
         "verified_email": False
     }
+
+
+@pytest.fixture
+def request_input():
+    """Provide a RequestInput instance matching the test module's usage.
+
+    This constructs the object the same way you had in `test_user.py`:
+    RequestInput(**valid_credentials)
+    """
+    creds = {"email": "test@example.com", "password": "secure123", "flow": "session"}
+    return RequestInput(**creds)
+
 
 @pytest.fixture(scope="session")
 def test_pyonir_db(test_app) -> PyonirMockDataBaseService:

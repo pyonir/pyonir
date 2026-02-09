@@ -5,34 +5,20 @@ from pyonir.core.authorizer import (
     PyonirUser,
     PyonirUserMeta,
     PermissionLevel,
-    RequestInput,
     INVALID_EMAIL_MESSAGE,
     INVALID_PASSWORD_MESSAGE,
 )
 
-# Path to a (possibly present) test fixture file. Tests will build users from the PyonirMocks fixture
-test_user_file = os.path.join(os.path.dirname(__file__), "contents", "mock_data", "test_user.json")
-
-valid_credentials = {"email": "test@example.com", "password": "secure123"}
+valid_credentials = {"email": "test@example.com", "password": "secure123", "flow": "session"}
 
 
-def make_request_input(email=None, password=None, flow=None):
-    """Create a RequestInput instance without invoking BaseSchema.__init__ to avoid enum coercion side-effects."""
-    ri = object.__new__(RequestInput)
-    # set minimal attributes used by tests
-    ri.email = email
-    ri.password = password
-    ri.flow = flow
-    ri._errors = []
-    return ri
-
-
-def test_user_credentials():
+def test_user_credentials(request_input):
     """RequestInput.from_dict handles missing email by reporting the invalid-email message."""
-    creds = make_request_input(email=None, password="securepass", flow="session")
-    creds.validate_email()
-    assert len(creds._errors) >= 1
-    assert INVALID_EMAIL_MESSAGE in creds._errors[0]
+    request_input.email = ""  # Simulate missing email
+    request_input._errors = []
+    request_input.validate_email()
+    assert len(request_input._errors) >= 1
+    assert INVALID_EMAIL_MESSAGE in request_input._errors[0]
 
 
 def test_user_from_dict(mock_data):
@@ -75,49 +61,59 @@ def test_meta_contains_password_field():
     assert getattr(user.meta, "password", None) == "supersecret"
 
 
-# RequestInput tests using the real RequestInput validators
+# RequestInput tests using the real RequestInput validators — mutate the shared instance for each test
 
-def test_valid_signin():
-    signin = make_request_input(email=valid_credentials["email"], password=valid_credentials["password"])
+def test_valid_signin(request_input):
+    request_input.email = valid_credentials["email"]
+    request_input.password = valid_credentials["password"]
+    request_input._errors = []
     # explicitly re-run validators to be deterministic
-    signin.validate_email()
-    signin.validate_password()
+    request_input.validate_email()
+    request_input.validate_password()
 
-    assert signin.is_valid()
-    assert signin.email == valid_credentials["email"]
-    assert signin.password == valid_credentials["password"]
-
-
-def test_invalid_email_format():
-    signin = make_request_input(email="invalid-email", password="secure123")
-    signin.validate_email()
-
-    assert hasattr(signin, "_errors")
-    assert any(INVALID_EMAIL_MESSAGE in e for e in signin._errors)
+    assert request_input.is_valid()
+    assert request_input.email == valid_credentials["email"]
+    assert request_input.password == valid_credentials["password"]
 
 
-def test_empty_email():
-    signin = make_request_input(email="", password="secure123")
-    signin.validate_email()
+def test_invalid_email_format(request_input):
+    request_input.email = "invalid-email"
+    request_input.password = "secure123"
+    request_input._errors = []
+    request_input.validate_email()
 
-    assert hasattr(signin, "_errors")
-    assert not signin.is_valid()
-    assert any(INVALID_EMAIL_MESSAGE in e for e in signin._errors)
-
-
-def test_empty_password():
-    signin = make_request_input(email="test@example.com", password="")
-    signin.validate_password()
-
-    assert hasattr(signin, "_errors")
-    assert not signin.is_valid()
-    assert any(INVALID_PASSWORD_MESSAGE in e for e in signin._errors)
+    assert hasattr(request_input, "_errors")
+    assert any(INVALID_EMAIL_MESSAGE in e for e in request_input._errors)
 
 
-def test_short_password():
-    signin = make_request_input(email="test@example.com", password="12345")
-    signin.validate_password()
+def test_empty_email(request_input):
+    request_input.email = ""
+    request_input.password = "secure123"
+    request_input._errors = []
+    request_input.validate_email()
 
-    assert hasattr(signin, "_errors")
-    assert not signin.is_valid()
-    assert any(INVALID_PASSWORD_MESSAGE in e for e in signin._errors)
+    assert hasattr(request_input, "_errors")
+    assert not request_input.is_valid()
+    assert any(INVALID_EMAIL_MESSAGE in e for e in request_input._errors)
+
+
+def test_empty_password(request_input):
+    request_input.email = "test@example.com"
+    request_input.password = ""
+    request_input._errors = []
+    request_input.validate_password()
+
+    assert hasattr(request_input, "_errors")
+    assert not request_input.is_valid()
+    assert any(INVALID_PASSWORD_MESSAGE in e for e in request_input._errors)
+
+
+def test_short_password(request_input):
+    request_input.email = "test@example.com"
+    request_input.password = "12345"
+    request_input._errors = []
+    request_input.validate_password()
+
+    assert hasattr(request_input, "_errors")
+    assert not request_input.is_valid()
+    assert any(INVALID_PASSWORD_MESSAGE in e for e in request_input._errors)

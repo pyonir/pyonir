@@ -764,8 +764,9 @@ class PyonirSecurity:
     def reset_signin_attempts(self):
         """Resets the sign-in attempts counter in the session."""
         if self.session:
-            del self.session['signin_attempts']
-            if self.session.get('signin_locked_until'):
+            if 'signin_attempts' in self.session:
+                del self.session['signin_attempts']
+            if 'signin_locked_until' in self.session:
                 del self.session['signin_locked_until']
 
     def create_jwt(self, user_id: str = None, user_role: str = '', exp_time=None):
@@ -1180,11 +1181,6 @@ class PyonirAuthService:
             response = authorizer.responses.ERROR
             response.status_code = 400
 
-        # perform model validation on request
-        # signin_creds = UserSignIn(email=authorizer.user_creds.email, password=authorizer.user_creds.password)
-        # if signin_creds.is_valid():
-        #     authorizer.create_profile()
-        #     authorizer.request.add_flash('sign_up', authorizer.response.to_dict())
         return response
 
     @staticmethod

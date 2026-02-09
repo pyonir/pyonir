@@ -375,20 +375,6 @@ class PyonirDatabaseService:
         cursor.execute(f"PRAGMA table_info({table_name});")
         return {row[1]: row[2] for row in cursor.fetchall()}
 
-    # def get_table_pk(self, table: str, with_columns: bool = False):
-    #     cursor = self.connection.cursor()
-    #     cursor.execute(f"PRAGMA table_info('{table}')")
-    #     pk = "id"
-    #     columns = {}
-    #     for col in cursor.fetchall():
-    #         cid, name, type_, notnull, dflt_value, pk = col
-    #         columns[name] = type_
-    #         if pk == 1:
-    #             pk = name
-    #             if not with_columns: break
-    #     columns.update({"__pk__": pk})
-    #     return pk if not with_columns else columns
-
     def rename_table_columns(self, table_name: str, rename_map: dict):
         """
         Renames columns in database schema table

@@ -56,8 +56,8 @@ def route_wrapper(route: RouteConfig, **kwargs):
     async def dec_wrapper(star_req):
         """Wrapper function for handling incoming requests, performing security checks, and building responses"""
         from pyonir.core.authorizer import PyonirBaseRequest
-        pyonir_request: PyonirBaseRequest = PyonirBaseRequest(star_req, star_req.test_app.pyonir_app)
-        star_req.test_app.pyonir_app.server.request = pyonir_request
+        pyonir_request: PyonirBaseRequest = PyonirBaseRequest(star_req, star_req.app.pyonir_app)
+        star_req.app.pyonir_app.server.request = pyonir_request
         await pyonir_request.set_request_input()
         await pyonir_request.set_page_file()
         pyonir_request.security.responses.load_responses(pyonir_request.file.data)

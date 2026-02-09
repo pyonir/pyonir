@@ -546,7 +546,7 @@ def process_lookups(value_str: str, file_ctx: DeserializeFile = None) -> Optiona
     """Process $dir and $data lookups in the value string"""
     app_ctx: list = file_ctx.app_ctx
     file_contents_dirpath: str = file_ctx.file_contents_dirpath
-    file_name: str = file_ctx.file_name
+    file_name: str = file_ctx.file_name + file_ctx.file_ext
 
     value_str = value_str.strip()
     has_lookup = value_str.startswith((LOOKUP_DIR_PREFIX, LOOKUP_DATA_PREFIX, LOOKUP_CALLER_PREFIX))

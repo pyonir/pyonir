@@ -9,8 +9,8 @@ def homepage(req: PyonirRequest):
         request.session['count'] = 1
     else:
         request.session['count'] = int(request.session['count']) + 1
-    # print("SESSION:", request.session)
-    # print("COOKIE HEADER:", request.headers.get("cookie"))
+    print("SESSION:", request.session)
+    print("COOKIE HEADER:", request.headers.get("cookie"))
     username = "John Doe"
     count = request.session['count']
     return f'Hello, {username}: {count}!<a href="/hii">count</a></br><p>SESSION: {request.session}</p>'

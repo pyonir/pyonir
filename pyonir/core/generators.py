@@ -34,7 +34,7 @@ class APIGen:
                     fn_name = fn.__name__
                     import_method_path = f"{namespace}.{fn_name}"
                     gen_params = "\n\t".join([f"{k}: {v}" for k, v in params.items()]) if params else ""
-                    file_path = os.path.join(self.test_app.api_dirpath, namespace, fn_name + '.md')
+                    file_path = os.path.join(self.app.api_dirpath, namespace, fn_name + '.md')
                     create_file(str(file_path), gen_template.format(
                         generated_date=datetime.datetime.now(),
                         gen_params=gen_params, methods=method, import_method_path=import_method_path, docs=fn_docs))

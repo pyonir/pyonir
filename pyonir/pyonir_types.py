@@ -189,8 +189,6 @@ class AbstractFSQuery:
         """Paginates a list into smaller segments based on curr_pg and display limit"""
         from sortedcontainers import SortedList
         self.order_dir = 'desc' if reverse else 'asc'
-        # if self.limit:
-        #     self.curr_page = 1 if not self.curr_page else self.curr_page
         if self.order_by:
             self.sorted_files = SortedList(self.query_fs, self.sorting_key)
         if self.where_key:

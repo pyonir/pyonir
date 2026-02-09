@@ -30,4 +30,4 @@ You can edit this page by modifying the `contents/pages/index.md` file.
 **Happy coding!**
 
 ![circuts](/static/images/circuits.jpg)
-![circuts](/public/city-gemini.png)
+![circuts](/public/test_image.png)

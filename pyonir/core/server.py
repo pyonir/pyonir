@@ -123,6 +123,7 @@ class PyonirServer(Starlette):
         self.add_middleware(SessionMiddleware,
                             https_only=False,
                             domain=self.pyonir_app.domain,
+                            max_age=3600,
                             secret_key=self.pyonir_app.salt,
                             session_cookie=self.pyonir_app.session_key,
                             same_site='lax'
@@ -202,7 +203,10 @@ class PyonirServer(Starlette):
     def init_default_static_routes(self):
         if self.pyonir_app.use_themes:
             self.add_static_route(self.pyonir_app.frontend_assets_route, self.pyonir_app.themes.active_theme.static_dirpath)
+        else:
+            self.add_static_route(self.pyonir_app.frontend_assets_route, self.pyonir_app.frontend_assets_dirpath)
         self.add_static_route(self.pyonir_app.public_assets_route, self.pyonir_app.public_assets_dirpath)
+        self.add_static_route(self.pyonir_app.uploads_route, self.pyonir_app.uploads_dirpath)
         # self.add_static_route("/{__file_path__:path}", self.pyonir_app.public_assets_dirpath)
 
     def init_routes(self):

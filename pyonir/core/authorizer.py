@@ -296,7 +296,7 @@ class PyonirBaseRestResponse:
             value = None
         self._file_response = value or PlainTextResponse("File not found", status_code=404)
 
-    def set_redirect_response(self, url: str, code: int):
+    def set_redirect_response(self, url: str, code: int = 302):
         from starlette.responses import RedirectResponse
         res = RedirectResponse(url, status_code=code)
         self._redirect_response = res
@@ -700,7 +700,8 @@ class PyonirSecurity:
     def create_session(self, user: PyonirUser):
         """Creates a user session for the authenticated user."""
         user_jwt = self.create_jwt(user_id=user.uid, user_role=user.role.name, exp_time=1440 if self.creds.remember_me else 60)
-        self.session[self.pyonir_app.session_key] = user_jwt
+        # self.session[self.pyonir_app.session_key] = user_jwt
+        self.session.update({self.pyonir_app.session_key: user_jwt})
         # user.save_to_session(self.request, value=user_jwt)
 
     def create_user(self) -> PyonirUser:
@@ -911,7 +912,9 @@ class PyonirBaseRequest:
 
     @property
     def session(self):
-        return self.server_request.session
+        if self.server_request and hasattr(self.server_request, 'session'):
+            return self.server_request.session
+        return {}
 
     @property
     def redirect_to(self):
@@ -937,7 +940,7 @@ class PyonirBaseRequest:
 
         # Perform redirects
         if self.redirect_to:
-            return self.server_response.set_redirect_response(self.redirect_to, 301).build()
+            return self.server_response.set_redirect_response(self.redirect_to).build()
 
         # Execute plugins hooks initial request
         await self.pyonir_app.plugin_manager.run_async_plugins(PyonirHooks.ON_REQUEST, self)

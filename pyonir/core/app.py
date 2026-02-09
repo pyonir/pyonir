@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import Optional, Generator, List, Callable
 
 from pyonir.core.loaders import import_module
@@ -163,33 +164,6 @@ class Base:
         """Parses a file and returns a Parsely instance for the file."""
         from pyonir.core.parser import DeserializeFile
         return DeserializeFile(file_path, app_ctx=self.app_ctx, model=model)
-
-    # def apply_virtual_routes(self, pyonir_request: 'BaseRequest') -> 'Parsely':
-    #     """Reads and applies virtual .routes.md file specs onto or updates the request file"""
-    #     from pyonir.core.parser import DeserializeFile, FileStatuses
-    #     server = pyonir_request.app.server
-    #     # if hasattr(pyonir_request.query_params,'rr'):
-    #     #     pyonir_request.app.collect_virtual_routes()
-    #     pth = pyonir_request.path.replace(self.API_ROUTE,'') if pyonir_request.is_api else pyonir_request.path
-    #     virtual_route_url, virtual_route_data, virtual_path_params = server.get_virtual(pth)
-    #     if virtual_route_data:
-    #         rfile: DeserializeFile = pyonir_request.file
-    #         pyonir_request.path_params.update(virtual_path_params)
-    #         if rfile.file_exists:
-    #             rfile.data.update(virtual_route_data)
-    #             rfile.apply_filters()
-    #         if not rfile.file_exists:
-    #             # replace 404page with the virtual file as the page
-    #             request_ctx = pyonir_request.app_ctx_ref
-    #             vfile = self.parse_file(request_ctx.virtual_routes_filepath)
-    #             vurl_data = vfile.data.get(virtual_route_url) or {}
-    #             vurl_data.update(**{'url': pyonir_request.path, 'slug': pyonir_request.slug})
-    #             vfile.data = vurl_data
-    #             vfile.status = FileStatuses.PUBLIC
-    #             vfile.apply_filters()
-    #             # vfile.file_ssg_html_dirpath = vfile.file_ssg_html_dirpath.replace(vfile.file_name, pyonir_request.slug)
-    #             # vfile.file_ssg_api_dirpath = vfile.file_ssg_api_dirpath.replace(vfile.file_name, pyonir_request.slug)
-    #             pyonir_request.file = vfile
 
     def register_resolver(self, name: str, cls_or_path, args=(), kwargs=None, hot_reload=False):
         import inspect
@@ -506,8 +480,6 @@ class BaseApp(Base):
         self.name: str = os.path.basename(self.app_dirpath) # directory name of application
         self.themes: Optional[PyonirThemes] = None # application themes
         self.plugin_manager: PluginManager = PluginManager(self)
-        # self.plugins_installed = {}
-        # self._plugins_activated: set = set()
         self._resolvers = {}
         self._configs: object = None
         self._env: EnvConfig = load_env(os.path.join(self.app_dirpath, '.env'))
@@ -527,6 +499,7 @@ class BaseApp(Base):
             'md': parse_markdown
         }
         self.apply_globals()
+        # Path(self.uploads_dirpath).mkdir(parents=True, exist_ok=True)
 
     @property
     def active_theme(self):

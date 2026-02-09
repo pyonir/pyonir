@@ -6,7 +6,7 @@ from pyonir.core.utils import get_version
 from pyonir.core.app import BaseApp, BasePlugin
 from pyonir.core.database import CollectionQuery
 from pyonir.core.schemas import BaseSchema
-from pyonir.core.server import BaseRequest, BaseServer, BaseRestResponse
+from pyonir.core.server import PyonirServer
 
 # Pyonir settings
 PYONIR_DIRPATH = os.path.abspath(os.path.dirname(__file__))
@@ -23,7 +23,6 @@ __version__: str = "0.0.53"
 Site: Optional[BaseApp] = None
 
 
-class PyonirServer(BaseServer): pass
 class PyonirRequest(PyonirBaseRequest): pass
 class PyonirCollection(CollectionQuery): pass
 class PyonirSchema(BaseSchema): pass

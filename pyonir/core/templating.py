@@ -36,8 +36,10 @@ class TemplateEnvironment(Environment):
         self.globals["render_component"] = self.render_component
 
     def url_for(self, route_name: str):
-        rmaps = self._app.server.url_map if self._app.server else {}
-        return rmaps.get(route_name, {}).get('path', '/'+route_name)
+        from pyonir.core.server import RouteConfig
+        rmaps = self._app.server.route_map if self._app.server else {}
+        route: RouteConfig = rmaps.get(route_name)
+        return route.path if route else f"/{route_name}"
 
     def render_component(self, name: str, *args, **kwargs) -> str:
         """Render a macro from components.jinja with full Jinja context."""

@@ -10,8 +10,8 @@ from enum import Enum, StrEnum
 from pyonir.core.mapper import func_request_mapper
 from pyonir.core.parser import DeserializeFile, VIRTUAL_ROUTES_FILENAME
 from pyonir.core.schemas import BaseSchema
-from pyonir.core.server import BaseApp, BaseRestResponse
-from pyonir.core.user import User, Role, PermissionLevel, Roles, UserSignIn
+from pyonir.core.server import BaseApp, RouteConfig
+# from pyonir.core.user import User, Role, PermissionLevel, Roles, UserSignIn
 from pyonir.core.utils import merge_dict, get_attr, dict_to_class
 
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -112,6 +112,90 @@ def format_time_remaining(time_remaining: Union[int, float]) -> str:
         time_str = f"{secs}s"
     return time_str
 
+class PermissionLevel(str):
+    NONE = 'none'
+    """Defines the permission levels for users"""
+
+    READ = 'read'
+    """Permission to read data"""
+
+    WRITE = 'write'
+    """Permission to write data"""
+
+    UPDATE = 'update'
+    """Permission to update data"""
+
+    DELETE = 'delete'
+    """Permission to delete data"""
+
+    ADMIN = 'admin'
+    """Permission to perform administrative actions"""
+
+
+@dataclass
+class Role:
+    """Defines the permissions for each role"""
+    name: str
+    perms: list[str]
+
+    def to_dict(self, **kwargs) -> str:
+        return self.name
+
+    @classmethod
+    def from_string(cls, role_name: str) -> "Role":
+        """
+        Create a Role instance from a string definition.
+
+        Format: "RoleName:perm1,perm2,perm3"
+        - RoleName is required.
+        - Permissions are optional; defaults to [].
+
+        Example:
+            Role.from_string("Admin:read,write")
+            -> Role(name="Admin", perms=["read", "write"])
+        """
+        role_name, perms = role_name.split(':')
+        return cls(name=role_name.strip(), perms=perms.strip().split(',') if perms else [])
+
+
+class Roles:
+    """Defines the user roles and their permissions"""
+
+    SUPER = Role(name='super', perms=[
+        PermissionLevel.READ,
+        PermissionLevel.WRITE,
+        PermissionLevel.UPDATE,
+        PermissionLevel.DELETE,
+        PermissionLevel.ADMIN
+    ])
+    """Super user with all permissions"""
+    ADMIN = Role(name='admin', perms=[
+        PermissionLevel.READ,
+        PermissionLevel.WRITE,
+        PermissionLevel.UPDATE,
+        PermissionLevel.DELETE
+    ])
+    """Admin user with most permissions"""
+    AUTHOR = Role(name='author', perms=[
+        PermissionLevel.READ,
+        PermissionLevel.WRITE,
+        PermissionLevel.UPDATE
+    ])
+    """Author user with permissions to create and edit content"""
+    CONTRIBUTOR = Role(name='contributor', perms=[
+        PermissionLevel.READ,
+        PermissionLevel.WRITE
+    ])
+    """Contributor user with permissions to contribute content"""
+    GUEST = Role(name='guest', perms=[
+        PermissionLevel.READ
+    ])
+    """Contributor user with permissions to contribute content"""
+
+    @classmethod
+    def all_roles(cls):
+        return [cls.SUPER, cls.ADMIN, cls.AUTHOR, cls.CONTRIBUTOR, cls.GUEST]
+
 @dataclass
 class PyonirBaseRestResponse:
     """Represents a REST response from the server."""
@@ -156,7 +240,7 @@ class PyonirBaseRestResponse:
             return self._file_response
         elif self._stream:
             media_type = EVENT_RES
-            content = StreamingResponse(content=self._stream, media_type=EVENT_RES)
+            return StreamingResponse(content=self._stream, media_type=EVENT_RES)
         elif self._html:
             media_type = TEXT_RES
             content = self._html
@@ -200,15 +284,23 @@ class PyonirBaseRestResponse:
         self._html = value
         return self
 
+    def set_stream(self, value: any):
+        """Sets the stream response value"""
+        self._stream = value
+        return self
+
     def set_file_response(self, value: any):
         """Sets the file response value"""
-        from starlette.responses import PlainTextResponse
+        from starlette.responses import PlainTextResponse, Response
+        if not isinstance(value, Response):
+            value = None
         self._file_response = value or PlainTextResponse("File not found", status_code=404)
 
     def set_redirect_response(self, url: str, code: int):
         from starlette.responses import RedirectResponse
         res = RedirectResponse(url, status_code=code)
         self._redirect_response = res
+        return self
 
     def build(self):
         """Builds the response object"""
@@ -223,19 +315,6 @@ class PyonirBaseRestResponse:
         if self._redirect_response:
             return self._redirect_response
         return res
-
-    # def set_server_response(self):
-    #     """Renders the starlette web response"""
-    #     from starlette.responses import Response, StreamingResponse
-    #
-    #     if self._media_type == EVENT_RES and self._stream:
-    #         return StreamingResponse(content=self._stream, media_type=EVENT_RES)
-    #
-    #     content = self._html if self._html else self.to_json()
-    #     media_type = TEXT_RES if self._html else JSON_RES
-    #     self._server_response = Response(content=content, media_type=media_type)
-    #     if self._headers:
-    #         self._server_response.headers.update(self._headers)
 
     def set_media(self, media_type: str):
         self._media_type = media_type
@@ -258,7 +337,7 @@ class PyonirBaseRestResponse:
         if headers:
             self._headers.update(headers)
 
-class PyonirAuthResponse(PyonirBaseRestResponse):
+class PyonirRestResponse(PyonirBaseRestResponse):
     """
     Represents a standardized authentication response.
 
@@ -266,70 +345,70 @@ class PyonirAuthResponse(PyonirBaseRestResponse):
         message (str): A human-readable message describing the response.
         status_code (int): The associated HTTP status code for the response.
     """
-    def response(self, message: str = None, status_code: int = None) -> 'PyonirAuthResponse':
+    def response(self, message: str = None, status_code: int = None) -> 'PyonirRestResponse':
         """Returns a new PyonirAuthResponse with updated message and status code, or defaults to current values."""
-        return PyonirAuthResponse(
+        return PyonirRestResponse(
             message=message or self.message,
             status_code=status_code or self.status_code
         )
 
 class DefaultPyonirAuthResponses:
     """Enum-like class that provides standardized authentication responses."""
-    SERVER_OK = PyonirAuthResponse(
+    SERVER_OK = PyonirRestResponse(
         message="Server Ok",
         status_code=200
     )
     """PyonirAuthResponse: Indicates general server status of ok"""
 
-    ERROR = PyonirAuthResponse(
+    ERROR = PyonirRestResponse(
         message="Authentication failed",
         status_code=400
     )
     """PyonirAuthResponse: Indicates an authentication error due to invalid credentials or bad input (HTTP 400)."""
 
-    INVALID_CREDENTIALS = PyonirAuthResponse(
+    INVALID_CREDENTIALS = PyonirRestResponse(
         message="The credentials provided is incorrect.",
         status_code=401
     )
     """PyonirAuthResponse: Indicates failed credential authentication (HTTP 401)."""
 
-    SUCCESS = PyonirAuthResponse(
+    SUCCESS = PyonirRestResponse(
         message="Authentication successful",
         status_code=200
     )
     """PyonirAuthResponse: Indicates successful authentication (HTTP 200)."""
 
-    ACTIVE_SESSION = PyonirAuthResponse(
+    ACTIVE_SESSION = PyonirRestResponse(
         message="Authentication successful. session is active",
         status_code=200
     )
     """PyonirAuthResponse: Active authentication session (HTTP 200)."""
 
-    UNAUTHORIZED = PyonirAuthResponse(
+    UNAUTHORIZED = PyonirRestResponse(
         message="Unauthorized access",
         status_code=401
     )
     """PyonirAuthResponse: Indicates missing or invalid authentication credentials (HTTP 401)."""
 
-    SESSION_EXPIRED = PyonirAuthResponse(
+    SESSION_EXPIRED = PyonirRestResponse(
         message="Session has expired. New Sign in required",
         status_code=401
     )
     """PyonirAuthResponse: Indicates missing or invalid authentication credentials (HTTP 401)."""
 
-    NO_ACCOUNT_EXISTS = PyonirAuthResponse(message="Account not found.", status_code=409)
+    NO_ACCOUNT_EXISTS = PyonirRestResponse(message="Account not found.", status_code=409)
     """Error: The requested action cannot be completed because the user does not have an account."""
 
-    USER_SIGNED_OUT = PyonirAuthResponse(message="User signed out", status_code=200)
+    USER_SIGNED_OUT = PyonirRestResponse(message="User signed out", status_code=200)
     """PyonirAuthResponse: User signed out"""
 
-    ACCOUNT_EXISTS = PyonirAuthResponse(message="Account already exists", status_code=409)
+    ACCOUNT_EXISTS = PyonirRestResponse(message="Account already exists", status_code=409)
     """PyonirAuthResponse: Indicates that the user account already exists (HTTP 409)."""
 
-    SOMETHING_WENT_WRONG = PyonirAuthResponse(message="Something went wrong, please try again later", status_code=422)
+    SOMETHING_WENT_WRONG = PyonirRestResponse(message="Something went wrong, please try again later", status_code=422)
     """PyonirAuthResponse: Indicates a general error occurred during authentication (HTTP 422)."""
 
-    TOO_MANY_REQUESTS = PyonirAuthResponse(message="Too many requests. Try again later", status_code=429)
+    TOO_MANY_REQUESTS = PyonirRestResponse(message="Too many requests. Try again later", status_code=429)
     """PyonirAuthResponse: Indicates too many requests have been made, triggering rate limiting (HTTP 429)."""
 
     def load_responses(self, responses: dict):
@@ -338,7 +417,7 @@ class DefaultPyonirAuthResponses:
         for key, res_obj in _responses.items():
             message = res_obj.get('message', '')
             status_code = res_obj.get('status_code', 200)
-            setattr(self, key.upper(), PyonirAuthResponse(message=message, status_code=status_code))
+            setattr(self, key.upper(), PyonirRestResponse(message=message, status_code=status_code))
 
 class AuthenticationTypes(StrEnum):
     BASIC = "basic"
@@ -469,6 +548,11 @@ class RequestInput(BaseSchema):
             self._errors.append(INVALID_PASSWORD_MESSAGE)
 
     @classmethod
+    def from_dict(cls, data: dict) -> 'RequestInput':
+        """Creates a RequestInput instance from a dictionary."""
+        return cls(**data)
+
+    @classmethod
     async def from_request(cls, request: StarletteRequest) -> 'RequestInput':
         """Extracts user credentials from the incoming request."""
         pyonir_app: BaseApp = request.app.pyonir_app
@@ -522,7 +606,6 @@ class RequestInput(BaseSchema):
                    password=password,
                    remember_me=remember_me,
                    bearer_token=bearer_token)
-
 
 class PyonirSecurity:
     """Handles route security checks including authentication and authorization."""
@@ -594,7 +677,7 @@ class PyonirSecurity:
 
     @property
     def has_session(self) -> bool:
-        return bool(self.request.request_input.session_id)
+        return bool(self.request.request_input.session_id) if self.request.request_input else False
 
     @property
     def signin_attempts(self) -> int:
@@ -749,9 +832,9 @@ class PyonirBaseRequest:
         self.file: Optional[DeserializeFile] = None
         self.file_resolver: Optional[Callable] = None
         self.server_request: StarletteRequest = server_request
-        self.server_response: PyonirAuthResponse = PyonirAuthResponse()
+        self.server_response: PyonirRestResponse = PyonirRestResponse()
         self.security: Optional[PyonirSecurity] = PyonirSecurity(self)
-        self.request_input: RequestInput = server_request.state.creds if server_request and hasattr(server_request.state, 'creds') else None
+        self.request_input: RequestInput = RequestInput() if not server_request else None
 
         # path params
         self.host = str(server_request.base_url).rstrip('/') if server_request else app.host
@@ -770,7 +853,7 @@ class PyonirBaseRequest:
         self.is_home = (self.slug == '')
         self.is_api = self.parts and self.parts[0] == app.API_DIRNAME
         self.is_static = bool(list(os.path.splitext(self.path)).pop()) if server_request else False
-
+        self.is_sse = server_request and EVENT_RES in server_request.headers.get("accept", "")
         if self.is_api:
             self.path = self.path.replace(app.API_ROUTE, '')  # normalize api path
 
@@ -784,6 +867,11 @@ class PyonirBaseRequest:
     @property
     def app_ctx_ref(self):
         return self._app_ctx_ref or self.pyonir_app
+
+    @property
+    def headers(self) -> dict:
+        """Returns the headers from the server request"""
+        return dict(self.server_request.headers) if self.server_request else {}
 
     @property
     def path_params(self) -> object:
@@ -831,41 +919,47 @@ class PyonirBaseRequest:
         file_redirect = self.request_input.body.get('redirect_to', self.request_input.body.get('redirect'))
         return file_redirect
 
-    async def build_response(self, route_func: Callable) -> Any:
+    async def build_response(self, route: RouteConfig) -> Any:
         """Builds the server response for the current request by executing the route function and processing the file."""
-        is_default_system_router = route_func.__name__ == 'pyonir_index' if route_func else False
-        if not is_default_system_router and route_func and self.pyonir_app.is_dev:
+        route_func = self.file_resolver or route.func
+        root_static_file_request = self.is_static and route.is_index
+        if callable(route_func) and self.pyonir_app.is_dev:
             route_func = self.pyonir_app.reload_module(route_func, reload=True)
-
+        # is_async_gen = inspect.isasyncgenfunction(route_func)
         is_async = inspect.iscoroutinefunction(route_func)
         args = func_request_mapper(route_func, self)
         route_func_response = None
 
-        if callable(route_func):
+        if callable(route_func) and not root_static_file_request:
             self.server_response.status_code = 200
             route_func_response = await route_func(**args) if is_async else route_func(**args)
 
         # Perform redirects
         if self.redirect_to:
-            return self.pyonir_app.server.serve_redirect(self.redirect_to)
+            return self.server_response.set_redirect_response(self.redirect_to, 301).build()
 
         # Execute plugins hooks initial request
         await self.pyonir_app.plugin_manager.run_async_plugins(PyonirHooks.ON_REQUEST, self)
 
-        if isinstance(route_func_response, BaseRestResponse):
+        if isinstance(route_func_response, PyonirRestResponse):
             return route_func_response.build()
-        elif self.is_static:
-            route_func_response = self.pyonir_app.server.resolve_static(self.pyonir_app, self) or route_func_response
-            self.server_response.set_file_response(route_func_response)
+
+        if self.is_sse:
+            self.server_response.set_stream(route_func_response)
         elif self.is_api:
+            if route_func_response is not None and self.file.file_exists:
+                self.file.data['router_content'] = route_func_response
+                route_func_response = None
             self.server_response.set_json(route_func_response or self.file.data)
+        elif self.is_static: # allow route functions to return file responses for static files
+            self.server_response.set_file_response(route_func_response)
         else:
             self.server_response.set_html(self.file.output_html(self))
         return self.server_response.build()
 
     async def set_request_input(self, data: Optional[Dict] = None):
         """Sets the request input data from the web request. This gathers credentials and query parameters into a single RequestInput object."""
-        self.request_input = await RequestInput.from_request(self.server_request)
+        self.request_input = await RequestInput.from_request(self.server_request) if self.server_request else RequestInput.from_dict(data or {})
         if data:
             self.request_input.body.update(data)
 
@@ -952,15 +1046,16 @@ class PyonirBaseRequest:
         app_plugin = list(filter(lambda p: p.name == resolver_path.split('.')[0], Site.activated_plugins))
         app_plugin = app_plugin[0] if len(app_plugin) else self.pyonir_app
         resolver = app_plugin.reload_resolver(resolver_path)
-        _type = get_attr(resolver_action, 'headers.accept') #or request.type
-        custom_response_headers = get_attr(self.file.data, '@response.headers', {})
+        custom_response_headers = get_attr(resolver_action, 'headers', {})
+
+        if custom_response_headers:
+            self.server_response.set_headers_from_dict(custom_response_headers)
+            resolver_action.pop('headers')
 
         self.file.data.update(resolver_action)
         self.request_input.body.update(resolver_action)
         self.file_resolver = resolver
 
-        if custom_response_headers:
-            self.server_response.set_headers_from_dict(custom_response_headers)
 
     def render_error(self):
         """Data output for an unknown file path for a web request"""
@@ -1035,20 +1130,6 @@ class PyonirBaseRequest:
                 res[key] = converter.convert(res[key])
             return res
 
-
-class PyonirRequestMiddleware(BaseHTTPMiddleware):
-    """Middleware to extract and attach user credentials to the request state."""
-
-    def __init__(self, app):
-        super().__init__(app)
-
-    async def dispatch(self, request: Request, call_next):
-        pyonir_app = request.app.pyonir_app
-        if isinstance(pyonir_app, BaseApp):
-            pyonir_request: PyonirBaseRequest = PyonirBaseRequest(request, pyonir_app)
-            request.state.pyonir_request = pyonir_request
-        return await call_next(request)
-
 class PyonirAuthService:
     """
     Abstract base class defining authentication and authorization route resolvers,
@@ -1056,7 +1137,7 @@ class PyonirAuthService:
     """
 
     @staticmethod
-    async def sign_up(request: PyonirBaseRequest) -> PyonirAuthResponse:
+    async def sign_up(request: PyonirBaseRequest) -> PyonirRestResponse:
         """
         Handles the user sign-up process for the authentication system.
         ---
@@ -1083,7 +1164,7 @@ class PyonirAuthService:
                 a `response` object to be returned to the client.
 
         Returns:
-            PyonirAuthResponse:
+            PyonirRestResponse:
                 An authentication response containing status, message, and
                 additional data (e.g., user ID or error details).
         """
@@ -1107,7 +1188,7 @@ class PyonirAuthService:
         return response
 
     @staticmethod
-    async def sign_in(request: PyonirBaseRequest) -> PyonirAuthResponse:
+    async def sign_in(request: PyonirBaseRequest) -> PyonirRestResponse:
         """
         Authenticate a user and return a JWT or session token.
         ---
@@ -1140,7 +1221,7 @@ class PyonirAuthService:
         return server_response
 
     @staticmethod
-    async def sign_out(request: PyonirBaseRequest) -> PyonirAuthResponse:
+    async def sign_out(request: PyonirBaseRequest) -> PyonirRestResponse:
         """
         Invalidate a user's active session or token.
         ---

@@ -208,7 +208,7 @@ class DeserializeFile:
     def process_site_filter(filter_name: str, value: any, kwargs=None):
         from pyonir import Site
 
-        if not Site or (not Site.SSG_IN_PROGRESS and not Site.server.is_active):
+        if not Site or (not Site.SSG_IN_PROGRESS and not Site.server):
             return value
         site_filter = Site.Parsely_Filters.get(filter_name)
         return site_filter(value, kwargs)

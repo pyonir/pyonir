@@ -219,7 +219,7 @@ class Base:
         """Reload a func if hot_reload is enabled"""
         import importlib, sys
         module_path = func.__module__
-        if reload and module_path in sys.modules:
+        if not module_path == '__main__' and reload and module_path in sys.modules:
             importlib.reload(sys.modules[module_path])
         else:
             importlib.import_module(module_path)
@@ -493,9 +493,8 @@ class BaseApp(Base):
         :param salt: value to salt hashes and security tokens
         """
         from pyonir.core.templating import TemplateEnvironment
-        from pyonir import PyonirServer
         from pyonir.core.parser import parse_markdown, DeserializeFile
-        from pyonir import __version__
+        from pyonir import __version__, PyonirServer
         DeserializeFile._routes_dirname = self.PAGES_DIRNAME
         self.VERSION = __version__
         # self.SECRET_SAUCE = generate_id()
@@ -519,7 +518,7 @@ class BaseApp(Base):
         """Serve frontend files from the frontend directory for HTML requests"""
         self.TemplateEnvironment = TemplateEnvironment(self)
         """Templating manager"""
-        self.server = PyonirServer(self)
+        self.server: Optional[PyonirServer] = PyonirServer(self)
         """Starlette server instance"""
 
         self.Parsely_Filters = {
@@ -528,6 +527,10 @@ class BaseApp(Base):
             'md': parse_markdown
         }
         self.apply_globals()
+
+    @property
+    def active_theme(self):
+        return self.themes.active_theme if self.themes else None
 
     @property
     def session_key(self) -> str:
@@ -666,12 +669,7 @@ class BaseApp(Base):
 
     def load_routes(self, routes: List[PyonirRoute], endpoint: str = '') -> None:
         """Loads a list of routes into the application server"""
-        self.server.mount(self.frontend_assets_route, self.server.create_static_route(self.frontend_assets_dirpath))
-        self.server.init_app_routes(routes, endpoint)
-
-    def load_routers(self, routers: PyonirRouters):
-        """Loads a list of routers into the application server"""
-        self.server.init_app_router(routers)
+        self.server.register_routes(routes, endpoint)
 
     def apply_globals(self, global_vars: dict = None):
         """Updates the jinja global variables dictionary"""
@@ -724,7 +722,7 @@ class BaseApp(Base):
         """Generates Static website"""
         import time
         from pyonir.core.utils import create_file, copy_assets, PrntColrs
-        from pyonir.core.server import BaseRequest
+        from pyonir.core.authorizer import PyonirBaseRequest
         from pyonir.core.parser import DeserializeFile
         from pyonir.core.database import query_fs
         self.SSG_IN_PROGRESS = True
@@ -737,7 +735,7 @@ class BaseApp(Base):
             print(f"{PrntColrs.OKCYAN}3. Generating Static Pages")
 
             self.TemplateEnvironment.globals['is_ssg'] = True
-            ssg_req = BaseRequest(None, self)
+            ssg_req = PyonirBaseRequest(None, self)
             start_time = time.perf_counter()
 
             all_pages: Generator[DeserializeFile] = query_fs(self.pages_dirpath, app_ctx=self.app_ctx, model='file')

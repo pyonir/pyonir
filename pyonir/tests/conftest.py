@@ -11,6 +11,10 @@ class PyonirMockRole(BaseSchema, table_name='roles_table', primary_key='rid'):
     rid: str = BaseSchema.generate_id
     name: str
 
+    @classmethod
+    def from_value(cls, value):
+        return cls(**{"name":value})
+
 class PyonirMockUser(BaseSchema, table_name='pyonir_users', primary_key='uid', foreign_keys={PyonirMockRole}, fk_options={"role": {"ondelete": "RESTRICT", "onupdate": "RESTRICT"}}):
     username: str
     email: str
@@ -34,24 +38,23 @@ class PyonirMocks:
     DatabaseService = PyonirMockDataBaseService
     App = Pyonir
     user_data = {
-      "auth_from": "basic",
-      "avatar": "avatar.jpg?t=1761745512",
-      "meta": {
+        "auth_from": "basic",
+        "avatar": "avatar.jpg?t=1761745512",
         "about_you": "Blessed and Highly Favored",
         "age": 0,
         "first_name": "Fine",
+        "last_name": "Pyonista",
         "gender": "",
         "height": 0,
-        "last_name": "Pyonista",
+        "weight": 0,
         "phone": "",
-        "weight": 0
-      },
         "email": "pyonir@site.com",
-      "username": "pyonir",
-      "password": "123",
-      "profile_splash": None,
-      "uid": "NDYzZjBhNTUwYjQ2",
-      "verified_email": False
+        "role": {"name": "pythonista"},
+        "username": "pyonir",
+        "password": "123",
+        "profile_splash": None,
+        "uid": "NDYzZjBhNTUwYjQ2",
+        "verified_email": False
     }
 
 @pytest.fixture(scope="session")

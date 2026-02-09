@@ -71,10 +71,12 @@ def test_request_mapper():
     from pyonir.core.mapper import func_request_mapper
     app = Pyonir(__file__)
     pyonir_request = PyonirRequest(None, app)
-    pyonir_request.path_params = dict_to_class({'user_id': '42'})
-    pyonir_request.query_params = dict_to_class({})
+    pyonir_request.request_input.body = {'user_id': '42'}
+    pyonir_request._path_params = dict_to_class({'user_id': '42'})
+    pyonir_request._query_params = dict_to_class({})
     args = func_request_mapper(demo_route, pyonir_request)
-    pass
+    assert args['user_id'] == 42
+    assert args['request'] == pyonir_request
 
 def test_cls_mapper_menu():
     data = {

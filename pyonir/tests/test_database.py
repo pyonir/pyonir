@@ -24,7 +24,7 @@ def test_crud_operations(test_pyonir_db: PyonirMocks.DatabaseService):
     # Verify foreign key role
     mock_role_results = next(test_pyonir_db.find(PyonirMockRole, {'where': f"rid = '{mock_user.role.rid}'"}))
     assert (isinstance(mock_role_results, PyonirMockRole))
-    assert (mock_role_results.value == mock_user.role.value)
+    assert (mock_role_results.name == mock_user.role.name)
 
     # Update
     updated = test_pyonir_db.update(table_name, user_id, {
@@ -48,7 +48,7 @@ def test_crud_operations(test_pyonir_db: PyonirMocks.DatabaseService):
     assert deleted
 
     # Verify deletion
-    results = test_pyonir_db.find(PyonirMockUser, {'where': f"{table_key} = '{user_id}'"})
+    results = list(test_pyonir_db.find(PyonirMockUser, {'where': f"{table_key} = '{user_id}'"}))
     assert (len(results) == 0)
 
     test_pyonir_db.disconnect()

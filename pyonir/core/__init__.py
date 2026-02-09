@@ -1,2 +1,2 @@
 from __future__ import annotations
-from .user import User, Roles, PermissionLevel, Role, UserMeta, UserSignIn
+from .authorizer import PyonirUser, Roles, PermissionLevel, Role, PyonirUserMeta, RequestInput

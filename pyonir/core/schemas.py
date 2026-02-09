@@ -32,7 +32,7 @@ class BaseSchema:
     _private_keys: Optional[list[str]]
     _foreign_key_names: set[str]
 
-    created_by: str = ""
+    created_by: str = staticmethod(lambda: get_active_user())
     created_on: datetime = staticmethod(lambda: BaseSchema.generate_date())
 
     def __init_subclass__(cls, **kwargs):
@@ -158,32 +158,6 @@ class BaseSchema:
                 # set relationship path on parent schema
                 file_data[k] = f"{LOOKUP_DATA_PREFIX}/{fk_type.__table_name__}/{fk_file_name}"
 
-        return create_file(file_path, file_data)
-
-    def xsave_to_file(self, file_path: str = None) -> bool:
-        """Saves the user data to a file in JSON format"""
-        from pyonir.core.utils import create_file
-        from pyonir.core.parser import LOOKUP_DATA_PREFIX
-        from pyonir import Site
-        if not file_path and hasattr(self, 'file_path'):
-            file_path = getattr(self, 'file_path', None)
-        active_user = getattr(Site.server.request, 'active_user', None)
-        filename_as_pk = os.path.basename(file_path).split('.')[0]
-        schema_pk_value = getattr(self, self.__primary_key__, None) if self.__primary_key__!='id' else filename_as_pk
-        file_data = self.to_dict(obfuscate=False, with_extras=False)
-        if self.__foreign_keys__:
-            app_datastore = Site.datastore_dirpath if Site else os.path.dirname(file_path)
-            for k, fk_type in self.__foreign_keys__:
-                data_path = os.path.join(app_datastore, fk_type.__table_name__)
-                fk_schema_inst = getattr(self, k, None)
-                if fk_schema_inst and hasattr(fk_schema_inst, "save_to_file"):
-                    fk_schema_inst.created_by = active_user.uid if active_user else fk_schema_inst.created_by
-                    fk_pk_value = getattr(fk_schema_inst, fk_schema_inst.__primary_key__, None)
-                    fk_entry_name = (fk_pk_value if fk_pk_value and fk_pk_value!='id' else schema_pk_value) + '.json'
-                    fk_file_path = os.path.join(data_path, fk_entry_name)
-                    fk_schema_inst.save_to_file(fk_file_path)
-                    file_data[k] = f"{LOOKUP_DATA_PREFIX}/{fk_type.__table_name__}/{fk_entry_name}"
-                    # setattr(self,k, f"{LOOKUP_DATA_PREFIX}/{fk_schema_inst.__table_name__}/{fk_entry_name}")
         return create_file(file_path, file_data)
 
     def to_dict(self, obfuscate:bool = True, with_extras: bool = False) -> dict:

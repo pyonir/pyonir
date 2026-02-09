@@ -11,7 +11,7 @@ T = TypeVar("T")
 def get_active_user() -> str:
     from pyonir import Site
     active_uid = "unknown_user"
-    if Site and Site.server.is_active and Site.server.request.security:
+    if Site and Site.server.is_active and Site.server.request.security.has_session:
         active_uid = Site.server.request.security.user and Site.server.request.security.user.uid
     return active_uid
 

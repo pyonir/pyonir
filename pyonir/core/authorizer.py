@@ -209,7 +209,7 @@ class PyonirBaseRestResponse:
     data: dict = field(default_factory=dict)
     """Response data, typically a dictionary containing the response payload."""
 
-    _cookies: list = field(default_factory=list)
+    _cookies: dict = field(default_factory=dict)
     _html: str = None
     _stream: any = None
     _media_type: str = None
@@ -312,6 +312,11 @@ class PyonirBaseRestResponse:
         if self.headers and res.headers:
             for key, value in self.headers.items():
                 res.headers[key] = str(value)
+
+        if self._cookies:
+            for key, value in self._cookies.items():
+                res.set_cookie(key=key, value=value)
+
         if self._redirect_response:
             return self._redirect_response
         return res
@@ -330,7 +335,7 @@ class PyonirBaseRestResponse:
             max_age=3600,
         :return:
         """
-        self._cookies.append(cookie)
+        self._cookies.update(cookie)
 
     def set_headers_from_dict(self, headers: dict):
         """Sets multiple header values from a dictionary"""
@@ -557,7 +562,7 @@ class RequestInput(BaseSchema):
         """Extracts user credentials from the incoming request."""
         pyonir_app: BaseApp = request.app.pyonir_app
         headers = dict(request.headers)
-        cookies = dict(request.cookies)
+        # cookies = dict(request.cookies)
         session = dict(request.session)
         path_params = dict(request.path_params) or {}
         query_params = dict(request.query_params) or {}
@@ -587,9 +592,12 @@ class RequestInput(BaseSchema):
                 # email, _ = bearer_token.get('username') if bearer_token else None, None
 
         elif _session_id:
-            flow = AuthMethod.SESSION
             _jwt = decode_jwt(_session_id, pyonir_app.salt)
-            _session_id = _jwt.get('sub') if _jwt else None
+            if _jwt:
+                flow = AuthMethod.SESSION
+                _session_id = _jwt.get('sub')
+            else:
+                _session_id = None
 
         elif email and password and not _auth_header:
             flow = AuthMethod.BODY
@@ -626,7 +634,6 @@ class PyonirSecurity:
         self._signin_locked_until: str = ''
         self._redirect_route = '/'
         self.responses = DefaultPyonirAuthResponses()
-        # self._route_file_security: Optional[RouteSecurityConfig] = None
 
     @property
     def requires_authentication(self) -> bool:
@@ -700,9 +707,7 @@ class PyonirSecurity:
     def create_session(self, user: PyonirUser):
         """Creates a user session for the authenticated user."""
         user_jwt = self.create_jwt(user_id=user.uid, user_role=user.role.name, exp_time=1440 if self.creds.remember_me else 60)
-        # self.session[self.pyonir_app.session_key] = user_jwt
-        self.session.update({self.pyonir_app.session_key: user_jwt})
-        # user.save_to_session(self.request, value=user_jwt)
+        self.session[self.pyonir_app.session_key] = user_jwt
 
     def create_user(self) -> PyonirUser:
         """Creates a new user instance of user_model based on the provided credentials."""
@@ -809,8 +814,7 @@ class PyonirSecurity:
         elif flow == AuthMethod.SESSION:
             # check active session and query user details
             if not self.has_session:
-                self.session.clear()
-                return None
+                return None #self.end_session()
             return self.get_user_profile()
 
         elif flow == AuthMethod.BEARER:
@@ -824,6 +828,14 @@ class PyonirSecurity:
         if not site_salt or not password or not token:
             raise ValueError("site_salt, password, and token must be provided")
         return f"{site_salt}${password}${token}"
+
+    def end_session(self):
+        """Ends the user session by clearing the session data."""
+        if self.session:
+            del self.session[self.pyonir_app.session_key]
+            self.reset_signin_attempts()
+        pass
+
 
 class PyonirBaseRequest:
     PAGINATE_LIMIT: int = 6
@@ -902,7 +914,7 @@ class PyonirBaseRequest:
     @property
     def user(self) -> Optional[Type[PyonirUser]]:
         """Returns the authenticated user for the current request"""
-        return self.security.user or self.security.get_authenticated_user(AuthMethod.SESSION)
+        return self.security.user
 
     @property
     def session_token(self):
@@ -929,7 +941,6 @@ class PyonirBaseRequest:
         root_static_file_request = self.is_static and route.is_index
         if callable(route_func) and self.pyonir_app.is_dev:
             route_func = self.pyonir_app.reload_module(route_func, reload=True)
-        # is_async_gen = inspect.isasyncgenfunction(route_func)
         is_async = inspect.iscoroutinefunction(route_func)
         args = func_request_mapper(route_func, self)
         route_func_response = None
@@ -963,7 +974,12 @@ class PyonirBaseRequest:
 
     async def set_request_input(self, data: Optional[Dict] = None):
         """Sets the request input data from the web request. This gathers credentials and query parameters into a single RequestInput object."""
-        self.request_input = await RequestInput.from_request(self.server_request) if self.server_request else RequestInput.from_dict(data or {})
+        # If there is no server request, just initialize from provided data
+        if not self.server_request:
+            self.request_input = RequestInput.from_dict(data or {})
+            return
+
+        self.request_input = await RequestInput.from_request(self.server_request)
         if data:
             self.request_input.body.update(data)
 

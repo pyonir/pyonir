@@ -89,18 +89,18 @@ class RouteConfig:
     def is_index(self):
         return self.path == '/'
 
-class PyonirRequestMiddleware(BaseHTTPMiddleware):
+class PyonirDebugRequestMiddleware(BaseHTTPMiddleware):
     """Middleware to extract and attach user credentials to the request state."""
 
     async def dispatch(self, request: Request, call_next):
-        from starlette.routing import Match
-        matched_route = None
-        scope = request.scope
-        for route in request.app.routes:
-            match, child_scope = route.matches(scope)
-            if match == Match.FULL:
-                matched_route = route
-                break
+        is_file = '.' in str(request.url)
+        if not is_file:
+            if 'count' not in request.session:
+                request.session['count'] = 1
+            else:
+                request.session['count'] = int(request.session['count']) + 1
+            print("SESSION:", request.session, request.url)
+            print("COOKIE HEADER:", request.headers.get("cookie"))
 
         return await call_next(request)
 
@@ -120,6 +120,7 @@ class PyonirServer(Starlette):
         self.is_active: bool = False
         self.request = None
         self.pyonir_app: BaseApp = pyonir_app
+        # self.add_middleware(PyonirDebugRequestMiddleware)
         self.add_middleware(SessionMiddleware,
                             https_only=False,
                             domain=self.pyonir_app.domain,
@@ -130,7 +131,6 @@ class PyonirServer(Starlette):
                             )
         self.add_middleware(TrustedHostMiddleware)
         self.add_middleware(CSRFProtectMiddleware, csrf_secret=self.pyonir_app.salt)
-        # self.add_middleware(PyonirRequestMiddleware)
         # star_app.add_middleware(GZipMiddleware, minimum_size=500)
 
     def register_route(self, path, route_func: Union[str, Callable], methods: list = None, params: dict = None):

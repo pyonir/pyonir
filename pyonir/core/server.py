@@ -62,7 +62,7 @@ def route_wrapper(route: RouteConfig, **kwargs):
         await pyonir_request.set_page_file()
         pyonir_request.security.responses.load_responses(pyonir_request.file.data)
         if pyonir_request.security.is_denied:
-            pyonir_request.server_response.set_redirect_response(pyonir_request.security.redirect_to or '/', code=403)
+            pyonir_request.server_response.set_redirect_response(pyonir_request.security.redirect_to or '/')
         res = await pyonir_request.build_response(route)
         return res
     return dec_wrapper

@@ -44,6 +44,7 @@ class BaseSchema:
         frozen = kwargs.get("frozen", False)
         foreign_keys = kwargs.get("foreign_keys", False)
         foreign_key_options = kwargs.get("fk_options", {})
+        unique_keys = kwargs.get("unique_keys", {})
         if table_name:
             setattr(cls, "__table_name__", table_name)
         foreign_fields = set()
@@ -77,6 +78,7 @@ class BaseSchema:
         setattr(cls, "__frozen__", frozen)
         setattr(cls, "_errors", [])
         setattr(cls, "_foreign_key_names", foreign_field_names)
+        setattr(cls, "_unique_keys", unique_keys)
         cls.generate_sql_table(dialect)
 
     def __init__(self, **data):
@@ -243,7 +245,8 @@ class BaseSchema:
         metadata = MetaData()
         columns = []
         has_pk = False
-        fk_set = getattr(cls, "__foreign_keys__", set()) or set()
+        fk_set = getattr(cls, "__foreign_keys__", set())
+        unq_set = getattr(cls, "_unique_keys", set())
 
         # Create minimal stub tables for all referenced foreign key targets so SQLAlchemy can resolve them.
         for fk_name, fk_typ in fk_set:
@@ -267,7 +270,8 @@ class BaseSchema:
             # determine if this column is a primary key
             is_pk = name == 'id' or (primary_key and name == primary_key and not has_pk)
             is_nullable = is_optional_type(typ) and not is_pk
-            kwargs = {"primary_key": is_pk, "nullable": is_nullable}
+            is_unique = name in unq_set
+            kwargs = {"primary_key": is_pk, "nullable": is_nullable, "unique": is_unique}
 
             # collect column positional args (type, optional ForeignKey)
             col_args = [col_type]

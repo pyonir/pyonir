@@ -31,12 +31,14 @@ class BaseSchema:
     _errors: list[str]
     _private_keys: Optional[list[str]]
     _foreign_key_names: set[str]
+    _unique_keys: Set['BaseSchema']
+    _nullable_keys: Set[str]
 
     created_by: str = staticmethod(lambda: get_active_user())
     created_on: datetime = staticmethod(lambda: BaseSchema.generate_date())
 
     def __init_subclass__(cls, **kwargs):
-        from pyonir.core.mapper import collect_type_hints
+        from pyonir.core.mapper import collect_type_hints, unwrap_optional
         table_name = kwargs.get("table_name")
         primary_key = kwargs.get("primary_key")
         dialect = kwargs.get("dialect")
@@ -45,6 +47,7 @@ class BaseSchema:
         foreign_keys = kwargs.get("foreign_keys", False)
         foreign_key_options = kwargs.get("fk_options", {})
         unique_keys = kwargs.get("unique_keys", {})
+        nullable_keys = set()
         if table_name:
             setattr(cls, "__table_name__", table_name)
         foreign_fields = set()
@@ -64,9 +67,13 @@ class BaseSchema:
                 setattr(cls, name, staticmethod(val))
 
         for name, typ in collect_type_hints(cls).items():
-            is_fk(name, typ)
+            fktyp, *t = unwrap_optional(typ)
+            is_nullable = typ != fktyp
+            if is_nullable:
+                nullable_keys.add(name)
+            is_fk(name, fktyp)
             is_factory(getattr(cls, name, None))
-            model_fields.add((name, typ))
+            model_fields.add((name, fktyp))
             table_columns.add(name)
 
         setattr(cls, "__fields__", model_fields)
@@ -79,6 +86,7 @@ class BaseSchema:
         setattr(cls, "_errors", [])
         setattr(cls, "_foreign_key_names", foreign_field_names)
         setattr(cls, "_unique_keys", unique_keys)
+        setattr(cls, "_nullable_keys", nullable_keys)
         cls.generate_sql_table(dialect)
 
     def __init__(self, **data):
@@ -88,7 +96,7 @@ class BaseSchema:
             if data:
                 custom_mapper_fn = getattr(self, f'map_to_{field_name}', None)
                 type_factory = getattr(self, field_name, custom_mapper_fn)
-                is_opt = is_optional_type(field_type)
+                is_opt = field_name in self._nullable_keys #or is_optional_type(field_type)
                 has_correct_type = (not is_opt and isinstance(value, field_type)) or (value is None and (type_factory is None or callable(type_factory)))
                 if field_name in self._foreign_key_names:
                     value = type_factory() if not value and type_factory else cls_mapper(value, field_type, is_fk=True) if not has_correct_type else value
@@ -196,7 +204,7 @@ class BaseSchema:
             v = getattr(self, name)
             if (name, fkmodel) in self.__foreign_keys__:
                 v = get_attr(v, fkmodel.__primary_key__)
-            is_optional_schema = isinstance(v, BaseSchema) and is_optional_type(_)
+            is_optional_schema = isinstance(v, BaseSchema) and is_optional_type(fkmodel)
             v = json.dumps(v, default=json_serial) if is_optional_schema or isinstance(v,(BaseSchema, dict, list, tuple, set)) else v
             values.append(v)
         return tuple(columns), tuple(values)
@@ -251,17 +259,17 @@ class BaseSchema:
         # Create minimal stub tables for all referenced foreign key targets so SQLAlchemy can resolve them.
         for fk_name, fk_typ in fk_set:
             if hasattr(fk_typ, "__table_name__"):
-                ref_table = getattr(fk_typ, "__table_name__", None) or fk_typ.__name__.lower()
-                ref_pk = getattr(fk_typ, "__primary_key__", "id")
+                fk_ref_table = getattr(fk_typ, "__table_name__", None) or fk_typ.__name__.lower()
+                fk_ref_pk = getattr(fk_typ, "__primary_key__", "id")
                 # determine pk column type from referenced model fields
                 pk_col_type = String
                 for f_name, f_typ in getattr(fk_typ, "__fields__", set()):
-                    if f_name == ref_pk:
+                    if f_name == fk_ref_pk:
                         pk_col_type = PY_TO_SQLA.get(f_typ, String)
                         break
                 # register a stub table in the same metadata if not already present
-                if ref_table not in metadata.tables:
-                    Table(ref_table, metadata, Column(ref_pk, pk_col_type, primary_key=True), extend_existing=True)
+                if fk_ref_table not in metadata.tables:
+                    Table(fk_ref_table, metadata, Column(fk_ref_pk, pk_col_type, primary_key=True), extend_existing=True)
 
         for name, typ in cls.__fields__:
             # determine SQL column type
@@ -269,7 +277,8 @@ class BaseSchema:
 
             # determine if this column is a primary key
             is_pk = name == 'id' or (primary_key and name == primary_key and not has_pk)
-            is_nullable = is_optional_type(typ) and not is_pk
+            is_fk = (name in cls._foreign_key_names)
+            is_nullable = (name in cls._nullable_keys) and not is_pk
             is_unique = name in unq_set
             kwargs = {"primary_key": is_pk, "nullable": is_nullable, "unique": is_unique}
 
@@ -277,7 +286,7 @@ class BaseSchema:
             col_args = [col_type]
 
             # if this field is registered as a foreign key, add ForeignKey constraint
-            if (name, typ) in fk_set and hasattr(typ, "__table_name__"):
+            if is_fk and hasattr(typ, "__table_name__"):
                 fk_options = cls.__fk_options__.get(name, {})
                 ref_table = getattr(typ, "__table_name__", None) or typ.__name__.lower()
                 ref_pk = getattr(typ, "__primary_key__", "id")

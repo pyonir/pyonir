@@ -259,6 +259,7 @@ class PyonirDatabaseService:
         self._query: PyonirDBQuery = None
         self._datastore_dirpath: str = ""
         self._dbconfig: DatabaseConfig = dc
+        self._cursor = None
 
     @property
     def query(self) -> PyonirDBQuery:
@@ -471,6 +472,17 @@ class PyonirDatabaseService:
 
         return db_type, database, host, port, username, password
 
+    def execute_sql(self, sql: str, params: tuple = None):
+        """Execute a raw SQL query against the database."""
+        self.connect()
+        if not self.connection:
+            raise RuntimeError("Database connection is not established.")
+        cursor = self.connection.cursor()
+        res = cursor.execute(sql, params or ())
+        self._cursor = cursor
+        self.connection.commit()
+        return self
+
     def destroy(self):
         """Destroy the database or datastore."""
         self.disconnect()
@@ -558,14 +570,14 @@ class PyonirDatabaseService:
         return any(result)
 
     @abstractmethod
-    def update(self, table: str, id: Any, data: Dict) -> bool:
+    def update(self, entity: BaseSchema, id: Any, data: Dict) -> bool:
         """Update entity row using table primary key."""
-
+        table = entity.__table_name__ if hasattr(entity, '__table_name__') else str(entity)
         if self.driver == Driver.SQLITE:
             pk = self.get_pk(table)
-            columns, values = BaseSchema.dict_to_tuple(data, as_update_keys=True)
+            columns, _values = BaseSchema.dict_to_tuple(data, as_update_keys=True)
             query = f"UPDATE {table} SET {columns} WHERE {pk} = ?"
-            values = list(values) + [id]
+            values = list(_values) + [id]
             cursor = self.connection.cursor()
             cursor.execute(query, values)
             self.connection.commit()

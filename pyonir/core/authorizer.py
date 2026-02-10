@@ -439,8 +439,6 @@ class AuthMethod(StrEnum):
 
 class PyonirUserMeta(BaseSchema):
     """Represents personal details about a user"""
-    auth_token: Optional[str] = None
-    """Authentication token used during user sign-in"""
     password: str = None
     """Protected password hash for the user"""
     avatar: Optional[str] = ''
@@ -454,7 +452,6 @@ class PyonirUserMeta(BaseSchema):
     weight: Optional[int] = 0
     phone: Optional[str] = ''
     about_you: Optional[str] = ''
-    role: Optional[str] = ''
 
 class PyonirUser(BaseSchema, table_name='users'):
     """Represents an app user"""
@@ -465,20 +462,22 @@ class PyonirUser(BaseSchema, table_name='users'):
     uid: str = None
     """Unique identifier for the user"""
 
-    file_path: str = ''
+    auth_token: Optional[str] = None
+    """Authentication token used during user sign-in"""
+
+    role: Optional[Role] = ''
+    """User role that determines permissions and access levels"""
+
+    file_path: Optional[str] = ''
     """File path for user-specific files"""
 
-    file_dirpath: str = ''
+    file_dirpath: Optional[str] = ''
     """Directory path for user-specific files"""
 
-    @property
-    def role(self) -> Role:
-        """Role assigned to the user, defaults to 'none'"""
-        return self.map_to_role(self.meta.role) or Roles.GUEST
-
-    @property
-    def auth_token(self) -> str:
-        return self.meta.auth_token or ''
+    # @property
+    # def role(self) -> Role:
+    #     """Role assigned to the user, defaults to 'none'"""
+    #     return self.map_to_role(self.meta.role) or Roles.GUEST
 
     @property
     def email(self) -> str:
@@ -505,6 +504,8 @@ class PyonirUser(BaseSchema, table_name='users'):
         if not self.uid:
             self.uid = generate_user_id(self.email, Site.salt, 16) if self.email else BaseSchema.generate_id()
             self.created_by = self.uid
+        if isinstance(self.role, str):
+            self.role = self.map_to_role(self.role)
 
     @staticmethod
     def map_to_role(role_value: str) -> Role:

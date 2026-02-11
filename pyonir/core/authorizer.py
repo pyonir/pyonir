@@ -726,7 +726,7 @@ class PyonirSecurity:
             user = self.user
         auth_token = csrf_token(self.request.server_request)
         hashed_password = hash_password(self.harden_password(self.pyonir_app.salt, self.creds.password, token=auth_token))
-        user.meta.auth_token = auth_token
+        user.auth_token = auth_token
         user.meta.password = hashed_password
 
     def has_signin_exceeded(self) -> bool:

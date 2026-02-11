@@ -10,7 +10,7 @@ T = TypeVar("T")
 
 def get_active_user() -> str:
     from pyonir import Site
-    active_uid = "unknown_user"
+    active_uid = "pyonir_system"
     if Site and Site.server.is_active and Site.server.request.security.has_session:
         active_uid = Site.server.request.security.user and Site.server.request.security.user.uid
     return active_uid
@@ -33,6 +33,7 @@ class BaseSchema:
     _foreign_key_names: set[str]
     _unique_keys: Set['BaseSchema']
     _nullable_keys: Set[str]
+    _timestamp_keys: Set[str]
 
     created_by: str = staticmethod(lambda: get_active_user())
     created_on: datetime = staticmethod(lambda: BaseSchema.generate_date())
@@ -47,6 +48,7 @@ class BaseSchema:
         foreign_keys = kwargs.get("foreign_keys", False)
         foreign_key_options = kwargs.get("fk_options", {})
         unique_keys = kwargs.get("unique_keys", {})
+        timestamps_keys = kwargs.get("timestamp_keys", set())
         nullable_keys = set()
         if table_name:
             setattr(cls, "__table_name__", table_name)
@@ -54,7 +56,7 @@ class BaseSchema:
         foreign_field_names = set()
         model_fields = set()
         table_columns = set()
-
+        timestamps_keys.add("created_on")
         def is_fk(name, typ):
             if foreign_keys and typ in foreign_keys:
                 foreign_fields.add((name, typ))
@@ -87,6 +89,7 @@ class BaseSchema:
         setattr(cls, "_foreign_key_names", foreign_field_names)
         setattr(cls, "_unique_keys", unique_keys)
         setattr(cls, "_nullable_keys", nullable_keys)
+        setattr(cls, "_timestamp_keys", timestamps_keys)
         cls.generate_sql_table(dialect)
 
     def __init__(self, **data):
@@ -235,7 +238,7 @@ class BaseSchema:
         """
         from sqlalchemy.schema import CreateTable
         from sqlalchemy.dialects import sqlite, postgresql, mysql
-        from sqlalchemy import Boolean, Float, JSON, Table, Column, Integer, String, MetaData, ForeignKey
+        from sqlalchemy import text, Boolean, Float, JSON, Table, Column, Integer, String, MetaData, ForeignKey
         from pyonir.core.mapper import is_optional_type
 
         dialect = dialect or "sqlite"
@@ -280,6 +283,7 @@ class BaseSchema:
             is_fk = (name in cls._foreign_key_names)
             is_nullable = (name in cls._nullable_keys) and not is_pk
             is_unique = name in unq_set
+            use_auto_timestamp = name in cls._timestamp_keys and not is_pk and not is_fk
             kwargs = {"primary_key": is_pk, "nullable": is_nullable, "unique": is_unique}
 
             # collect column positional args (type, optional ForeignKey)
@@ -291,7 +295,8 @@ class BaseSchema:
                 ref_table = getattr(typ, "__table_name__", None) or typ.__name__.lower()
                 ref_pk = getattr(typ, "__primary_key__", "id")
                 col_args.append(ForeignKey(f"{ref_table}.{ref_pk}", **fk_options))
-
+            if use_auto_timestamp:
+                kwargs["server_default"] = text("CURRENT_TIMESTAMP")
             columns.append(Column(name, *col_args, **kwargs))
 
             if is_pk:

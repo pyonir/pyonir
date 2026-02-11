@@ -369,6 +369,10 @@ class PyonirDatabaseService:
             return self
         cursor = self.connection.cursor()
         cursor.execute(sql_create)
+        for fk_name, fk_type in model.__foreign_keys__:
+            fk_model = fk_type if isinstance(fk_type, type) and issubclass(fk_type, BaseSchema) else None
+            if not fk_model: continue
+            self.build_table_from_model(fk_model)
         return self
 
     def get_existing_columns(self, table_name: str) -> Dict[str, str]:
@@ -545,10 +549,14 @@ class PyonirDatabaseService:
             placeholders = ', '.join('?' for _ in values)
             query = f"INSERT INTO {table} {keys} VALUES ({placeholders})"
             cursor = self.connection.cursor()
-            cursor.execute(query, values)
-            self.connection.commit()
-            primary_id_value = getattr(entity, get_attr(entity,'__primary_key__'), cursor.lastrowid)
-            return primary_id_value
+            try:
+                cursor.execute(query, values)
+                self.connection.commit()
+                primary_id_value = getattr(entity, get_attr(entity,'__primary_key__'), cursor.lastrowid)
+                return primary_id_value
+            except sqlite3.IntegrityError as e:
+                print(f"[ERROR] Integrity error during insert: {e}")
+                return None
 
 
     @abstractmethod

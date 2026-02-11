@@ -150,7 +150,8 @@ def func_request_mapper(func: Callable, pyonir_request: 'PyonirRequest') -> dict
 
 def lookup_fk(value: str, data_dir: str, app_ctx: list):
     _, _, has_lookup = value.partition(LOOKUP_DATA_PREFIX+'/') if isinstance(value, str) else [None,None,None]
-    value = DeserializeFile(os.path.join(data_dir, has_lookup), app_ctx=app_ctx) if has_lookup else json.loads(value) if isinstance(value, str) else value
+    is_json = value.strip().startswith(('{','[')) if isinstance(value, str) else False
+    value = DeserializeFile(os.path.join(data_dir, has_lookup), app_ctx=app_ctx) if has_lookup else json.loads(value) if is_json else value
     return value
 
 def coerce_value_to_type(value: Any, target_type: Union[type, Tuple[type]], factory_fn: Callable = None) -> Any:
@@ -197,9 +198,11 @@ def cls_mapper(file_obj: Union[dict, DeserializeFile], cls: Union['BaseSchema', 
 
     if hasattr(cls, '__skip_parsely_deserialization__'):
         return file_obj
-    if is_fk and isinstance(file_obj, str):
+    if is_fk and isinstance(file_obj, str) and file_obj.startswith(LOOKUP_DATA_PREFIX+'/'):
         file_obj = lookup_fk(file_obj, data_dir, app_ctx)
         return cls_mapper(file_obj, cls)
+    if hasattr(cls, 'from_value') and callable(getattr(cls, 'from_value')):
+        return cls.from_value(file_obj)
     is_generic = isinstance(cls, GenericQueryModel)
     is_base = issubclass(cls, BaseSchema) if not is_generic else False
     cls_ins = cls() if is_base else {}

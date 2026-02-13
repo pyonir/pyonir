@@ -70,8 +70,8 @@ class DeserializeFile:
         self.schema = model
         self.file_ext = ext
         self.file_name = name
-        self.file_path = str(file_path)
-        self.file_dirpath = os.path.dirname(file_path)  # path to files contents directory
+        self._file_path = str(file_path)
+        self._file_dirpath = os.path.dirname(file_path)  # path to files contents directory
         self.file_dirname = os.path.basename(self.file_dirpath)
         self.file_contents_dirpath = None
         # file data processing
@@ -123,6 +123,14 @@ class DeserializeFile:
         # if self.file_exists and self.is_page:
         #     # Cache object
         #     FileCache[self.file_path] = self
+
+    @property
+    def file_path(self):
+        return self._file_path
+
+    @property
+    def file_dirpath(self):
+        return self._file_dirpath
 
     def replay_retry(self):
         """Replays deserializing line"""
@@ -542,6 +550,27 @@ def parse_ref_to_files(filepath, file_name, app_ctx, attr_path: str = None, quer
         data = get_attr(p, rtn_key) or p
     return data
 
+def parse_lookup_path(value_path: str, base_path: str):
+    from pyonir.core.utils import parse_url_params
+    if not isinstance(value_path, str):
+        raise TypeError(f"Must be a string value. {value_path}")
+    # base_path = app_ctx[-1:][0] if value_path.startswith(LOOKUP_DATA_PREFIX) else file_contents_dirpath
+    _query_params = value_path.split("?").pop() if "?" in value_path else False
+    query_params = parse_url_params(_query_params) if _query_params else {}
+    has_attr_path = value_path.split("#")[-1] if "#" in value_path else ''
+    is_caller = value_path.strip().startswith(LOOKUP_CALLER_PREFIX)
+    value_path = value_path.replace(f"{LOOKUP_DIR_PREFIX}/", "") \
+        .replace(f"{LOOKUP_DATA_PREFIX}/", "") \
+        .replace(f"{LOOKUP_CALLER_PREFIX}/", "") \
+        .replace(f"?{_query_params}", "") \
+        .replace(f'#{has_attr_path}', '')
+    if is_caller:
+        value_path = value_path.strip().replace(f"{LOOKUP_CALLER_PREFIX}/", "")
+    else:
+        value_path = value_path.replace('../', '').replace('/*', '')
+        value_path = os.path.join(base_path, *value_path.split("/"))
+    return value_path, query_params, has_attr_path, is_caller
+
 def process_lookups(value_str: str, file_ctx: DeserializeFile = None) -> Optional[Union[str, dict, list]]:
     """Process $dir and $data lookups in the value string"""
     app_ctx: list = file_ctx.app_ctx
@@ -555,25 +584,26 @@ def process_lookups(value_str: str, file_ctx: DeserializeFile = None) -> Optiona
     if has_lookup:
         from pyonir.core.utils import parse_url_params
         base_path = app_ctx[-1:][0] if value_str.startswith(LOOKUP_DATA_PREFIX) else file_contents_dirpath
-        _query_params = value_str.split("?").pop() if "?" in value_str else False
-        query_params = parse_url_params(_query_params) if _query_params else {}
-        has_attr_path = value_str.split("#")[-1] if "#" in value_str else ''
-        is_caller = value_str.strip().startswith(LOOKUP_CALLER_PREFIX)
-        value_str = value_str.replace(f"{LOOKUP_DIR_PREFIX}/", "") \
-            .replace(f"{LOOKUP_DATA_PREFIX}/", "") \
-            .replace(f"{LOOKUP_CALLER_PREFIX}/", "") \
-            .replace(f"?{_query_params}", "") \
-            .replace(f'#{has_attr_path}', '')
+        lookup_fpath, query_params, has_attr_path, is_caller = parse_lookup_path(value_str, base_path=base_path)
+        # _query_params = value_str.split("?").pop() if "?" in value_str else False
+        # query_params = parse_url_params(_query_params) if _query_params else {}
+        # has_attr_path = value_str.split("#")[-1] if "#" in value_str else ''
+        # is_caller = value_str.strip().startswith(LOOKUP_CALLER_PREFIX)
+        # value_str = value_str.replace(f"{LOOKUP_DIR_PREFIX}/", "") \
+        #     .replace(f"{LOOKUP_DATA_PREFIX}/", "") \
+        #     .replace(f"{LOOKUP_CALLER_PREFIX}/", "") \
+        #     .replace(f"?{_query_params}", "") \
+        #     .replace(f'#{has_attr_path}', '')
 
         if is_caller:
             from pyonir import Site
-            module_path = value_str.strip().replace(f"{LOOKUP_CALLER_PREFIX}/", "")
-            func = Site.load_function_from_path(module_path) if Site else None
+            # module_path = value_str.strip().replace(f"{LOOKUP_CALLER_PREFIX}/", "")
+            func = Site.load_function_from_path(lookup_fpath) if Site else None
             data = func() if callable(func) else None
             return data
 
-        value_str = value_str.replace('../', '').replace('/*', '')
-        lookup_fpath = os.path.join(base_path, *value_str.split("/"))
+        # value_str = value_str.replace('../', '').replace('/*', '')
+        # lookup_fpath = os.path.join(base_path, *value_str.split("/"))
         if not os.path.exists(lookup_fpath):
             print(f"[DEBUG] FileNotFoundError: {lookup_fpath}")
             if file_ctx.is_virtual_route:

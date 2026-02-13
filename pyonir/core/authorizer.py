@@ -468,10 +468,10 @@ class PyonirUser(BaseSchema, table_name='users'):
     role: Optional[Role] = ''
     """User role that determines permissions and access levels"""
 
-    file_path: Optional[str] = ''
-    """File path for user-specific files"""
+    _file_path: Optional[str] = ''
+    """File path for user-specific profile"""
 
-    file_dirpath: Optional[str] = ''
+    _file_dirpath: Optional[str] = ''
     """Directory path for user-specific files"""
 
     # @property
@@ -501,8 +501,8 @@ class PyonirUser(BaseSchema, table_name='users'):
     def _after_init(self):
         """Generates a unique user ID based on email and salt"""
         from pyonir import Site
-        if not self.uid:
-            self.uid = generate_user_id(self.email, Site.salt, 16) if self.email else BaseSchema.generate_id()
+        if self.email and not self.uid:
+            self.uid = generate_user_id(self.email, Site.salt, 16) #if self.email else BaseSchema.generate_id()
             self.created_by = self.uid
         if isinstance(self.role, str):
             self.role = self.map_to_role(self.role)
@@ -726,7 +726,7 @@ class PyonirSecurity:
             user = self.user
         auth_token = csrf_token(self.request.server_request)
         hashed_password = hash_password(self.harden_password(self.pyonir_app.salt, self.creds.password, token=auth_token))
-        user.meta.auth_token = auth_token
+        user.auth_token = auth_token
         user.meta.password = hashed_password
 
     def has_signin_exceeded(self) -> bool:

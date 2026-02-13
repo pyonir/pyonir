@@ -169,6 +169,33 @@ def deserialize_datestr(
     # Localize to input zone, then convert to UTC
     return tz.localize(dt).astimezone(pytz.utc)
 
+def set_deep_attr(target: any, path: str, value: any):
+    """Sets value in nested object using dot-separated path."""
+
+    keys = path.split('.') if isinstance(path, str) else path
+    curr_value = get_attr(target, path)
+    last = keys.pop()
+    _t = None
+    is_dict = isinstance(target, dict)
+    is_frozen = get_attr(target,'__frozen__')
+
+    for key in keys:
+        _t = get_attr(target, key) if not _t else _t
+        if not _t:
+            if is_dict:
+                target[key] = {}
+            else:
+                setattr(target, key, dict() if is_dict else type(key, (object,), {}))
+            _t = get_attr(target, key)
+            continue
+
+    if curr_value and is_frozen:
+        raise ValueError(f"Can not update value on immutable object")
+    if is_dict:
+        (_t if _t is not None else target)[last] = value
+    else:
+        setattr(_t or target, last, value)
+
 def get_attr(row_obj, attr_path=None, default=None, rtn_none=True):
     """
     Resolves nested attribute or dictionary key paths.
@@ -410,15 +437,16 @@ def coerce_bool(value: str) -> any:
 
 def set_attr(source, keys, value):
     """Helper to set value in nested dictionary using dot-separated keys."""
-    d = {}
-    keys = keys.split('.') if isinstance(keys, str) else keys
-    for key in keys[:-1]:
-        d = d.setdefault(key, {})
-    d[keys[-1]] = coerce_bool(value)
-    if isinstance(source, dict):
-        merge_dict(d, source)
-    else:
-        setattr(source, keys[0], dict_to_class(d))
+    set_deep_attr(source, keys, value)
+    # d = {}
+    # keys = keys.split('.') if isinstance(keys, str) else keys
+    # for key in keys[:-1]:
+    #     d = d.setdefault(key, {})
+    # d[keys[-1]] = coerce_bool(value)
+    # if isinstance(source, dict):
+    #     merge_dict(d, source)
+    # else:
+    #     setattr(source, keys[0], dict_to_class(d))
 
 def load_env(path=".env") -> 'EnvConfig':
     import warnings

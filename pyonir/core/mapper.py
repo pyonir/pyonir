@@ -8,7 +8,7 @@ from collections.abc import Iterable as ABCIterable, Mapping as ABCMapping, Gene
 
 from sqlmodel import SQLModel
 
-from pyonir.core.parser import DeserializeFile, LOOKUP_DATA_PREFIX
+from pyonir.core.parser import DeserializeFile, LOOKUP_DATA_PREFIX, parse_lookup_path
 from pyonir.core.schemas import GenericQueryModel
 from pyonir.core.utils import get_attr, deserialize_datestr
 
@@ -149,8 +149,12 @@ def func_request_mapper(func: Callable, pyonir_request: 'PyonirRequest') -> dict
     return cls_args
 
 def lookup_fk(value: str, data_dir: str, app_ctx: list):
-    _, _, has_lookup = value.partition(LOOKUP_DATA_PREFIX+'/') if isinstance(value, str) else [None,None,None]
-    value = DeserializeFile(os.path.join(data_dir, has_lookup), app_ctx=app_ctx) if has_lookup else json.loads(value) if isinstance(value, str) else value
+    is_json = value.strip().startswith(('{','[')) if isinstance(value, str) else False
+    lookup_path, query_params, has_attr_path, is_caller = parse_lookup_path(value, base_path=data_dir)
+    is_file_path = os.path.exists(lookup_path)
+    value = json.loads(value) if is_json else DeserializeFile(lookup_path, app_ctx=app_ctx) if is_file_path else value
+    if has_attr_path:
+        value = get_attr(value, has_attr_path)
     return value
 
 def coerce_value_to_type(value: Any, target_type: Union[type, Tuple[type]], factory_fn: Callable = None) -> Any:
@@ -188,18 +192,23 @@ def coerce_value_to_type(value: Any, target_type: Union[type, Tuple[type]], fact
     else:
         return value
 
-def cls_mapper(file_obj: Union[dict, DeserializeFile], cls: Union['BaseSchema', type], is_fk: bool = False) -> object:
+def cls_mapper(file_obj: Union[dict, DeserializeFile], cls: Union['BaseSchema', type], type_factory: Callable = None, is_fk: bool = False) -> object:
     """Recursively map dict-like input into `cls` with type-safe field mapping."""
     from pyonir.core.schemas import BaseSchema
     from pyonir import Site
     app_ctx = Site.app_ctx if Site else []
     data_dir = Site.datastore_dirpath if Site else ''
 
-    if hasattr(cls, '__skip_parsely_deserialization__'):
-        return file_obj
+    if not file_obj and type_factory:
+        return type_factory()
     if is_fk and isinstance(file_obj, str):
-        file_obj = lookup_fk(file_obj, data_dir, app_ctx)
-        return cls_mapper(file_obj, cls)
+        _file_obj = lookup_fk(file_obj, data_dir, app_ctx)
+        if not _file_obj:
+            raise TypeError(f"Failed to find lookup file for {file_obj}")
+        return cls_mapper(_file_obj, cls)
+    if hasattr(cls, 'from_value') and callable(getattr(cls, 'from_value')):
+        return cls.from_value(file_obj)
+    is_file = isinstance(file_obj, DeserializeFile)
     is_generic = isinstance(cls, GenericQueryModel)
     is_base = issubclass(cls, BaseSchema) if not is_generic else False
     cls_ins = cls() if is_base else {}
@@ -223,12 +232,13 @@ def cls_mapper(file_obj: Union[dict, DeserializeFile], cls: Union['BaseSchema', 
             value = get_attr(ds, name_alias or name)
             if value is not None: break
 
-        if (name, hint) in fks:
-            value = lookup_fk(value, data_dir, app_ctx)
-
         if value is None:
             set_attr(cls_ins, name, value)
             continue
+
+        if (name, hint) in fks:
+            value = cls_mapper(value, hint, 0, 1)
+            # value = lookup_fk(value, data_dir, app_ctx)
         # Handle containers
         custom_mapper_fn = getattr(cls, f'map_to_{name}', None)
         if custom_mapper_fn:
@@ -245,6 +255,8 @@ def cls_mapper(file_obj: Union[dict, DeserializeFile], cls: Union['BaseSchema', 
                         'file_created_on': get_attr(file_obj, 'file_created_on')})
         return dict_to_class(cls_ins, 'GenericQueryModel')
     res = cls_ins if is_base else cls(**cls_ins)
+    if is_base and is_file:
+        setattr(res, '_file_path', file_obj.file_path)
     if not is_frozen:
         for key, value in data.items():
             if isinstance(getattr(cls, key, None), property): continue  # skip properties

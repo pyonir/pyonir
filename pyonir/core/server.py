@@ -10,8 +10,7 @@ from starlette.requests import Request
 from starlette.staticfiles import StaticFiles
 
 from pyonir.core.app import BaseApp
-from pyonir.core.utils import dict_to_class
-from pyonir.pyonir_types import PyonirRoute
+from pyonir.pyonir_types import PyonirRoute, PyonirHooks
 
 TEXT_RES: str = 'text/html'
 JSON_RES: str = 'application/json'
@@ -69,21 +68,21 @@ def route_wrapper(route: RouteConfig, **kwargs):
 
 @dataclass
 class RouteConfig:
-    doc: str
-    endpoint: str
-    route: str
-    path: str
-    methods: List[str]
-    name: str
-    static_path: str
-    func: Optional[Callable]
-    params: dict
-    use_security: bool
-    use_sse: bool
-    use_ws: bool
-    is_async: bool
-    is_async_gen: bool
-    is_static: bool
+    doc: str = None
+    endpoint: str = None
+    route: str = None
+    path: str = None
+    methods: List[str] = None
+    name: str = None
+    static_path: str = None
+    func: Optional[Callable] = None
+    params: dict = None
+    use_security: bool = None
+    use_sse: bool = None
+    use_ws: bool = None
+    is_async: bool = None
+    is_async_gen: bool = None
+    is_static: bool = None
 
     @property
     def is_index(self):
@@ -179,6 +178,8 @@ class PyonirServer(Starlette):
         self.route_map[route_name] = new_route
 
     def mount_pyonir_route_config(self, new_route: RouteConfig):
+        if not isinstance(new_route, RouteConfig):
+            return
         route_func_wrapper = route_wrapper(new_route)
         if new_route.is_static:
             self.add_static_route(new_route.route, new_route.static_path)
@@ -200,6 +201,9 @@ class PyonirServer(Starlette):
             return
         self.mount(url, StaticFiles(directory=directory_path))
 
+    def add_url_route(self, name: str, path: str):
+        self.route_map[name] = RouteConfig(path=path)
+
     def init_default_static_routes(self):
         if self.pyonir_app.use_themes:
             self.add_static_route(self.pyonir_app.frontend_assets_route, self.pyonir_app.themes.active_theme.static_dirpath)
@@ -211,8 +215,14 @@ class PyonirServer(Starlette):
 
     def init_routes(self):
         """Mounts registered routes into the server"""
+        if not self.endpoints:
+            self.register_route('/', pyonir_home, '*')
+            self.register_route('/{path:path}', pyonir_home, '*')
+            pass
+
         for path, route in self.url_map.items():
             self.mount_pyonir_route_config(route)
+
 
     def run_uvicorn_server(self, uvicorn_options: dict = None):
         """Starts the uvicorn web service"""
@@ -263,6 +273,8 @@ class PyonirServer(Starlette):
         self.init_default_static_routes()
         self.init_routes()
         self.is_active = True
+        self.pyonir_app.plugin_manager.run_plugins(PyonirHooks.AFTER_INIT)
+
         uvicorn.run(self, **uvicorn_options)
 
     @staticmethod
@@ -276,3 +288,6 @@ class PyonirServer(Starlette):
     def generate_nginx_conf(app: BaseApp) -> bool:
         """Generates a NGINX conf file based on App configurations"""
         return generate_nginx_conf(app)
+
+async def pyonir_home() -> None:
+    return None

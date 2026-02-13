@@ -260,6 +260,7 @@ class PyonirDatabaseService:
         self._datastore_dirpath: str = ""
         self._dbconfig: DatabaseConfig = dc
         self._cursor = None
+        self._schemas = set()
 
     @property
     def query(self) -> PyonirDBQuery:
@@ -355,7 +356,14 @@ class PyonirDatabaseService:
         self.connect()
         for model in models:
             self.build_table_from_model(model)
+            self.build_fs_dirs_from_model(model)
         self.disconnect()
+        return self
+
+    def build_fs_dirs_from_model(self, model: Type[BaseSchema]):
+        if getattr(model, '_lookup_table', False):
+            model.init_lookup_table(self)
+        return self
 
     def build_table_from_model(self, model: Type[BaseSchema]):
         """Create a table in the database."""
@@ -373,6 +381,7 @@ class PyonirDatabaseService:
             fk_model = fk_type if isinstance(fk_type, type) and issubclass(fk_type, BaseSchema) else None
             if not fk_model: continue
             self.build_table_from_model(fk_model)
+        self._schemas.add(model)
         return self
 
     def get_existing_columns(self, table_name: str) -> Dict[str, str]:
@@ -485,7 +494,7 @@ class PyonirDatabaseService:
         res = cursor.execute(sql, params or ())
         self._cursor = cursor
         self.connection.commit()
-        return self
+        return res
 
     def destroy(self):
         """Destroy the database or datastore."""
@@ -526,9 +535,10 @@ class PyonirDatabaseService:
         return self
 
     @abstractmethod
-    def insert(self, entity: type[BaseSchema], table: str = None) -> Any:
+    def insert(self, entity: type[BaseSchema], table: str = None, return_conflict_id: bool = None) -> Any:
         """Insert entity into backend."""
-
+        if not isinstance(entity, BaseSchema):
+            raise TypeError(f"entity must be baseschema: {type(entity)}: {entity} was provided.")
         if self.driver == Driver.FILE_SYSTEM:
             # Save JSON file per record
             entity.save_to_file(entity.file_path)
@@ -536,15 +546,16 @@ class PyonirDatabaseService:
 
         else:
             self.connect()
-            self.build_table_from_model(entity)
+            # self.build_table_from_model(entity)
             # perform nested inserts for foreign keys if any
             for fk_name, fk_type in getattr(entity, '__foreign_keys__', []):
                 fk_entity = getattr(entity, fk_name, None)
-                if fk_entity and isinstance(fk_entity, BaseSchema):
-                    fk_primary_id = self.insert(fk_entity)
-                    # set foreign key reference in main entity
+                fk_primary_id = self.insert(fk_entity, 0, True)
+                # set foreign key reference in main entity
+                if fk_primary_id:
                     setattr(fk_entity, getattr(fk_entity, '__primary_key__'), fk_primary_id)
             table = entity.__table_name__ if hasattr(entity, '__table_name__') else table
+            table_pk = get_attr(entity,'__primary_key__', 'id')
             keys, values = BaseSchema.dict_to_tuple(entity) if isinstance(entity, dict) else entity.to_tuple()
             placeholders = ', '.join('?' for _ in values)
             query = f"INSERT INTO {table} {keys} VALUES ({placeholders})"
@@ -552,10 +563,16 @@ class PyonirDatabaseService:
             try:
                 cursor.execute(query, values)
                 self.connection.commit()
-                primary_id_value = getattr(entity, get_attr(entity,'__primary_key__'), cursor.lastrowid)
+                primary_id_value = getattr(entity, table_pk, cursor.lastrowid)
                 return primary_id_value
             except sqlite3.IntegrityError as e:
                 print(f"[ERROR] Integrity error during insert: {e}")
+                if return_conflict_id and entity._unique_keys:
+                    ukey = list(entity._unique_keys).pop(0)
+                    uval = getattr(entity, ukey, None)
+                    query = f"""SELECT (id) FROM {table} WHERE {ukey} = "{uval}";"""
+                    rtn_id = dict(cursor.execute(query).fetchone()).get(table_pk)
+                    return rtn_id
                 return None
 
 

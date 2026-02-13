@@ -1,5 +1,8 @@
 # -*- coding: utf-8 -*-
 import os, sys
+
+from pyonir.core.parser import DeserializeFile
+
 from pyonir.core.app import BaseApp, Optional
 from pyonir.core.authorizer import PyonirBaseRequest
 from pyonir.core.utils import get_version
@@ -22,7 +25,7 @@ PYONIR_JINJA_FILTERS_DIRPATH = os.path.join(PYONIR_JINJA_DIRPATH, "filters")
 __version__: str = "0.0.53"
 Site: Optional[BaseApp] = None
 
-
+class PyonirFile(DeserializeFile): pass
 class PyonirRequest(PyonirBaseRequest): pass
 class PyonirCollection(CollectionQuery): pass
 class PyonirSchema(BaseSchema): pass

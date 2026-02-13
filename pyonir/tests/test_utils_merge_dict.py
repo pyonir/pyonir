@@ -1,8 +1,18 @@
 import sys
 import types
 
-from pyonir.core.utils import merge_dict
+from pyonir.core.utils import merge_dict, dict_to_class, get_attr, set_attr, set_deep_attr
 from pyonir.core.parser import FILTER_KEY
+
+def test_add_nested_from_path():
+
+    # obj = type('foo', (object,), {'__frozen__': False})
+    obj = {'__frozen__': False}
+    set_deep_attr(obj,'app.datapath', 3)
+    set_deep_attr(obj,'app.name', 'bar')
+    set_deep_attr(obj,'app.name', 'zap')
+    pass
+
 
 def test_add_missing_keys():
     # Ensure parser module exists for import inside merge_dict

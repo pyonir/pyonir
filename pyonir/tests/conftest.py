@@ -1,3 +1,4 @@
+import shutil
 from abc import ABC
 from typing import Optional
 
@@ -9,21 +10,58 @@ from pyonir.core.authorizer import RequestInput
 from pyonir.core.parser import DeserializeFile
 
 app_setup_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'libs', 'app_setup')
+user_meta_data = {
+    "auth_from": "basic",
+    "avatar": "avatar.jpg?t=1761745512",
+    "about_you": "Blessed and Highly Favored",
+    "age": 0,
+    "first_name": "Fine",
+    "last_name": "Pyonista",
+    "gender": "",
+    "height": 0,
+    "weight": 0,
+    "phone": "",
+    "email": "pyonir@site.com",
+    "username": "pyonir",
+    "password": "123",
+}
+user_data = {
+    "gender": "binary(literally)",
+    "role": "pythonista",
+    "email": "mocks@pyonir.dev",
+    "username": "pyonir",
+}
 
-class PyonirMockRole(BaseSchema, table_name='roles_table', primary_key='rid'):
+class PyonirMockRole(BaseSchema, table_name='roles_table', primary_key='rid', lookup_table='name'):
     rid: str = BaseSchema.generate_id
     name: str
 
     @classmethod
-    def from_value(cls, value):
-        return cls(**{"name":value})
+    def init_lookup_table(cls, dbc: PyonirDatabaseService):
+        """Sets up the database with the role's permissions"""
+        roles = [val for name, val in vars(PyonirMockRoles).items() if not name.startswith('__')]
+        for role in roles:
+            _file_dirpath = str(os.path.join(dbc.datastore_path, role.__table_name__))
+            role._file_path = os.path.join(_file_dirpath, role.name+'.json')
+            if not os.path.exists(role.file_path):
+                role.save_to_file()
+
+    @classmethod
+    def from_value(cls, value: any):
+        if isinstance(value, DeserializeFile):
+            value = value.data
+        return cls(**{"name":value}) if isinstance(value, str) else cls(**value)
+
+class PyonirMockRoles:
+    GUEST_TESTER = PyonirMockRole(name='guest_tester')
+    ADMIN_TESTER = PyonirMockRole(name='admin_tester')
 
 class PyonirMockUser(BaseSchema, table_name='pyonir_users', primary_key='uid', foreign_keys={PyonirMockRole}, fk_options={"role": {"ondelete": "RESTRICT", "onupdate": "RESTRICT"}}):
+    uid: str = BaseSchema.generate_id
     username: str
     email: str
     gender: Optional[str] = "godly"
-    uid: str = BaseSchema.generate_id
-    role: PyonirMockRole = lambda: PyonirMockRole(value="pythonista")
+    role: PyonirMockRole = lambda: PyonirMockRole(name="pythonista")
 
 
 class PyonirMockDataBaseService(PyonirDatabaseService, ABC):
@@ -40,25 +78,8 @@ class PyonirMocks:
     """Class to hold mock data for tests."""
     DatabaseService = PyonirMockDataBaseService
     App = Pyonir
-    user_data = {
-        "auth_from": "basic",
-        "avatar": "avatar.jpg?t=1761745512",
-        "about_you": "Blessed and Highly Favored",
-        "age": 0,
-        "first_name": "Fine",
-        "last_name": "Pyonista",
-        "gender": "",
-        "height": 0,
-        "weight": 0,
-        "phone": "",
-        "email": "pyonir@site.com",
-        "role": {"name": "pythonista"},
-        "username": "pyonir",
-        "password": "123",
-        "profile_splash": None,
-        "uid": "NDYzZjBhNTUwYjQ2",
-        "verified_email": False
-    }
+    user_data = user_data
+    user_meta_data = user_meta_data
 
 
 @pytest.fixture
@@ -80,9 +101,11 @@ def test_pyonir_db(test_app) -> PyonirMockDataBaseService:
     """
     db = (PyonirMockDataBaseService(test_app)
           .set_driver("sqlite").set_dbname("test_pyonir"))
+    db.build_fs_dirs_from_model(PyonirMockRole)
     yield db
 
     db.destroy()
+    shutil.rmtree(db.datastore_path)
 
 @pytest.fixture(scope="session")
 def test_app():
@@ -91,7 +114,7 @@ def test_app():
     Other test modules can simply request `test_app` to reuse this instance.
     """
     app = Pyonir(os.path.join(app_setup_path, 'main.py'), use_themes=False)
-    app.env.add('app.datastore_dirpath', os.path.join(app.app_dirpath))
+    app.env.add('app.datastore_dirpath', os.path.join(app.app_dirpath, 'test_pyonir_datastore'))
 
     yield app
 

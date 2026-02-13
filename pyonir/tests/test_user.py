@@ -6,7 +6,7 @@ from pyonir.core.authorizer import (
     PyonirUserMeta,
     PermissionLevel,
     INVALID_EMAIL_MESSAGE,
-    INVALID_PASSWORD_MESSAGE,
+    INVALID_PASSWORD_MESSAGE, Roles,
 )
 
 valid_credentials = {"email": "test@example.com", "password": "secure123", "flow": "session"}
@@ -31,20 +31,18 @@ def test_user_from_dict(mock_data):
 
 def test_from_fixture_data_directly():
     """Build a user directly from the shared fixture data and assert key fields."""
-    user = PyonirUser(meta=PyonirMocks.user_data, uid="test-uid")
+    user = PyonirUser(meta=PyonirMocks.user_meta_data, uid="test-uid")
     assert isinstance(user, PyonirUser)
-    assert user.email == PyonirMocks.user_data["email"]
+    assert user.email == PyonirMocks.user_meta_data["email"]
     # PyonirUser stores username on meta
     assert user.meta.username == PyonirMocks.user_data.get("username", "")
     assert isinstance(user.meta, PyonirUserMeta)
-    assert getattr(user.meta, "first_name", None) == PyonirMocks.user_data.get("first_name")
+    assert getattr(user.meta, "first_name", None) == PyonirMocks.user_meta_data.get("first_name")
 
 
 def test_permissions_after_load():
     # Use a role that exists in Roles to get deterministic permissions
-    fixture = dict(PyonirMocks.user_data)
-    fixture["role"] = "contributor"
-    user = PyonirUser(meta=fixture, uid="test-uid")
+    user = PyonirUser(meta=PyonirMocks.user_meta_data, uid="test-uid", role=Roles.CONTRIBUTOR)
 
     # contributor role should allow read & write, but not admin
     assert user.has_perm(PermissionLevel.READ)

@@ -1,16 +1,24 @@
 import os
-import shutil
-
-from pyonir.tests.conftest import PyonirMocks, PyonirMockUser, PyonirMockRole
+from pyonir.tests.conftest import PyonirMocks, PyonirMockUser, PyonirMockRole, PyonirMockRoles
 
 
 def test_crud_operations(test_pyonir_db: PyonirMocks.DatabaseService):
     # Create
+    from_db_data = {
+        'created_by': 'pyonir_system',
+        'created_on': '2026-02-12 07:44:04.529264+00:00',
+        'email': 'mocks@pyonir.dev',
+        'gender': 'binary(literally)',
+        'role': '{"created_on":"2026-02-12 07:44:11.195533+00:00","name":"pythonista","rid":"f69482429b65446d9e24cee6723d4fcf","created_by":"pyonir_system"}',
+        'uid': '959111dad9184541914cc6beb0ba633f',
+        'username': 'pyonir'
+    }
     test_pyonir_db.connect()
     mock_user = PyonirMockUser(**PyonirMocks.user_data)
+    test_pyonir_db.build_table_from_model(mock_user)
+    mock_role = PyonirMockUser(**from_db_data)
     table_name = mock_user.__table_name__
     table_key = mock_user.__primary_key__
-    test_pyonir_db.build_table_from_model(mock_user)
     user_id = test_pyonir_db.insert(mock_user)
     assert user_id
 
@@ -55,16 +63,34 @@ def test_crud_operations(test_pyonir_db: PyonirMocks.DatabaseService):
     test_pyonir_db.destroy()
     assert not test_pyonir_db.exists()
 
-def test_save_to_file_simple(test_app: PyonirMocks.App):
-    user = PyonirMockUser(username="fileuser", email="fileuser@example.com", role=PyonirMockRole(name="pythonista"))
-    temp_datastore = os.path.join(test_app.app_dirpath,'tmp_store')
-    test_app.env.add('app.datastore_dirpath', temp_datastore)
+def test_lookup_tables(test_app: PyonirMocks.App, test_pyonir_db: PyonirMocks.DatabaseService):
+    test_pyonir_db.build_fs_dirs_from_model(PyonirMockRole)
+
+    req_data = {'email': 'fileuser@example.com', 'gender': None, 'role': PyonirMockRoles.GUEST_TESTER.name, 'username': 'fileuser'}
+    req_user = PyonirMockUser(**req_data)
+    req_user.save_to_file(file_path=os.path.join(test_pyonir_db.datastore_path, req_user.__table_name__, "user.json"))
+
+    req_user.role = PyonirMockRoles.ADMIN_TESTER
+    req_user.save_to_file(file_path=os.path.join(test_pyonir_db.datastore_path, req_user.__table_name__, "user.json"))
+
+def test_save_to_file_simple(test_app: PyonirMocks.App, test_pyonir_db: PyonirMocks.DatabaseService):
+    temp_datastore = test_pyonir_db.datastore_path
+
+    user = PyonirMockUser(username="fileuser", email="fileuser@example.com", role=PyonirMockRole(name="guest_tester"))
+
     file_path = os.path.join(temp_datastore, user.__table_name__, "user.json")
     result = user.save_to_file(file_path)
     udata = PyonirMockUser.from_file(file_path, test_app.app_ctx)
+
     assert result
     assert os.path.exists(file_path)
     assert udata.username == user.username
     assert udata.email == user.email
     assert udata.role.name == user.role.name
-    shutil.rmtree(temp_datastore)
+
+    user._file_path = file_path
+    user.role = PyonirMockRoles.ADMIN_TESTER
+    user.save_to_file()
+    udata = PyonirMockUser.from_file(file_path, test_app.app_ctx)
+
+    assert udata.role.name == user.role.name

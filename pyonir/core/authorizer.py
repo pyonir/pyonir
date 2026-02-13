@@ -715,8 +715,7 @@ class PyonirSecurity:
         user = self.user_model(meta={'email': self.creds.email,
                                      'username': self.creds.email.split('@')[0]},)
         self.secure_user_credentials(user)
-        user.file_path = os.path.join(self.pyonir_app.datastore_dirpath, getattr(user, '__table_name__', ''), user.uid, 'profile.json')
-        user.file_dirpath = os.path.dirname(user.file_path)
+        user._file_path = os.path.join(self.pyonir_app.datastore_dirpath, getattr(user, '__table_name__', ''), user.uid, 'profile.json')
         return user
 
     def secure_user_credentials(self, user: PyonirUser = None):

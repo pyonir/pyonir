@@ -191,6 +191,8 @@ class BaseSchema:
         _pk_value = getattr(self, self.__primary_key__, use_filename_as_pk)
         _datastore = Site.datastore_dirpath if Site else os.path.dirname(file_path)
 
+        if not self.file_path:
+            self._file_path = file_path
         if not self.created_by:
             self.created_by = active_user_id
 

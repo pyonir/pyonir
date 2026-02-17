@@ -205,7 +205,7 @@ class BaseSchema:
                     fk_lookup_path = fk_schema_inst.lookup_table_ref_url
 
                 else:
-                    fk_schema_inst.created_by = fk_schema_inst.created_by or active_user_id
+                    fk_schema_inst.created_by = active_user_id
                     # use main schema pk value as the fk file name to show relationship
                     fk_file_name = (_pk_value or BaseSchema.generate_id()) + '.json'
                     fk_file_path = os.path.join(data_path, fk_file_name)

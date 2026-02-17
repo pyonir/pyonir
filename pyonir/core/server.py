@@ -143,7 +143,7 @@ class PyonirServer(Starlette):
         is_sse = params.pop('@sse', False)
         is_ws = params.pop('@ws', False)
         is_static_path = os.path.exists(route_func) if isinstance(route_func, str) else False
-        route_name = route_func.__name__ if route_func else params.get('name', None)
+        route_name = params.get('name', route_func.__name__ if route_func else '')
         docs = route_func.__doc__ if route_func else None
         base_endpoint, _, endpoint_path = (path[1:]).partition('/')
         is_index_path = path == '/' or _ == ""

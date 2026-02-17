@@ -474,10 +474,20 @@ class PyonirUser(BaseSchema, table_name='users'):
     _file_dirpath: Optional[str] = ''
     """Directory path for user-specific files"""
 
-    # @property
-    # def role(self) -> Role:
-    #     """Role assigned to the user, defaults to 'none'"""
-    #     return self.map_to_role(self.meta.role) or Roles.GUEST
+    @property
+    def account_dirpath(self) -> str:
+        """Relative path to user personal directory"""
+        return os.path.join(self.__table_name__, self.uid)
+
+    @property
+    def account_profile_path(self) -> str:
+        """Relative path to user profile data"""
+        return os.path.join(self.account_dirpath, 'profile.json')
+
+    @property
+    def account_sqlite_path(self) -> str:
+        """Relative path to user sqlite db file"""
+        return os.path.join(self.account_dirpath, f'{self.uid}_sqlite.db')
 
     @property
     def email(self) -> str:
@@ -934,6 +944,11 @@ class PyonirBaseRequest:
         if not self.file: return None
         file_redirect = self.request_input.body.get('redirect_to', self.request_input.body.get('redirect'))
         return file_redirect
+
+    def redirect(self, url: str, code: int = 302) -> PyonirRestResponse:
+        """Redirects web request to the provided route or redirect_to value"""
+        self.file = None
+        return self.server_response.set_redirect_response(url, code=code)
 
     async def build_response(self, route: RouteConfig) -> Any:
         """Builds the server response for the current request by executing the route function and processing the file."""

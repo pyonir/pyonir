@@ -4,7 +4,8 @@ import os, sys
 from dataclasses import dataclass
 from typing import Optional, Callable, List, Union
 
-from starlette.applications import Starlette
+from starlette.applications import Starlette, P
+from starlette.middleware import _MiddlewareFactory
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.staticfiles import StaticFiles
@@ -108,10 +109,6 @@ class PyonirServer(Starlette):
 
     def __init__(self, pyonir_app: BaseApp):
         super().__init__()
-        from starlette_wtf import CSRFProtectMiddleware
-        from starlette.middleware.sessions import SessionMiddleware
-        from starlette.middleware.trustedhost import TrustedHostMiddleware
-        # from starlette.middleware.gzip import GZipMiddleware
         self.route_map = {}
         self.static_map = {}
         self.url_map = {}
@@ -119,18 +116,38 @@ class PyonirServer(Starlette):
         self.is_active: bool = False
         self.request = None
         self.pyonir_app: BaseApp = pyonir_app
+        self._installed_middleware = set()
+
+    def _init_framework_middleware(self):
+        from starlette_wtf import CSRFProtectMiddleware
+        from starlette.middleware.sessions import SessionMiddleware
+        from starlette.middleware.trustedhost import TrustedHostMiddleware
+        # from starlette.middleware.gzip import GZipMiddleware
         # self.add_middleware(PyonirDebugRequestMiddleware)
         self.add_middleware(SessionMiddleware,
-                            https_only=False,
-                            domain=self.pyonir_app.domain,
-                            max_age=3600,
+                            https_only=not self.pyonir_app.is_dev,
                             secret_key=self.pyonir_app.salt,
                             session_cookie=self.pyonir_app.session_key,
+                            max_age=3600,
                             same_site='lax'
                             )
         self.add_middleware(TrustedHostMiddleware)
         self.add_middleware(CSRFProtectMiddleware, csrf_secret=self.pyonir_app.salt)
         # star_app.add_middleware(GZipMiddleware, minimum_size=500)
+
+    def add_middleware(
+        self,
+        middleware_class: _MiddlewareFactory[P],
+        *args: P.args,
+        **kwargs: P.kwargs,
+    ) -> None:
+        if middleware_class in self._installed_middleware: return
+        self._installed_middleware.add(middleware_class)
+        super().add_middleware(middleware_class, *args, **kwargs)
+
+    def build_middleware_stack(self):
+        self._init_framework_middleware()
+        return super().build_middleware_stack()
 
     def register_route(self, path, route_func: Union[str, Callable], methods: list = None, params: dict = None):
         import inspect

@@ -688,7 +688,7 @@ class BaseApp(Base):
         # Initialize Server instance
         if not self.salt:
             raise ValueError(f"You are attempting to run the application without proper configurations. .env file must include app.salt to protect the application.")
-        # self.server.generate_nginx_conf(self)
+
         self.server.run_uvicorn_server(uvicorn_options=uvicorn_options)
 
     def generate_static_website(self):

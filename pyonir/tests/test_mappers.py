@@ -10,7 +10,7 @@ from pyonir.core.schemas import BaseSchema, GenericQueryModel
 from pyonir.core.mapper import cls_mapper, dict_to_class
 from pyonir.core.parser import DeserializeFile
 from pyonir.libs.plugins.navigation import Menu
-from pyonir.tests.conftest import app_setup_path
+from pyonir.tests.conftest import app_setup_path, PyonirMocks
 
 
 # ==== Sample classes to map into ====
@@ -64,13 +64,12 @@ def test_generic():
     # assert genmodel.field1 == "value1"
     # assert genmodel.field2 == 123
 
-def test_request_mapper():
+def test_request_mapper(test_app: PyonirMocks.App):
 
     def demo_route(user_id: int, request: PyonirRequest):
         pass
     from pyonir.core.mapper import func_request_mapper
-    app = Pyonir(__file__)
-    pyonir_request = PyonirRequest(None, app)
+    pyonir_request = PyonirRequest(None, test_app)
     pyonir_request.request_input.body = {'user_id': '42'}
     pyonir_request._path_params = dict_to_class({'user_id': '42'})
     pyonir_request._query_params = dict_to_class({})

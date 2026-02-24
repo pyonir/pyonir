@@ -261,6 +261,7 @@ class PyonirDatabaseService:
         self._dbconfig: DatabaseConfig = dc
         self._cursor = None
         self._schemas = set()
+        self._parent_db: 'PyonirDatabaseService' = None
 
     @property
     def query(self) -> PyonirDBQuery:
@@ -329,6 +330,7 @@ class PyonirDatabaseService:
         dbc.set_dbname(os.path.basename(database))
         dbc.set_datastore_path(os.path.dirname(database))
         dbc.connect()
+        dbc._parent_db = self
         return dbc
 
     def set_driver(self, driver: str) -> "PyonirDatabaseService":
@@ -381,6 +383,7 @@ class PyonirDatabaseService:
             fk_model = fk_type if isinstance(fk_type, type) and issubclass(fk_type, BaseSchema) else None
             if not fk_model: continue
             self.build_table_from_model(fk_model)
+        model.sql_after_create(dbc=self)
         self._schemas.add(model)
         return self
 
@@ -535,6 +538,23 @@ class PyonirDatabaseService:
         return self
 
     @abstractmethod
+    def upsert(self, entity: type[BaseSchema], table: str = None, return_conflict_id: bool = None) -> Any:
+        if not isinstance(entity, BaseSchema):
+            raise TypeError(f"entity must be baseschema: {type(entity)}: {entity} was provided.")
+        self.connect()
+        keys, values = BaseSchema.dict_to_tuple(entity) if isinstance(entity, dict) else entity.to_tuple()
+        table_pk = get_attr(entity,'__primary_key__', 'id')
+        cursor = self.connection.cursor()
+        entity.__sql_history__.append(entity._sql_upsert_table)
+
+        try:
+            res = cursor.execute(entity._sql_upsert_table, values)
+            res = res.fetchone()
+            return res[0]
+        except Exception as e:
+            raise(e)
+
+    @abstractmethod
     def insert(self, entity: type[BaseSchema], table: str = None, return_conflict_id: bool = None) -> Any:
         """Insert entity into backend."""
         if not isinstance(entity, BaseSchema):
@@ -546,7 +566,6 @@ class PyonirDatabaseService:
 
         else:
             self.connect()
-            # self.build_table_from_model(entity)
             # perform nested inserts for foreign keys if any
             for fk_name, fk_type in getattr(entity, '__foreign_keys__', []):
                 fk_entity = getattr(entity, fk_name, None)
@@ -564,6 +583,8 @@ class PyonirDatabaseService:
                 cursor.execute(query, values)
                 self.connection.commit()
                 primary_id_value = getattr(entity, table_pk, cursor.lastrowid)
+                entity.__primary_key_value__ = primary_id_value
+                entity.__sql_history__.append(query)
                 return primary_id_value
             except sqlite3.IntegrityError as e:
                 print(f"[ERROR] Integrity error during insert: {e}")

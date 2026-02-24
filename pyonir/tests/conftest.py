@@ -50,6 +50,8 @@ class PyonirMockRole(BaseSchema, table_name='roles_table', primary_key='rid', lo
     def from_value(cls, value: any):
         if isinstance(value, DeserializeFile):
             value = value.data
+        if callable(value):
+            return value()
         return cls(**{"name":value}) if isinstance(value, str) else cls(**value)
 
 class PyonirMockRoles:

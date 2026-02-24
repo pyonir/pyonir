@@ -2,7 +2,7 @@ import os, json
 from datetime import datetime
 from enum import EnumType
 from types import UnionType
-from typing import get_type_hints, Any, Tuple
+from typing import get_type_hints, Any, Tuple, List, Type
 from typing import get_origin, get_args, Union, Callable, Mapping, Iterable, Generator
 from collections.abc import Iterable as ABCIterable, Mapping as ABCMapping, Generator as ABCGenerator
 
@@ -82,7 +82,8 @@ def coerce_unions(union_types: list[type], v: any):
     return _value
 
 
-def collect_type_hints(t, public_only=True):
+def collect_type_hints(t) -> List[Tuple[str, Type]]:
+    from pyonir.core.schemas import SYSTEM_COLUMNS
     hints = get_type_hints(t)
     try:
         init_hints = get_type_hints(t.__init__)
@@ -91,7 +92,18 @@ def collect_type_hints(t, public_only=True):
             del hints['return']
     except Exception as exc:
         pass
-    return {k:v for k,v in hints.items() if public_only and k[0]!='_'}
+    is_db_table = getattr(t, '__table_name__', False)
+    skip = lambda k: k[0]=='_'
+    all_keys = list(hints.keys())
+    a = [k for k in getattr(t, "__annotations__", {}).keys() if not skip(k)] # gathers class fields
+    for k in all_keys:
+        if skip(k): continue
+        if k not in a and k not in SYSTEM_COLUMNS: # gathers extended class fields
+            a.append(k)
+    sl = [k for k in SYSTEM_COLUMNS if k not in a]
+    a = (a + sl) if is_db_table else a
+    return [(k, hints.get(k)) for k in a]
+    # return {k:v for k,v in hints.items() if public_only and k[0]!='_'}
 
 def required_parameters(cls):
     import inspect
@@ -212,10 +224,10 @@ def cls_mapper(file_obj: Union[dict, DeserializeFile], cls: Union['BaseSchema', 
     is_generic = isinstance(cls, GenericQueryModel)
     is_base = issubclass(cls, BaseSchema) if not is_generic else False
     cls_ins = cls() if is_base else {}
-    field_hints = cls.__fields__ if is_base or is_generic else [(k,v) for k,v in collect_type_hints(cls).items()]
+    field_hints = cls.__fields__ if is_base or is_generic else collect_type_hints(cls)
     alias_keymap = cls.__alias__ if hasattr(cls, '__alias__') else {}
     is_frozen = cls.__frozen__ if hasattr(cls, '__frozen__') else False
-    fks = getattr(cls, '__foreign_keys__', set())
+    fks = getattr(cls, '__foreign_keys__', None) or set()
     # normalize data source
     nested_key = getattr(cls, '__nested_field__', None)
     nested_data = get_attr(file_obj, nested_key) if nested_key else {}
@@ -238,7 +250,6 @@ def cls_mapper(file_obj: Union[dict, DeserializeFile], cls: Union['BaseSchema', 
 
         if (name, hint) in fks:
             value = cls_mapper(value, hint, 0, 1)
-            # value = lookup_fk(value, data_dir, app_ctx)
         # Handle containers
         custom_mapper_fn = getattr(cls, f'map_to_{name}', None)
         if custom_mapper_fn:
@@ -262,7 +273,7 @@ def cls_mapper(file_obj: Union[dict, DeserializeFile], cls: Union['BaseSchema', 
             if isinstance(getattr(cls, key, None), property): continue  # skip properties
             if key in processed or key[0] == '_': continue  # skip private or declared attributes
             setattr(res, key, value)
-    return res if field_hints else coerce_value_to_type(file_obj, cls)
+    return res if field_hints or is_base else coerce_value_to_type(file_obj, cls)
 
 def dict_to_class(data: dict, name: Union[str, callable] = None, deep: bool = True) -> object:
     """

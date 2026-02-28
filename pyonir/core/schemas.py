@@ -2,6 +2,8 @@ import json, os, uuid
 from datetime import datetime
 from typing import Type, Tuple, TypeVar, Any, Optional, List, Set, Dict
 
+from sqlalchemy import Table
+
 from pyonir.core.parser import LOOKUP_DATA_PREFIX
 
 from pyonir.core.utils import json_serial, get_attr
@@ -186,15 +188,18 @@ class BaseSchema:
     __frozen__:bool = False
     _errors: list[str]
     _private_keys: Optional[list[str]]
+
     __table_name__: str
     __fields__: List[tuple[str, type]]
     __primary_key__: str
+    __primary_key_value__: str
     __foreign_keys__: Set[Any]
     __fk_options__: Dict
     __table_columns__: List[Any]
-    __sql_history__: List[str]
     _sql_create_table: Optional[str]
-    _foreign_key_names: List[str]
+    _sql_insert: Optional[str]
+    _sql_upsert: Optional[str]
+    _foreign_key_names: Set[str]
     _mutable_columns: List[str]
     """mutable database columns names"""
     _unique_keys: List[str]
@@ -213,8 +218,8 @@ class BaseSchema:
         fields = collect_type_hints(cls)
         setattr(cls, "__fields__", fields)
         if table_name:
-            primary_key = kwargs.get("primary_key")
-            dialect = kwargs.get("dialect")
+            primary_key = kwargs.get("primary_key", '')
+            dialect_name = kwargs.get("dialect")
             alias = kwargs.get("alias_map", {})
             frozen = kwargs.get("frozen", False)
             foreign_keys = kwargs.get("foreign_keys", False)
@@ -229,6 +234,9 @@ class BaseSchema:
             model_fields = list()
             table_columns = list()
             timestamps_keys.add("created_on")
+            primary_keys = list()
+            returning_cols = []
+
             def is_fk(name, typ):
                 if foreign_keys and typ in foreign_keys:
                     foreign_fields.add((name, typ))
@@ -246,6 +254,9 @@ class BaseSchema:
             for name, typ in fields:
                 fktyp, *t = unwrap_optional(typ)
                 is_nullable = typ != fktyp
+                is_pk = primary_key and primary_key == name
+                if is_pk:
+                    primary_keys = (name, typ)
                 if is_nullable:
                     nullable_keys.add(name)
                 is_fk(name, fktyp)
@@ -255,24 +266,32 @@ class BaseSchema:
                 if _all_unique and name not in SYSTEM_COLUMNS:
                     unique_keys.append(name)
 
-            setattr(cls, "__table_name__", table_name)
-            setattr(cls, "__fields__", model_fields)
-            setattr(cls, "__primary_key__", primary_key or "id")
-            setattr(cls, "__foreign_keys__", foreign_fields)
-            setattr(cls, "__fk_options__", foreign_key_options)
-            setattr(cls, "__table_columns__", table_columns)
-            setattr(cls, "__sql_history__", [])
             setattr(cls, "__alias__", alias)
             setattr(cls, "__frozen__", frozen)
             setattr(cls, "_errors", [])
+            setattr(cls, "_file_path", None)
+
+            setattr(cls, "__table_name__", table_name)
+            setattr(cls, "__fields__", model_fields)
+            setattr(cls, "__primary_key__", primary_key)
+            setattr(cls, "__primary_key_value__", None)
+            setattr(cls, "__foreign_keys__", foreign_fields)
+            setattr(cls, "__fk_options__", foreign_key_options)
+            setattr(cls, "__table_columns__", table_columns)
+            setattr(cls, "_primary_keys", primary_keys)
             setattr(cls, "_foreign_key_names", foreign_field_names)
             setattr(cls, "_mutable_columns", mutable_columns)
             setattr(cls, "_unique_keys", unique_keys)
             setattr(cls, "_nullable_keys", nullable_keys)
             setattr(cls, "_timestamp_keys", timestamps_keys)
             setattr(cls, "_lookup_table", lookup_table_key)
-            setattr(cls, "_file_path", None)
-            # cls.generate_sql_table(dialect)
+
+            sqla_table = cls.generate_sqla_table()
+            setattr(cls, "_sqla_table", sqla_table)
+            setattr(cls, "_sql_create_table", generate_sqla(sqla_table, True))
+            setattr(cls, "_sql_insert", generate_sqla(sqla_table, is_insert=True, returning_cols=returning_cols, update_cols=mutable_columns))
+            setattr(cls, "_sql_upsert", generate_sqla(sqla_table, returning_cols=returning_cols, update_cols=mutable_columns))
+
 
     def __init__(self, **data):
         from pyonir.core.mapper import coerce_value_to_type, cls_mapper
@@ -282,19 +301,27 @@ class BaseSchema:
             if data:
                 custom_mapper_fn = getattr(self, f'map_to_{field_name}', None)
                 type_factory = getattr(self, field_name, custom_mapper_fn)
-                # is_nullable = field_name in self._nullable_keys and value is None
                 has_correct_type = isinstance(value, field_type)
                 if not has_correct_type:
                     if field_name in fks:
-                        value = cls_mapper(value, field_type, type_factory=type_factory, is_fk=True) #if should_call_factory else value
+                        is_nullable = field_name in self._nullable_keys and not value
+                        value = cls_mapper(value, field_type, type_factory=type_factory, is_fk=True) if not is_nullable else value
                     else:
                         value = coerce_value_to_type(value, field_type, factory_fn=type_factory) if (value is not None) or type_factory else None
             setattr(self, field_name, value)
 
         self._errors = []
-        self.__sql_history__ = []
         self.validate_fields()
         self._after_init()
+
+    @property
+    def pyonir_app(self):
+        from pyonir import Site
+        return Site if Site else None
+
+    @property
+    def id(self):
+        return self.__primary_key_value__
 
     @property
     def file_dirpath(self):
@@ -316,7 +343,6 @@ class BaseSchema:
         if not self.is_lookup_table: return None
         file_name = os.path.basename(self.file_path) if self.file_path else getattr(self, self._lookup_table)+'.json'
         return f"{LOOKUP_DATA_PREFIX}/{self.__table_name__}/{file_name}#data.{self._lookup_table}"
-
 
     def is_valid(self) -> bool:
         """Returns True if there are no validation errors."""
@@ -342,6 +368,10 @@ class BaseSchema:
         object.__setattr__(self, "_errors", [])
         self.validate_fields()
 
+    def _after_init(self):
+        """Hook for additional initialization in subclasses."""
+        pass
+
     def __post_init__(self):
         """Dataclass post init callback"""
         self._errors = []
@@ -362,7 +392,7 @@ class BaseSchema:
         file_data = self.to_dict(obfuscate=False, with_extras=False)
         active_user_id = get_attr(Site.server.request, 'security.user.uid') or self.created_by
         use_filename_as_pk = active_user_id if isinstance(self, (PyonirUser, PyonirUserMeta)) else _filename
-        _pk_value = getattr(self, self.__primary_key__, use_filename_as_pk)
+        _pk_value = get_attr(self, '__primary_key__') or use_filename_as_pk
         _datastore = Site.datastore_dirpath if Site else os.path.dirname(file_path)
 
         if not self.file_path:
@@ -423,7 +453,7 @@ class BaseSchema:
             columns.append(name)
             v = getattr(self, name)
             if (name, fkmodel) in self.__foreign_keys__:
-                v = get_attr(v, fkmodel.__primary_key__)
+                v = get_attr(v, fkmodel.__primary_key__ or 'id')
             is_optional_schema = isinstance(v, BaseSchema) and is_optional_type(fkmodel)
             v = json.dumps(v, default=json_serial) if is_optional_schema or isinstance(v,(BaseSchema, dict, list, tuple, set)) else v
             values.append(v)
@@ -435,10 +465,6 @@ class BaseSchema:
         keys = ', '.join(data.keys()) if not as_update_keys else ', '.join(f"{k}=?" for k in data.keys())
         values = tuple(json.dumps(v) if isinstance(v,(dict, list, tuple, set)) else v for v in data.values())
         return keys, values
-
-    def _after_init(self):
-        """Hook for additional initialization in subclasses."""
-        pass
 
     @staticmethod
     def init_lookup_table(dbc: 'PyonirDatabaseService'):
@@ -459,18 +485,18 @@ class BaseSchema:
         return cls_mapper(prsfile, cls)
 
     @classmethod
-    def generate_sql_table(cls, dialect: str = None) -> Optional[str]:
+    def generate_sqla_table(cls) -> Optional[Table]:
         """Generate the CREATE TABLE SQL string for this model, including foreign keys.
         Ensure referenced tables are present in the same MetaData so ForeignKey targets can be resolved.
         """
         table_name = getattr(cls, '__table_name__', None)
         if not table_name: return None
-        from sqlalchemy.schema import CreateTable
-        from sqlalchemy.dialects import sqlite, postgresql, mysql
         from sqlalchemy import text, UniqueConstraint, Boolean, Float, JSON, Table, Column, Integer, String, MetaData, ForeignKey
-        from pyonir.core.mapper import is_optional_type
 
-        dialect = dialect or "sqlite"
+        metadata = MetaData()
+        columns = []
+        columns_names = []
+        has_pk = False
         PY_TO_SQLA = {
             int: Integer,
             str: String,
@@ -479,31 +505,12 @@ class BaseSchema:
             dict: JSON,
             list: JSON,
         }
-        primary_key = getattr(cls, "__primary_key__", None)
 
-        metadata = MetaData()
-        columns = []
-        columns_names = []
-        has_pk = False
+        primary_key = getattr(cls, "__primary_key__", None)
         fk_set = getattr(cls, "__foreign_keys__", set())
         unq_set = getattr(cls, "_unique_keys", list())
         mutable_columns = getattr(cls, "_mutable_columns", list())
         is_lookup = getattr(cls, "_lookup_table", False)
-
-        # Create minimal stub tables for all referenced foreign key targets so SQLAlchemy can resolve them.
-        for fk_name, fk_typ in fk_set:
-            if hasattr(fk_typ, "__table_name__"):
-                fk_ref_table = getattr(fk_typ, "__table_name__", None) or fk_typ.__name__.lower()
-                fk_ref_pk = getattr(fk_typ, "__primary_key__", "id")
-                # determine pk column type from referenced model fields
-                pk_col_type = String
-                for f_name, f_typ in getattr(fk_typ, "__fields__", set()):
-                    if f_name == fk_ref_pk:
-                        pk_col_type = PY_TO_SQLA.get(f_typ, String)
-                        break
-                # register a stub table in the same metadata if not already present
-                if fk_ref_table not in metadata.tables:
-                    Table(fk_ref_table, metadata, Column(fk_ref_pk, pk_col_type, primary_key=True), extend_existing=True)
 
         for name, typ in cls.__fields__:
             # determine SQL column type
@@ -515,26 +522,29 @@ class BaseSchema:
             is_nullable = (name in cls._nullable_keys) and not is_pk
             is_unique = name in unq_set
             use_auto_timestamp = name in cls._timestamp_keys and not is_pk and not is_fk
-            kwargs = {"primary_key": is_pk, "nullable": is_nullable}
+            default_value = getattr(cls, name, None)
+            kwargs = {"primary_key": is_pk, "nullable": is_nullable, "default": default_value}
 
             # collect column positional args (type, optional ForeignKey)
-            col_args = [col_type]
+            col_args = [] if is_fk else [col_type]
 
             # if this field is registered as a foreign key, add ForeignKey constraint
             if is_fk and hasattr(typ, "__table_name__"):
+                fk_pks = getattr(typ, "_primary_keys")
                 fk_options = cls.__fk_options__.get(name, {})
-                ref_table = getattr(typ, "__table_name__", None) or typ.__name__.lower()
-                ref_pk = getattr(typ, "__primary_key__", "id")
-                col_args.append(ForeignKey(f"{ref_table}.{ref_pk}", **fk_options))
+                fk_table_name = getattr(typ, "__table_name__", None) or typ.__name__.lower()
+                fk_pk, fk_pk_type = fk_pks if fk_pks else ('id', PY_TO_SQLA.get(int))
+                fk_pk_type = PY_TO_SQLA.get(int)
+                col_args.append(ForeignKey(f"{fk_table_name}.{fk_pk}", **fk_options))
+                Table(fk_table_name, metadata, Column(fk_pk, fk_pk_type, primary_key=True), extend_existing=True)
+
             if use_auto_timestamp:
                 kwargs["server_default"] = text("CURRENT_TIMESTAMP")
             columns.append(Column(name, *col_args, **kwargs))
             columns_names.append(name)
 
-            if is_pk:
-                has_pk = True
 
-        if not has_pk:
+        if not primary_key:
             # Ensure at least one primary key
             columns.insert(0, Column("id", Integer, primary_key=True, autoincrement=True))
         if unq_set:
@@ -542,22 +552,7 @@ class BaseSchema:
             columns.append(UniqueConstraint(*unq_set, name=constraint_name))
         # Create main table with the same metadata so FK resolution works
         table = Table(table_name, metadata, *columns)
-
-        # Pick dialect
-        inserts = None
-        if dialect == "sqlite":
-            dialect_obj = sqlite.dialect()
-            inserts = sqlite.insert
-        elif dialect == "postgresql":
-            dialect_obj = postgresql.dialect()
-        elif dialect == "mysql":
-            dialect_obj = mysql.dialect()
-        else:
-            raise ValueError(f"Unsupported dialect: {dialect}")
-
-        cls._sql_create_table = str(CreateTable(table, if_not_exists=True).compile(dialect=dialect_obj))
-        cls._sql_upsert_table = generate_sqlite_upsert(table, inserts, dialect=dialect_obj, returning_cols=[], update_cols=mutable_columns)
-        return cls._sql_create_table
+        return table
 
     @classmethod
     def generate_date(cls, date_value: str = None) -> datetime:
@@ -568,74 +563,144 @@ class BaseSchema:
     def generate_id(cls) -> str:
         return uuid.uuid4().hex
 
-def generate_sqlite_upsert(table, insert, dialect, returning_cols=None, update_cols=None):
-    from sqlalchemy import or_, bindparam, UniqueConstraint
+    @property
+    def foreign_key_names(self):
+        return self._foreign_key_names
+
+
+def generate_sqla(
+    table: Table,
+    is_create: bool = False,
+    is_insert: bool = False,
+    dialect: Optional[str] = None,
+    toggle_columns: Optional[List[str]] = None,
+    returning_cols: Optional[List[str]] = None,
+    update_cols: Optional[List[str]] = None,
+) -> str:
+    """
+    Generate CREATE TABLE, INSERT, or UPSERT SQL string for a given SQLAlchemy table.
+    """
+
+    from sqlalchemy.dialects import sqlite, postgresql, mysql
+    from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+    from sqlalchemy import bindparam, UniqueConstraint, or_, Integer
+    from sqlalchemy.schema import CreateTable
+
+    # ---------------------------
+    # Pick dialect
+    # ---------------------------
+    dialect_insert = sqlite_insert
+    dialect_obj = sqlite.dialect()
+
+    if dialect == "postgresql":
+        dialect_obj = postgresql.dialect()
+        dialect_insert = postgresql.insert
+    elif dialect == "mysql":
+        dialect_obj = mysql.dialect()
+        dialect_insert = mysql.insert
+
+    # ---------------------------
+    # CREATE TABLE
+    # ---------------------------
+    if is_create:
+        return str(CreateTable(table, if_not_exists=True).compile(dialect=dialect_obj))
+
+    toggle_columns = toggle_columns or []
 
     insert_values = {}
     pk_columns = []
     updatable_columns = []
 
-    # 1️⃣ Inspect columns once
+    # ---------------------------
+    # Inspect columns
+    # ---------------------------
     for col in table.columns:
         name = col.name
 
         if col.primary_key:
             pk_columns.append(name)
 
-            # Include PK in insert ONLY if it is not auto-generated
+            # Only include PK if not auto-generated
             if not (
                 col.autoincrement
                 or col.default is not None
                 or col.server_default is not None
             ):
                 insert_values[name] = bindparam(name)
+
         else:
             insert_values[name] = bindparam(name)
             updatable_columns.append(name)
 
-    # 2️⃣ Build base INSERT
-    stmt = insert(table).values(insert_values)
+    # Determine conflict target
+    constraint_cols: Optional[List[str]] = None
 
-    # 3️⃣ Determine columns to update
+    for constraint in table.constraints:
+        if isinstance(constraint, UniqueConstraint):
+            constraint_cols = [c.name for c in constraint.columns]
+            break
+
+    if not constraint_cols and pk_columns:
+        constraint_cols = pk_columns
+    # ---------------------------
+    # Base INSERT
+    # ---------------------------
+    stmt = dialect_insert(table).values(insert_values)
+
+    # ============================================================
+    # SIMPLE INSERT MODE
+    # ============================================================
+    if is_insert:
+        if returning_cols:
+            stmt = stmt.returning(*[table.c[c] for c in returning_cols])
+        else:
+            stmt = stmt.returning(*[table.c[c] for c in pk_columns])
+        if constraint_cols:
+            stmt = stmt.on_conflict_do_nothing()
+        return str(
+            stmt.compile(
+                dialect=dialect_obj,
+                compile_kwargs={"render_postcompile": True},
+            )
+        )
+
+    # ============================================================
+    # UPSERT MODE
+    # ============================================================
+
+
     columns_to_update = update_cols or updatable_columns
-
-    update_columns = {}
+    upsert_set = {}
     where_conditions = []
 
     for name in columns_to_update:
-        update_columns[name] = stmt.excluded[name]
-        where_conditions.append(
-            table.c[name].is_not(stmt.excluded[name])
-        )
+        col = table.c[name]
+
+        if name in toggle_columns and isinstance(col.type, Integer):
+            upsert_set[name] = 1 - col
+        else:
+            upsert_set[name] = stmt.excluded[name]
+            where_conditions.append(col.is_not(stmt.excluded[name]))
 
     where_clause = or_(*where_conditions) if where_conditions else None
 
-    # 4️⃣ Resolve conflict target (UNIQUE → PK fallback)
-    conflict_cols = None
-    for constraint in table.constraints:
-        if isinstance(constraint, UniqueConstraint):
-            conflict_cols = [col.name for col in constraint.columns]
-            break
+    if constraint_cols and upsert_set:
+        stmt = stmt.on_conflict_do_update(
+            index_elements=constraint_cols,
+            set_=upsert_set,
+            where=where_clause,
+        )
 
-    if not conflict_cols:
-        conflict_cols = pk_columns
+    # RETURNING
+    if returning_cols:
+        stmt = stmt.returning(*[table.c[c] for c in returning_cols])
+    elif pk_columns:
+        stmt = stmt.returning(*[table.c[c] for c in pk_columns])
 
-    # 5️⃣ Build UPSERT
-    upsert_stmt = stmt.on_conflict_do_update(
-        index_elements=conflict_cols,
-        set_=update_columns,
-        where=where_clause
-    )
-
-    # 6️⃣ Optional RETURNING
-    target_return = [table.c[col] for col in returning_cols] or [table.c[c] for c in pk_columns]
-    upsert_stmt = upsert_stmt.returning(*target_return)
-
-    # 7️⃣ Compile
     return str(
-        upsert_stmt.compile(
-            dialect=dialect,
-            compile_kwargs={"render_postcompile": True}
+        stmt.compile(
+            dialect=dialect_obj,
+            compile_kwargs={"render_postcompile": True},
         )
     )
 

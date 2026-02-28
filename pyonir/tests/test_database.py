@@ -16,7 +16,6 @@ def test_crud_operations(test_pyonir_db: PyonirMocks.DatabaseService):
     test_pyonir_db.connect()
     mock_user = PyonirMockUser(**PyonirMocks.user_data)
     test_pyonir_db.build_table_from_model(mock_user)
-    mock_role = PyonirMockUser(**from_db_data)
     table_name = mock_user.__table_name__
     table_key = mock_user.__primary_key__
     user_id = test_pyonir_db.insert(mock_user)

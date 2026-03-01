@@ -22,14 +22,14 @@ def test_crud_operations(test_pyonir_db: PyonirMocks.DatabaseService):
     assert user_id
 
     # Read
-    results: PyonirMockUser = next(test_pyonir_db.find(PyonirMockUser, {'where': f"{table_key} = '{user_id}'"}))
+    results: PyonirMockUser = next(test_pyonir_db.find(PyonirMockUser, {'where': [f"{table_key} = '{user_id}'"]}))
     assert (isinstance(results, PyonirMockUser))
     assert (results.username == mock_user.username)
     assert (results.email == mock_user.email)
     assert (results.role.rid == mock_user.role.rid)
 
     # Verify foreign key role
-    mock_role_results = next(test_pyonir_db.find(PyonirMockRole, {'where': f"rid = '{mock_user.role.rid}'"}))
+    mock_role_results = next(test_pyonir_db.find(PyonirMockRole, {'where': [f"rid = '{mock_user.role.rid}'"]}))
     assert (isinstance(mock_role_results, PyonirMockRole))
     assert (mock_role_results.name == mock_user.role.name)
 
@@ -45,17 +45,17 @@ def test_crud_operations(test_pyonir_db: PyonirMocks.DatabaseService):
     })
 
     # Verify update
-    results = next(test_pyonir_db.find(PyonirMockUser, {'where': f"{table_key} = '{user_id}'"}))
+    results = next(test_pyonir_db.find(PyonirMockUser, {'where': [f"{table_key} = '{user_id}'"]}))
     assert (results.username == "newusername")
     assert (results.email == "newemail@example.com")
     # assert (results.age == 0)
 
     # Delete
-    deleted = test_pyonir_db.delete(mock_user, {'where': f"{table_key} = '{user_id}'"})
+    deleted = test_pyonir_db.delete(mock_user, {'where': [f"{table_key} = '{user_id}'"]})
     assert deleted
 
     # Verify deletion
-    results = list(test_pyonir_db.find(PyonirMockUser, {'where': f"{table_key} = '{user_id}'"}))
+    results = list(test_pyonir_db.find(PyonirMockUser, {'where': [f"{table_key} = '{user_id}'"]}))
     assert (len(results) == 0)
 
     test_pyonir_db.disconnect()

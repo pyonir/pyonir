@@ -168,13 +168,15 @@ class PyonirDBQuery:
             self._columns.append(json_sql)
         return self
 
-    def where(self, condition: Union[str, Callable], params: Dict = None):
-        if not condition:
+    def where(self, conditions: Union[List[str], Callable], params: Dict = None):
+        if not conditions:
             return self
-        if callable(condition):
-            # condition param arguments will always contain the list item and executed during mapping
-            self._where_func = (condition, params)
-        self._where.append(condition)
+        if callable(conditions):
+            # conditions param arguments will always contain the list item and executed during mapping
+            self._where_func = (conditions, params)
+        else:
+            for condition in conditions:
+                self._where.append(condition)
         return self
 
     def order_by(self, column: str, direction="ASC"):

@@ -573,9 +573,9 @@ class PyonirDatabaseService:
             r = cursor.fetchone()
             if r:
                 r = r[0]
-            elif entity._unique_keys and entity.is_lookup_table:
+            elif entity._unique_keys: #and entity.is_lookup_table:
                 table_pk = get_attr(entity,'__primary_key__') or 'id'
-                ukey = list(entity._unique_keys).pop(0)
+                ukey = entity._unique_keys[0]
                 uval = getattr(entity, ukey, None)
                 q = f"""SELECT (id) FROM {entity.__table_name__} WHERE {ukey} = "{uval}";"""
                 r = dict(cursor.execute(q).fetchone()).get(table_pk)

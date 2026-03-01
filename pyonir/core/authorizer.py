@@ -957,10 +957,10 @@ class PyonirBaseRequest:
         if callable(route_func) and self.pyonir_app.is_dev:
             route_func = self.pyonir_app.reload_module(route_func, reload=True)
         is_async = inspect.iscoroutinefunction(route_func)
-        args = func_request_mapper(route_func, self)
         route_func_response = None
 
         if callable(route_func) and not root_static_file_request:
+            args = func_request_mapper(route_func, self)
             self.server_response.status_code = 200
             route_func_response = await route_func(**args) if is_async else route_func(**args)
 
@@ -977,7 +977,7 @@ class PyonirBaseRequest:
         if self.is_sse:
             self.server_response.set_stream(route_func_response)
         elif self.is_api:
-            if route_func_response is not None and self.file.file_exists:
+            if route_func_response is not None and self.file.file_exists and self.method == 'GET':
                 self.file.data['router_content'] = route_func_response
                 route_func_response = None
             self.server_response.set_json(route_func_response or self.file.data)

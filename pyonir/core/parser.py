@@ -219,7 +219,7 @@ class DeserializeFile:
         if not Site or (not Site.SSG_IN_PROGRESS and not Site.server):
             return value
         site_filter = Site.Parsely_Filters.get(filter_name)
-        return site_filter(value, kwargs)
+        return site_filter(value, kwargs) if site_filter else value
 
     @classmethod
     def load(cls, json_str: str) -> dict:

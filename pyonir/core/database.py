@@ -146,7 +146,7 @@ class PyonirDBQuery:
             fk_model = fk_type if isinstance(fk_type, type) and issubclass(fk_type, BaseSchema) else None
             if not fk_model: continue
             table_alias = fk_model.__table_name__[0]
-            fk_pk = get_attr(fk_model,'__primary_key__','id')
+            fk_pk = get_attr(fk_model,'__primary_key__') or 'id'
             on_expr = f"{self._model_aliases[self._model]}.{fk_name} = {table_alias}.{fk_pk}"
             self.join(fk_model, on=on_expr, json_object=(fk_name,) + tuple(fk_model.__table_columns__), alias=table_alias, kind=kind)
         return self
@@ -168,13 +168,15 @@ class PyonirDBQuery:
             self._columns.append(json_sql)
         return self
 
-    def where(self, condition: Union[str, Callable], params: Dict = None):
-        if not condition:
+    def where(self, conditions: Union[List[str], Callable], params: Dict = None):
+        if not conditions:
             return self
-        if callable(condition):
-            # condition param arguments will always contain the list item and executed during mapping
-            self._where_func = (condition, params)
-        self._where.append(condition)
+        if callable(conditions):
+            # conditions param arguments will always contain the list item and executed during mapping
+            self._where_func = (conditions, params)
+        else:
+            for condition in conditions:
+                self._where.append(condition)
         return self
 
     def order_by(self, column: str, direction="ASC"):
@@ -259,8 +261,8 @@ class PyonirDatabaseService:
         self._query: PyonirDBQuery = None
         self._datastore_dirpath: str = ""
         self._dbconfig: DatabaseConfig = dc
-        self._cursor = None
         self._schemas = set()
+        self._parent_db: 'PyonirDatabaseService' = None
 
     @property
     def query(self) -> PyonirDBQuery:
@@ -329,6 +331,7 @@ class PyonirDatabaseService:
         dbc.set_dbname(os.path.basename(database))
         dbc.set_datastore_path(os.path.dirname(database))
         dbc.connect()
+        dbc._parent_db = self
         return dbc
 
     def set_driver(self, driver: str) -> "PyonirDatabaseService":
@@ -367,20 +370,12 @@ class PyonirDatabaseService:
 
     def build_table_from_model(self, model: Type[BaseSchema]):
         """Create a table in the database."""
-        sql_create = model.generate_sql_table(self.driver)
-        assert sql_create is not None, "SQL create statement must be provided."
-        if self.driver != Driver.SQLITE:
-            raise NotImplementedError("Create operation is only implemented for SQLite in this stub.")
-        if not self.connection:
-            raise ValueError("Database connection is not established.")
-        if self.has_table(model.__table_name__):
-            return self
-        cursor = self.connection.cursor()
-        cursor.execute(sql_create)
+        self.execute_sql(model._sql_create_table)
         for fk_name, fk_type in model.__foreign_keys__:
             fk_model = fk_type if isinstance(fk_type, type) and issubclass(fk_type, BaseSchema) else None
             if not fk_model: continue
             self.build_table_from_model(fk_model)
+        model.sql_after_create(dbc=self)
         self._schemas.add(model)
         return self
 
@@ -446,7 +441,9 @@ class PyonirDatabaseService:
             raise RuntimeError('Database service has not been initialized')
         cursor = self.connection.cursor()
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table_name,))
-        return bool(cursor.fetchone())
+        v = bool(cursor.fetchone())
+        cursor.close()
+        return v
 
 
     @staticmethod
@@ -486,15 +483,23 @@ class PyonirDatabaseService:
         return db_type, database, host, port, username, password
 
     def execute_sql(self, sql: str, params: tuple = None):
-        """Execute a raw SQL query against the database."""
+        """
+        Execute a raw SQL query safely against the SQLite database.
+        Does not return results; ensures the cursor is closed for the next execution.
+        """
         self.connect()
         if not self.connection:
             raise RuntimeError("Database connection is not established.")
+
         cursor = self.connection.cursor()
-        res = cursor.execute(sql, params or ())
-        self._cursor = cursor
-        self.connection.commit()
-        return res
+        try:
+            cursor.execute(sql, params or ())
+        except Exception as e:
+            self.connection.rollback()
+            raise e
+        finally:
+            cursor.close()
+            self.connection.commit()
 
     def destroy(self):
         """Destroy the database or datastore."""
@@ -535,45 +540,52 @@ class PyonirDatabaseService:
         return self
 
     @abstractmethod
-    def insert(self, entity: type[BaseSchema], table: str = None, return_conflict_id: bool = None) -> Any:
-        """Insert entity into backend."""
-        if not isinstance(entity, BaseSchema):
-            raise TypeError(f"entity must be baseschema: {type(entity)}: {entity} was provided.")
-        if self.driver == Driver.FILE_SYSTEM:
-            # Save JSON file per record
-            entity.save_to_file(entity.file_path)
-            return os.path.exists(entity.file_path)
+    def upsert(self, entity: type[BaseSchema]) -> Any:
+        return self.insert(entity, as_upsert=True)
 
-        else:
-            self.connect()
-            # self.build_table_from_model(entity)
-            # perform nested inserts for foreign keys if any
-            for fk_name, fk_type in getattr(entity, '__foreign_keys__', []):
-                fk_entity = getattr(entity, fk_name, None)
-                fk_primary_id = self.insert(fk_entity, 0, True)
-                # set foreign key reference in main entity
-                if fk_primary_id:
-                    setattr(fk_entity, getattr(fk_entity, '__primary_key__'), fk_primary_id)
-            table = entity.__table_name__ if hasattr(entity, '__table_name__') else table
-            table_pk = get_attr(entity,'__primary_key__', 'id')
-            keys, values = BaseSchema.dict_to_tuple(entity) if isinstance(entity, dict) else entity.to_tuple()
-            placeholders = ', '.join('?' for _ in values)
-            query = f"INSERT INTO {table} {keys} VALUES ({placeholders})"
-            cursor = self.connection.cursor()
-            try:
-                cursor.execute(query, values)
-                self.connection.commit()
-                primary_id_value = getattr(entity, table_pk, cursor.lastrowid)
-                return primary_id_value
-            except sqlite3.IntegrityError as e:
-                print(f"[ERROR] Integrity error during insert: {e}")
-                if return_conflict_id and entity._unique_keys:
-                    ukey = list(entity._unique_keys).pop(0)
-                    uval = getattr(entity, ukey, None)
-                    query = f"""SELECT (id) FROM {table} WHERE {ukey} = "{uval}";"""
-                    rtn_id = dict(cursor.execute(query).fetchone()).get(table_pk)
-                    return rtn_id
-                return None
+    @abstractmethod
+    def insert(self, entity: type[BaseSchema], as_upsert: bool = False) -> Optional[int]:
+        import json
+        from pyonir.core.utils import json_serial
+
+        if not isinstance(entity, BaseSchema):
+            raise TypeError(f"entity must be BaseSchema: {type(entity)}: {entity} was provided.")
+        self.connect()
+
+        def process_column(col):
+            v = get_attr(entity, col)
+            is_nullable = col in entity._nullable_keys and not v
+            if col in entity.foreign_key_names:
+                if v:
+                    v.created_by = entity.created_by
+                _v = self.insert(v, as_upsert) if not is_nullable else v
+                return _v
+            v = json.dumps(v, default=json_serial) if isinstance(v,(BaseSchema, dict, list, tuple, set)) else v
+            return v
+
+        keys = entity.__table_columns__
+        values = [process_column(c) for c in keys]
+        sql = entity._sql_insert if not as_upsert else entity._sql_upsert
+
+        cursor = self.connection.cursor()
+        try:
+            cursor.execute(sql, values)
+            r = cursor.fetchone()
+            if r:
+                r = r[0]
+            elif entity._unique_keys and entity.is_lookup_table:
+                table_pk = get_attr(entity,'__primary_key__') or 'id'
+                ukey = list(entity._unique_keys).pop(0)
+                uval = getattr(entity, ukey, None)
+                q = f"""SELECT (id) FROM {entity.__table_name__} WHERE {ukey} = "{uval}";"""
+                r = dict(cursor.execute(q).fetchone()).get(table_pk)
+            entity.__primary_key_value__ = r
+        except Exception as e:
+            raise e
+        finally:
+            cursor.close()
+            self.connection.commit()
+        return entity.__primary_key_value__
 
 
     @abstractmethod

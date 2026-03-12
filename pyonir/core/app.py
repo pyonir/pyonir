@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 from typing import Optional, Generator, List, Callable
 
 from pyonir.core.loaders import import_module
@@ -34,6 +33,7 @@ class Base:
     LOGS_DIRNAME: str = "logs" # directory for serving HTML endpoints with file based routing
     FILTERS_DIRNAME: str = "filters" # directory for jinja template filters
     API_ROUTE = f"/{API_DIRNAME}"  # Api base path for accessing pages as JSON
+    GENERATED_API_DIRNAME = "@generated" # API dirname stores generated files
 
     app_dirpath: str = '' # absolute path to context directory
     name: str = ''# context name
@@ -235,8 +235,8 @@ class Base:
 
         return resolver
 
-    @staticmethod
-    def generate_resolvers(cls: callable, output_dirpath: str, namespace: str = ''):
+    # @staticmethod
+    def generate_resolvers(self, cls: callable, namespace: str = '', output_dirpath: str = None):
         """Automatically generate api endpoints from service class or module."""
         import textwrap, inspect
         from pyonir.core.utils import create_file
@@ -268,12 +268,14 @@ class Base:
         else:  # Means cls is an instance
             klass = type(cls)
             name = klass.__name__
-            output_dirpath = os.path.join(output_dirpath, namespace)
             call_path_fn = lambda meth_name: f"{namespace}.{meth_name}"
             endpoint_meths = [
                 m for m in dir(cls)
                 if not m.startswith('_') and callable(getattr(cls, m))
             ]
+        default_output_path = os.path.join(self.contents_dirpath, self.API_DIRNAME)
+        output_dirpath = output_dirpath or default_output_path
+        output_dirpath = os.path.join(output_dirpath, self.GENERATED_API_DIRNAME, namespace)
 
         print(f"Generating {name} API endpoint definitions for:")
         for meth_name in endpoint_meths:

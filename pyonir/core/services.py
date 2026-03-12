@@ -1,14 +1,15 @@
 from abc import ABC
 from typing import Optional, get_type_hints
 
-from pyonir import BaseApp
+from pyonir.core.app import BaseApp
+
 
 class BaseService(ABC):
     """
     Abstract base class defining a generic service interface for Pyonir applications.
     """
     app: Optional[BaseApp]
-    """Pyonir application instance"""
+    """Pyonir plugin app instance"""
 
     name: str
     """Name of the service"""
@@ -18,6 +19,12 @@ class BaseService(ABC):
 
     endpoint: str
     """API endpoint for the service"""
+
+    @property
+    def pyonir_app(self) -> BaseApp:
+        """Main pyonir application"""
+        from pyonir import Site
+        return self.app or Site
 
     @property
     def endpoint_url(self) -> str:
@@ -31,7 +38,7 @@ class BaseService(ABC):
         if self.app.server.is_active: return
         import os
         base_path = os.path.join(self.app.contents_dirpath, self.app.API_DIRNAME)
-        self.app.generate_resolvers(self, base_path, namespace=namespace)
+        self.app.generate_resolvers(self, output_dirpath=base_path, namespace=namespace)
 
     def __init_subclass__(cls, **kwargs):
         """Validate that required attributes are defined in subclasses."""

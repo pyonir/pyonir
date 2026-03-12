@@ -11,11 +11,7 @@ from pyonir.core.mapper import func_request_mapper
 from pyonir.core.parser import DeserializeFile, VIRTUAL_ROUTES_FILENAME
 from pyonir.core.schemas import BaseSchema
 from pyonir.core.server import BaseApp, RouteConfig
-# from pyonir.core.user import User, Role, PermissionLevel, Roles, UserSignIn
 from pyonir.core.utils import merge_dict, get_attr, dict_to_class
-
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.requests import Request
 from starlette.requests import Request as StarletteRequest
 
 from pyonir.pyonir_types import PyonirHooks, EVENT_RES, TEXT_RES, JSON_RES
@@ -214,7 +210,6 @@ class PyonirBaseRestResponse:
     _stream: any = None
     _media_type: str = None
     _file_response: any = None
-    # _server_response: object = None
     _redirect_response = None
     _headers: dict = field(default_factory=dict)
 
@@ -419,10 +414,14 @@ class DefaultPyonirAuthResponses:
     def load_responses(self, responses: dict):
         """Loads custom responses into the enum."""
         _responses = get_attr(responses, '@security.responses') or {}
-        for key, res_obj in _responses.items():
+        for res_name, res_obj in _responses.items():
             message = res_obj.get('message', '')
             status_code = res_obj.get('status_code', 200)
-            setattr(self, key.upper(), PyonirRestResponse(message=message, status_code=status_code))
+            data = {}
+            for key, value in res_obj.items():
+                if key.lower() in ('message', 'status_code'): continue
+                data[key] = value
+            setattr(self, res_name.upper(), PyonirRestResponse(message=message, status_code=status_code, data=data))
 
 class AuthenticationTypes(StrEnum):
     BASIC = "basic"
@@ -1044,9 +1043,10 @@ class PyonirBaseRequest:
             if not self.is_api and root_path.endswith(app_ctx.API_DIRNAME): continue
             category_index = os.path.join(root_path, *request_segments, 'index.md')
             single_page = os.path.join(root_path, *request_segments) + BaseApp.EXTENSIONS['file']
+            generated_page = os.path.join(root_path,app_ctx.GENERATED_API_DIRNAME, *request_segments) + BaseApp.EXTENSIONS['file']
             single_protected_page = os.path.join(root_path, *protected_segment) + BaseApp.EXTENSIONS['file']
 
-            for candidate in (category_index, single_page, single_protected_page):
+            for candidate in (category_index, single_page, generated_page, single_protected_page):
                 if os.path.exists(candidate):
                     route_page = DeserializeFile(candidate, app_ctx=app_ctx.app_ctx)
                     if virtual_route:
@@ -1170,6 +1170,45 @@ class PyonirAuthService:
     Abstract base class defining authentication and authorization route resolvers,
     including role and permission checks.
     """
+
+    @staticmethod
+    def save_image_from_url(url: str, directory: str) -> str:
+        """
+        Download an image from a URL and save it to a local directory.
+
+        Args:
+            url: External image URL
+            directory: Local directory where image will be saved
+
+        Returns:
+            Path to the saved image
+        """
+        import requests
+        from pathlib import Path
+        from urllib.parse import urlparse
+        parsed = urlparse(url)
+        url_path = Path(parsed.path)
+
+        url_name = url_path.stem or "image"
+        url_ext = url_path.suffix
+
+        path = Path(directory)
+
+        if path.suffix:  # file path provided
+            filepath = path.with_suffix(url_ext) if url_ext else path
+            filepath.parent.mkdir(parents=True, exist_ok=True)
+        else:  # directory provided
+            path.mkdir(parents=True, exist_ok=True)
+            filepath = path / (url_name + url_ext)
+
+        response = requests.get(url, stream=True, timeout=10)
+        response.raise_for_status()
+
+        with open(filepath, "wb") as f:
+            for chunk in response.iter_content(8192):
+                f.write(chunk)
+
+        return str(filepath)
 
     @staticmethod
     async def sign_up(request: PyonirBaseRequest) -> PyonirRestResponse:

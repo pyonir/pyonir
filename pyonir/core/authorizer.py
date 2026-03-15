@@ -476,7 +476,7 @@ class PyonirUser(BaseSchema, table_name='users'):
     @property
     def account_dirpath(self) -> str:
         """Relative path to user personal directory"""
-        return os.path.join(self.__table_name__, self.uid)
+        return self.file_dirpath or os.path.join(self.__table_name__, self.uid)
 
     @property
     def account_profile_path(self) -> str:

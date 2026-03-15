@@ -238,7 +238,7 @@ class Base:
     # @staticmethod
     def generate_resolvers(self, cls: callable, namespace: str = '', output_dirpath: str = None):
         """Automatically generate api endpoints from service class or module."""
-        import textwrap, inspect
+        import textwrap, inspect, datetime
         from pyonir.core.utils import create_file
 
         def process_docs(meth: callable):
@@ -250,6 +250,7 @@ class Base:
             return meta, "".join(_r)
 
         resolver_template = textwrap.dedent("""\
+        generated_on: {generated_date}
         {meta}
         ===
         {docs}
@@ -277,15 +278,16 @@ class Base:
         output_dirpath = output_dirpath or default_output_path
         output_dirpath = os.path.join(output_dirpath, self.GENERATED_API_DIRNAME, namespace)
 
-        print(f"Generating {name} API endpoint definitions for:")
+        print(f"Generating {name} API endpoint {self.endpoint} definitions for:")
         for meth_name in endpoint_meths:
             file_path = os.path.join(output_dirpath, meth_name+'.md')
             method_import_path = call_path_fn(meth_name)
             meth: callable = getattr(cls, meth_name)
-            meta, docs = process_docs(meth)
+            is_router = hasattr(meth, "_generate_file")
+            meta, docs, *args = meth._generate_file if is_router else process_docs(meth)
             if not meta: continue
             meta = textwrap.dedent(meta.replace('{method_import_path}', method_import_path)).strip()
-            m_temp = resolver_template.format(docs=docs, meta=meta)
+            m_temp = resolver_template.format(docs=docs, meta=meta, generated_date=datetime.datetime.now())
             create_file(file_path, m_temp)
             print(f"\t{meth_name} at {file_path}")
 

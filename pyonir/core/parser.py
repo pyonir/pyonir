@@ -585,25 +585,13 @@ def process_lookups(value_str: str, file_ctx: DeserializeFile = None) -> Optiona
         from pyonir.core.utils import parse_url_params
         base_path = app_ctx[-1:][0] if value_str.startswith(LOOKUP_DATA_PREFIX) else file_contents_dirpath
         lookup_fpath, query_params, has_attr_path, is_caller = parse_lookup_path(value_str, base_path=base_path)
-        # _query_params = value_str.split("?").pop() if "?" in value_str else False
-        # query_params = parse_url_params(_query_params) if _query_params else {}
-        # has_attr_path = value_str.split("#")[-1] if "#" in value_str else ''
-        # is_caller = value_str.strip().startswith(LOOKUP_CALLER_PREFIX)
-        # value_str = value_str.replace(f"{LOOKUP_DIR_PREFIX}/", "") \
-        #     .replace(f"{LOOKUP_DATA_PREFIX}/", "") \
-        #     .replace(f"{LOOKUP_CALLER_PREFIX}/", "") \
-        #     .replace(f"?{_query_params}", "") \
-        #     .replace(f'#{has_attr_path}', '')
 
         if is_caller:
             from pyonir import Site
-            # module_path = value_str.strip().replace(f"{LOOKUP_CALLER_PREFIX}/", "")
             func = Site.load_function_from_path(lookup_fpath) if Site else None
             data = func() if callable(func) else None
             return data
 
-        # value_str = value_str.replace('../', '').replace('/*', '')
-        # lookup_fpath = os.path.join(base_path, *value_str.split("/"))
         if not os.path.exists(lookup_fpath):
             print(f"[DEBUG] FileNotFoundError: {lookup_fpath}")
             if file_ctx.is_virtual_route:

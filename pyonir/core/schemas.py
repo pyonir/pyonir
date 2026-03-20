@@ -214,10 +214,10 @@ class BaseSchema:
     def __init_subclass__(cls, **kwargs):
         from pyonir.core.mapper import collect_type_hints, unwrap_optional
         table_name = kwargs.get("table_name")
-        setattr(cls, "__table_name__", table_name)
         fields = collect_type_hints(cls)
         setattr(cls, "__fields__", fields)
         if table_name:
+            setattr(cls, "__table_name__", table_name)
             primary_key = kwargs.get("primary_key", '')
             dialect_name = kwargs.get("dialect")
             alias = kwargs.get("alias_map", {})
@@ -238,7 +238,8 @@ class BaseSchema:
             returning_cols = []
 
             def is_fk(name, typ):
-                if foreign_keys and typ in foreign_keys:
+                is_baseschema = issubclass(typ, BaseSchema) and hasattr(typ, '__table_name__')
+                if is_baseschema or (foreign_keys and typ in foreign_keys):
                     foreign_fields.add((name, typ))
                     foreign_field_names.add(name)
                     return True

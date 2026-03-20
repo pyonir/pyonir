@@ -543,12 +543,12 @@ def parse_ref_to_files(filepath, file_name, app_ctx, attr_path: str = None, quer
                                      include_names=include_names,
                                      exclude_names=(file_name, 'index.md'),
                                      force_all=return_all_files)
-        data = collection.set_params(query_params).paginated_collection()
+        _data = collection.set_params(query_params).paginated_collection()
     else:
-        rtn_key = attr_path or 'data'
-        p = DeserializeFile(filepath, app_ctx=app_ctx)
-        data = get_attr(p, rtn_key) or p
-    return data
+        if not attr_path: attr_path = 'data'
+        _data = DeserializeFile(filepath, app_ctx=app_ctx)
+    res = get_attr(_data, attr_path) or _data
+    return res
 
 def parse_lookup_path(value_path: str, base_path: str):
     from pyonir.core.utils import parse_url_params

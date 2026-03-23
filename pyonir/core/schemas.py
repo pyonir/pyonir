@@ -10,6 +10,7 @@ from pyonir.core.utils import json_serial, get_attr
 
 T = TypeVar("T")
 SYSTEM_COLUMNS = ('created_on', 'created_by')
+SYSTEM_COLUMN_TYPES = (('created_on', datetime), ('created_by', str))
 
 def get_active_user() -> str:
     from pyonir import Site
@@ -207,8 +208,8 @@ class BaseSchema:
     _timestamp_keys: Set[str]
     _lookup_table: str
 
-    created_by: str = staticmethod(lambda: get_active_user())
-    created_on: datetime = staticmethod(lambda: BaseSchema.generate_date())
+    created_by: str = lambda: get_active_user()
+    created_on: datetime = lambda: BaseSchema.generate_date()
     _file_path: str
 
     def __init_subclass__(cls, **kwargs):
@@ -251,8 +252,10 @@ class BaseSchema:
 
             _all_unique = '*' in unique_keys
             if _all_unique: unique_keys = list()
-
+            has_sys_cols = False
             for name, typ in fields:
+                if not has_sys_cols:
+                    has_sys_cols = name in SYSTEM_COLUMNS
                 fktyp, *t = unwrap_optional(typ)
                 is_nullable = typ != fktyp
                 is_pk = primary_key and primary_key == name
@@ -266,7 +269,9 @@ class BaseSchema:
                 table_columns.append(name)
                 if _all_unique and name not in SYSTEM_COLUMNS:
                     unique_keys.append(name)
-
+            if not has_sys_cols:
+                model_fields += SYSTEM_COLUMN_TYPES
+                table_columns += SYSTEM_COLUMNS
             setattr(cls, "__alias__", alias)
             setattr(cls, "__frozen__", frozen)
             setattr(cls, "_errors", [])
@@ -297,11 +302,12 @@ class BaseSchema:
     def __init__(self, **data):
         from pyonir.core.mapper import coerce_value_to_type, cls_mapper
         fks = getattr(self, '_foreign_key_names', None) or set()
+        cls = self.__class__
         for field_name, field_type in self.__fields__:
             value = data.get(field_name)
             if data:
                 custom_mapper_fn = getattr(self, f'map_to_{field_name}', None)
-                type_factory = getattr(self, field_name, custom_mapper_fn)
+                type_factory = getattr(cls, field_name, custom_mapper_fn)
                 has_correct_type = isinstance(value, field_type)
                 if not has_correct_type:
                     if field_name in fks:

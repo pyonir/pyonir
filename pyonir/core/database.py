@@ -539,6 +539,12 @@ class PyonirDatabaseService:
             self.connection = None
         return self
 
+    def save_to_file_system(self, entity: BaseSchema):
+        euid = BaseSchema.generate_id()
+        db_path = entity.file_dirpath or os.path.join(self.datastore_path, entity.__table_name__)
+        fullpath = os.path.join(db_path, euid+'.json')
+        return entity.save_to_file(fullpath)
+
     @abstractmethod
     def upsert(self, entity: type[BaseSchema]) -> Any:
         return self.insert(entity, as_upsert=True)

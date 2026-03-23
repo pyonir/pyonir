@@ -186,11 +186,11 @@ def coerce_value_to_type(value: Any, target_type: Union[type, Tuple[type]], fact
             has_type = type(value) in union_types
             _value = value if has_type else coerce_unions(union_types, value)
         return _value
-    # try:
+
     if isinstance(value, actual_type):
         return value
-    # except TypeError:
-    #     raise
+    if hasattr(target_type, 'from_value') and callable(getattr(target_type, 'from_value')):
+        return target_type.from_value(value)
     if value is None and callable(factory_fn):
         return factory_fn()
     elif value is None and is_sqlmodel_field(factory_fn):
@@ -223,7 +223,7 @@ def cls_mapper(file_obj: Union[dict, DeserializeFile], cls: Union['BaseSchema', 
     is_file = isinstance(file_obj, DeserializeFile)
     is_generic = isinstance(cls, GenericQueryModel)
     is_base = issubclass(cls, BaseSchema) if not is_generic else False
-    cls_ins = cls() if is_base else {}
+    cls_args = {}
     field_hints = cls.__fields__ if is_base or is_generic else collect_type_hints(cls)
     alias_keymap = cls.__alias__ if hasattr(cls, '__alias__') else {}
     is_frozen = cls.__frozen__ if hasattr(cls, '__frozen__') else False
@@ -245,7 +245,7 @@ def cls_mapper(file_obj: Union[dict, DeserializeFile], cls: Union['BaseSchema', 
             if value is not None: break
 
         if value is None:
-            set_attr(cls_ins, name, value)
+            set_attr(cls_args, name, value)
             continue
 
         if (name, hint) in fks:
@@ -259,13 +259,13 @@ def cls_mapper(file_obj: Union[dict, DeserializeFile], cls: Union['BaseSchema', 
             if fn_factory:
                 value = None
             value = coerce_value_to_type(value, hint, factory_fn=fn_factory)
-        set_attr(cls_ins, name, value)
+        set_attr(cls_args, name, value)
         processed.add(name)
     if is_generic:
-        cls_ins.update({'file_name': get_attr(file_obj, 'file_name'),
+        cls_args.update({'file_name': get_attr(file_obj, 'file_name'),
                         'file_created_on': get_attr(file_obj, 'file_created_on')})
-        return dict_to_class(cls_ins, 'GenericQueryModel')
-    res = cls_ins if is_base else cls(**cls_ins)
+        return dict_to_class(cls_args, 'GenericQueryModel')
+    res = cls(**cls_args)
     if is_base and is_file:
         setattr(res, '_file_path', file_obj.file_path)
     if not is_frozen:

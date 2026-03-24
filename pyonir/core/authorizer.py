@@ -888,7 +888,7 @@ class PyonirBaseRequest:
         app.TemplateEnvironment.globals['request'] = self
 
     @property
-    def app_ctx_ref(self):
+    def app_ctx_ref(self) -> BaseApp:
         return self._app_ctx_ref or self.pyonir_app
 
     @property
@@ -1103,9 +1103,7 @@ class PyonirBaseRequest:
     def get_virtual_route(self) -> Union[tuple[DeserializeFile, str], None]:
         """Applies virtual route data to the current request file if available."""
         app_ctx = self.app_ctx_ref
-        ctx_virtual_file_path = os.path.join(app_ctx.pages_dirpath, VIRTUAL_ROUTES_FILENAME) + BaseApp.EXTENSIONS['file']
-        if not os.path.exists(ctx_virtual_file_path): return None
-        ctx_virtual_file = DeserializeFile(ctx_virtual_file_path, app_ctx=app_ctx.app_ctx)
+        ctx_virtual_file = app_ctx.virtual_routes_file
         vkey, vdata, vpath_params, wildcard_vdata = self._get_virtual_params(ctx_virtual_file.data)
 
         if vpath_params and vkey:

@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 from typing import Optional, Generator, List, Callable
 
+from pyonir.core.parser import DeserializeFile
+
 from pyonir.core.loaders import import_module
 from pyonir.core.utils import get_attr, load_env, merge_dict
 
@@ -39,6 +41,7 @@ class Base:
     name: str = ''# context name
     _configs: Optional[object] # context settings
     _resolvers = Optional[dict] # resolver registry
+    _virtual_file: Optional[DeserializeFile] = None
 
     # FIELDS
     @property
@@ -69,6 +72,12 @@ class Base:
     def request_paths(self):
         """Request will search for files in the assigned directories under the qualifying endpoint"""
         return self.endpoint, {self.pages_dirpath, self.api_dirpath}
+
+    @property
+    def virtual_routes_file(self) -> Optional[DeserializeFile]:
+        """Virtual route file for app or plugin app"""
+        self._virtual_file = DeserializeFile(self.virtual_routes_filepath, app_ctx=self.app_ctx)
+        return self._virtual_file if self._virtual_file.file_exists else None
 
     # FILES
     @property
@@ -714,16 +723,16 @@ class BaseApp(Base):
             self.TemplateEnvironment.globals['is_ssg'] = True
             ssg_req = PyonirBaseRequest(None, self)
             start_time = time.perf_counter()
-
+            # query all pages
             all_pages: Generator[DeserializeFile] = query_fs(self.pages_dirpath, app_ctx=self.app_ctx, model='file')
             xmls = []
-            virtual_file = ssg_req.fetch_virtual_route(self, url='')
-            del virtual_file.data['url']
-            del virtual_file.data['slug']
+
             for pgfile in all_pages:
-                if virtual_file: ssg_req.ssg_request(pgfile, virtual_file.data)
+                ssg_req.url = pgfile.data.get('url')
+                virtual_file, virtual_url = ssg_req.get_virtual_route()
+                # if virtual_file: ssg_req.ssg_request(pgfile, virtual_file.data)
                 try:
-                    merge_dict(virtual_file.data, pgfile.data)
+                    merge_dict(derived=virtual_file.data, src=pgfile.data)
                     pgfile.apply_filters()
                 except Exception as e:
                     raise

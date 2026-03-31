@@ -888,6 +888,11 @@ class PyonirBaseRequest:
         app.TemplateEnvironment.globals['request'] = self
 
     @property
+    def csrf_token(self):
+        from starlette_wtf import csrf_token
+        return csrf_token(self.server_request)
+
+    @property
     def app_ctx_ref(self) -> BaseApp:
         return self._app_ctx_ref or self.pyonir_app
 
@@ -1311,8 +1316,8 @@ class PyonirAuthService:
         :param request: BaseRequest - The web request.
         :return: Optional[str] - A new access token if successful, otherwise None.
         """
-        authorizer = request.auth
-        authorizer.refresh()
+        authorizer = request.security
+        authorizer.refresh_token()
         return authorizer.response
 
     async def verify_authority(self, token: str, permission: str) -> bool:

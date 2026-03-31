@@ -364,8 +364,8 @@ class PyonirDatabaseService:
         return self
 
     def build_fs_dirs_from_model(self, model: Type[BaseSchema]):
-        if getattr(model, '_lookup_table', False):
-            model.init_lookup_table(self)
+        # if getattr(model, '_lookup_table', False):
+        #     model.init_lookup_table(self)
         return self
 
     def build_table_from_model(self, model: Type[BaseSchema]):
@@ -540,7 +540,7 @@ class PyonirDatabaseService:
         return self
 
     def save_to_file_system(self, entity: BaseSchema):
-        euid = BaseSchema.generate_id()
+        euid = entity.generate_id()
         db_path = entity.file_dirpath or os.path.join(self.datastore_path, entity.__table_name__)
         fullpath = os.path.join(db_path, euid+'.json')
         return entity.save_to_file(fullpath)
@@ -561,13 +561,15 @@ class PyonirDatabaseService:
         def process_column(col):
             v = get_attr(entity, col)
             is_nullable = col in entity._nullable_keys and not v
-            if col in entity.foreign_key_names:
-                if v:
-                    v.created_by = entity.created_by
+            if v and not is_nullable and col in entity.foreign_key_names:
+                v.created_by = entity.created_by
                 _v = self.insert(v, as_upsert) if not is_nullable else v
                 return _v
             v = json.dumps(v, default=json_serial) if isinstance(v,(BaseSchema, dict, list, tuple, set)) else v
             return v
+
+        if entity.created_by is None or callable(entity.created_by):
+            entity.created_by = entity.get_active_user()
 
         keys = entity.__table_columns__
         values = [process_column(c) for c in keys]

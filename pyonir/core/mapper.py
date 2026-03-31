@@ -133,9 +133,7 @@ def func_request_mapper(func: Callable, pyonir_request: 'PyonirRequest') -> dict
     import inspect
     # param_type_map = collect_type_hints(func)
     default_args = pyonir_request.request_input.body
-    # default_args.update(**pyonir_request.path_params.__dict__)
-    # default_args.update(**pyonir_request.query_params.__dict__)
-    # default_args.update(**pyonir_request.form)
+    # TODO: Fix mapping of default values for lambda functions to avoid callable values.
     cls_args = {}
 
 
@@ -229,6 +227,7 @@ def cls_mapper(file_obj: Union[dict, DeserializeFile], cls: Union['BaseSchema', 
     is_frozen = cls.__frozen__ if hasattr(cls, '__frozen__') else False
     fks = getattr(cls, '__foreign_keys__', None) or set()
     # normalize data source
+    pkey = get_attr(file_obj, 'data.__primary_key_value__') or None
     nested_key = getattr(cls, '__nested_field__', None)
     nested_data = get_attr(file_obj, nested_key) if nested_key else {}
     data = get_attr(file_obj, 'data') or {}
@@ -266,6 +265,8 @@ def cls_mapper(file_obj: Union[dict, DeserializeFile], cls: Union['BaseSchema', 
                         'file_created_on': get_attr(file_obj, 'file_created_on')})
         return dict_to_class(cls_args, 'GenericQueryModel')
     res = cls(**cls_args)
+    if pkey is not None:
+        setattr(res, '__primary_key_value__', pkey)
     if is_base and is_file:
         setattr(res, '_file_path', file_obj.file_path)
     if not is_frozen:

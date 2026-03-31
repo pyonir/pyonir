@@ -302,6 +302,7 @@ class BaseSchema:
     def __init__(self, **data):
         from pyonir.core.mapper import coerce_value_to_type, cls_mapper
         fks = getattr(self, '_foreign_key_names', None) or set()
+        pkv = data.get('__primary_key_value__', None)
         cls = self.__class__
         for field_name, field_type in self.__fields__:
             value = data.get(field_name)
@@ -316,7 +317,8 @@ class BaseSchema:
                     else:
                         value = coerce_value_to_type(value, field_type, factory_fn=type_factory) if (value is not None) or type_factory else None
             setattr(self, field_name, value)
-
+        if pkv:
+            setattr(self, '__primary_key_value__', int(pkv))
         self._errors = []
         self.validate_fields()
         self._after_init()
@@ -399,7 +401,7 @@ class BaseSchema:
         file_data = self.to_dict(obfuscate=False, with_extras=False)
         active_user_id = get_attr(Site.server.request, 'security.user.uid') or self.created_by
         use_filename_as_pk = active_user_id if isinstance(self, (PyonirUser, PyonirUserMeta)) else _filename
-        _pk_value = get_attr(self, '__primary_key__') or use_filename_as_pk
+        _pk_value = get_attr(self, getattr(self, '__primary_key__')) or use_filename_as_pk
         _datastore = Site.datastore_dirpath if Site else os.path.dirname(file_path)
 
         if not self.file_path:
@@ -418,7 +420,7 @@ class BaseSchema:
                 else:
                     fk_schema_inst.created_by = active_user_id
                     # use main schema pk value as the fk file name to show relationship
-                    fk_file_name = (_pk_value or BaseSchema.generate_id()) + '.json'
+                    fk_file_name = use_filename_as_pk + '.json'
                     fk_file_path = os.path.join(data_path, fk_file_name)
                     fk_schema_inst.save_to_file(fk_file_path)
                     fk_lookup_path = f"{LOOKUP_DATA_PREFIX}/{fk_type.__table_name__}/{fk_file_name}#data"
@@ -443,7 +445,11 @@ class BaseSchema:
                 return value.isoformat()
             return value
 
-        return {key: process_value(key, getattr(self, key)) for key, ktype in self.__fields__ if not is_ignored(key) and not obfuscated(key)}
+        res = {key: process_value(key, getattr(self, key)) for key, ktype in self.__fields__ if not is_ignored(key) and not obfuscated(key)}
+        # save primary key value under a special key for lookup when reconstructing from file
+        if hasattr(self, '__primary_key_value__'):
+            res["__primary_key_value__"] = self.id
+        return res
 
     def to_json(self, obfuscate = True) -> str:
         """Returns a JSON serializable dictionary"""
@@ -477,6 +483,10 @@ class BaseSchema:
     def init_lookup_table(dbc: 'PyonirDatabaseService'):
         """Initialize lookup table for this model if it has foreign keys."""
         return NotImplementedError("init_lookup_table must be implemented in subclasses with foreign keys to initialize related data.")
+
+    @classmethod
+    def get_active_user(cls) -> str:
+        return get_active_user()
 
     @classmethod
     def sql_after_create(cls, dbc: 'PyonirDatabaseService'):
@@ -553,6 +563,7 @@ class BaseSchema:
 
         if not primary_key:
             # Ensure at least one primary key
+            cls.__primary_key__ = 'id'
             columns.insert(0, Column("id", Integer, primary_key=True, autoincrement=True))
         if unq_set:
             constraint_name = f"uq_{table_name}_{'_'.join(unq_set)}"

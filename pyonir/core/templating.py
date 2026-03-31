@@ -32,7 +32,6 @@ class TemplateEnvironment(Environment):
         self.globals['request'] = None
         self.globals['user'] = None
         self.globals['get_request'] = lambda: app.server.request
-        self.globals['get_active_user'] = lambda: app.server.request.auth.user
         self.globals["render_component"] = self.render_component
 
     def url_for(self, route_name: str):

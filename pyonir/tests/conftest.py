@@ -37,10 +37,9 @@ class PyonirMockRole(BaseSchema, table_name='roles_table', primary_key='rid', lo
     name: str
 
     @classmethod
-    def init_lookup_table(cls, dbc: PyonirDatabaseService):
+    def sql_after_create(cls, dbc: PyonirDatabaseService):
         """Sets up the database with the role's permissions"""
-        roles = [val for name, val in vars(PyonirMockRoles).items() if not name.startswith('__')]
-        for role in roles:
+        for role in PyonirMockRoles.all():
             _file_dirpath = str(os.path.join(dbc.datastore_path, role.__table_name__))
             role._file_path = os.path.join(_file_dirpath, role.name+'.json')
             if not os.path.exists(role.file_path):
@@ -57,6 +56,10 @@ class PyonirMockRole(BaseSchema, table_name='roles_table', primary_key='rid', lo
 class PyonirMockRoles:
     GUEST_TESTER = PyonirMockRole(name='guest_tester')
     ADMIN_TESTER = PyonirMockRole(name='admin_tester')
+
+    @classmethod
+    def all(cls):
+        return [role for role in vars(cls).values() if isinstance(role, PyonirMockRole)]
 
 class PyonirMockUser(BaseSchema, table_name='pyonir_users', primary_key='uid', foreign_keys={PyonirMockRole}, fk_options={"role": {"ondelete": "RESTRICT", "onupdate": "RESTRICT"}}):
     uid: str = BaseSchema.generate_id

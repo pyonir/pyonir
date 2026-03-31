@@ -218,6 +218,59 @@ class BaseSchema:
         fields = collect_type_hints(cls)
         setattr(cls, "__fields__", fields)
         if table_name:
+            primary_key = kwargs.get("primary_key", '')
+            dialect_name = kwargs.get("dialect")
+            alias = kwargs.get("alias_map", {})
+            frozen = kwargs.get("frozen", False)
+            foreign_keys = kwargs.get("foreign_keys", False)
+            foreign_key_options = kwargs.get("fk_options", {})
+            unique_keys = kwargs.get("unique_keys", [])
+            timestamps_keys = kwargs.get("timestamp_keys", set())
+            lookup_table_key = kwargs.get("lookup_table", False)
+            mutable_columns = kwargs.get("mutable_columns", False)
+            nullable_keys = set()
+            foreign_fields = set()
+            foreign_field_names = set()
+            model_fields = list()
+            table_columns = list()
+            timestamps_keys.add("created_on")
+            primary_keys = list()
+            returning_cols = []
+
+            def is_fk(name, typ):
+                if foreign_keys and typ in foreign_keys:
+                    foreign_fields.add((name, typ))
+                    foreign_field_names.add(name)
+                    return True
+                return False
+
+            def is_factory(val):
+                if callable(val):
+                    setattr(cls, name, staticmethod(val))
+
+            _all_unique = '*' in unique_keys
+            if _all_unique: unique_keys = list()
+
+            for name, typ in fields:
+                fktyp, *t = unwrap_optional(typ)
+                is_nullable = typ != fktyp
+                is_pk = primary_key and primary_key == name
+                if is_pk:
+                    primary_keys = (name, typ)
+                if is_nullable:
+                    nullable_keys.add(name)
+                is_fk(name, fktyp)
+                is_factory(getattr(cls, name, None))
+                model_fields.append((name, fktyp))
+                table_columns.append(name)
+                if _all_unique and name not in SYSTEM_COLUMNS:
+                    unique_keys.append(name)
+
+            setattr(cls, "__alias__", alias)
+            setattr(cls, "__frozen__", frozen)
+            setattr(cls, "_errors", [])
+            setattr(cls, "_file_path", None)
+
             setattr(cls, "__table_name__", table_name)
             primary_key = kwargs.get("primary_key", '')
             dialect_name = kwargs.get("dialect")

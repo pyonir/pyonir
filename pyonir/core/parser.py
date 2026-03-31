@@ -550,7 +550,7 @@ def parse_ref_to_files(filepath, file_name, app_ctx, attr_path: str = None, quer
     res = get_attr(_data, attr_path) or _data
     return res
 
-def parse_lookup_path(value_path: str, base_path: str):
+def parse_lookup_path(value_path: str, base_path: str, rel_base_path: str = None):
     from pyonir.core.utils import parse_url_params
     if not isinstance(value_path, str):
         raise TypeError(f"Must be a string value. {value_path}")
@@ -569,6 +569,8 @@ def parse_lookup_path(value_path: str, base_path: str):
     else:
         value_path = value_path.replace('../', '').replace('/*', '')
         value_path = os.path.join(base_path, *value_path.split("/"))
+    if value_path[:-1] == base_path:
+        value_path = rel_base_path
     return value_path, query_params, has_attr_path, is_caller
 
 def process_lookups(value_str: str, file_ctx: DeserializeFile = None) -> Optional[Union[str, dict, list]]:
@@ -584,7 +586,7 @@ def process_lookups(value_str: str, file_ctx: DeserializeFile = None) -> Optiona
     if has_lookup:
         from pyonir.core.utils import parse_url_params
         base_path = app_ctx[-1:][0] if value_str.startswith(LOOKUP_DATA_PREFIX) else file_contents_dirpath
-        lookup_fpath, query_params, has_attr_path, is_caller = parse_lookup_path(value_str, base_path=base_path)
+        lookup_fpath, query_params, has_attr_path, is_caller = parse_lookup_path(value_str, base_path=base_path, rel_base_path=file_ctx.file_dirpath)
 
         if is_caller:
             from pyonir import Site

@@ -325,18 +325,19 @@ def create_file(file_abspath: str, data: any = None, is_json: bool = False, mode
         print(f"Error create_file method: {str(e)}")
         return False
 
-def copy_assets(src: str, dst: str, purge: bool = True):
+def copy_assets(src: str, dst: str, purge: bool = True, ignore: list[str] = None) -> None:
     """Copies files from a source directory into a destination directory with option to purge destination"""
     import shutil
     from shutil import ignore_patterns
     # print(f"{PrntColrs.OKBLUE}Coping `{src}` resource into {dst}{PrntColrs.RESET}")
+    if ignore is None: ignore = []
     try:
         if os.path.exists(dst) and purge:
             shutil.rmtree(dst)
         if os.path.isfile(src):
             shutil.copyfile(src, dst)
         if os.path.isdir(src):
-            shutil.copytree(src, dst, ignore=ignore_patterns('__pycache__', '*.pyc', 'tmp*', 'node_modules', '.*'))
+            shutil.copytree(src, dst, ignore=ignore_patterns(*ignore, '__pycache__', '*.pyc', 'tmp*', 'node_modules', '.*'))
     except Exception as e:
         raise
 

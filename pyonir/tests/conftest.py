@@ -61,12 +61,35 @@ class PyonirMockRoles:
     def all(cls):
         return [role for role in vars(cls).values() if isinstance(role, PyonirMockRole)]
 
+class PyonirMockStatus(BaseSchema, table_name='statuses_table', primary_key='sid', lookup_table='name'):
+    sid: str = BaseSchema.generate_id
+    name: str = lambda : "unknown"
+
+    @classmethod
+    def sql_after_create(cls, dbc: 'PyonirDatabaseService'):
+        """Sets up the database with the status entries"""
+        for status in PyonirMockStatuses.all():
+            _file_dirpath = str(os.path.join(dbc.datastore_path, status.__table_name__))
+            status._file_path = os.path.join(_file_dirpath, status.name+'.json')
+            if not os.path.exists(status.file_path):
+                status.save_to_file()
+
+class PyonirMockStatuses:
+    ACTIVE = PyonirMockStatus(name='active')
+    INACTIVE = PyonirMockStatus(name='inactive')
+    BANNED = PyonirMockStatus(name='banned')
+
+    @classmethod
+    def all(cls):
+        return [status for status in vars(cls).values() if isinstance(status, PyonirMockStatus)]
+
 class PyonirMockUser(BaseSchema, table_name='pyonir_users', primary_key='uid', foreign_keys={PyonirMockRole}, fk_options={"role": {"ondelete": "RESTRICT", "onupdate": "RESTRICT"}}):
     uid: str = BaseSchema.generate_id
     username: str
     email: str
     gender: Optional[str] = "godly"
     role: PyonirMockRole = lambda: PyonirMockRole(name="pythonista")
+    status: PyonirMockStatus = lambda: PyonirMockStatuses.BANNED
 
 
 class PyonirMockDataBaseService(PyonirDatabaseService, ABC):

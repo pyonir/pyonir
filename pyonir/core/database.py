@@ -725,6 +725,9 @@ def query_fs(abs_dirpath: str,
         is_excluded_file = exclude_names and file_path.name in exclude_names
         is_included_file = include_names and file_path.name in include_names
         is_allowed_file = file_path.suffix[1:] in allowed_content_extensions
+        # is_excluded_file_dir = any(part in exclude_dirs for part in file_path.parent.parts) if exclude_dirs else False
+        # if is_excluded_file_dir:
+        #     print("[DEBUG] Skipping file in excluded directory:", file_path)
         if is_included_file: return False
         if include_names and not is_included_file: return True
         if not is_private_file and force_all: return False

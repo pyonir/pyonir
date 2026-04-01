@@ -212,9 +212,12 @@ class BaseSchema:
     created_on: datetime = lambda: BaseSchema.generate_date()
     _file_path: str
 
-    def __init_subclass__(cls, **kwargs):
+    def __init_subclass__(cls,
+                          table_name: Optional[str] = None,
+                          unique_keys: Optional[List[str]] = None,
+                          file_name: Optional[str] = None,
+                          **kwargs):
         from pyonir.core.mapper import collect_type_hints, unwrap_optional
-        table_name = kwargs.get("table_name")
         fields = collect_type_hints(cls)
         setattr(cls, "__fields__", fields)
         if table_name:
@@ -225,7 +228,7 @@ class BaseSchema:
             frozen = kwargs.get("frozen", False)
             foreign_keys = kwargs.get("foreign_keys", False)
             foreign_key_options = kwargs.get("fk_options", {})
-            unique_keys = kwargs.get("unique_keys", [])
+            unique_keys = unique_keys or []
             timestamps_keys = kwargs.get("timestamp_keys", set())
             lookup_table_key = kwargs.get("lookup_table", False)
             mutable_columns = kwargs.get("mutable_columns", False)

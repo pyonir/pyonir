@@ -704,7 +704,7 @@ class BaseApp(Base):
 
         self.server.run_uvicorn_server(uvicorn_options=uvicorn_options)
 
-    def generate_static_website(self):
+    def generate_static_website(self, exclude_routes: tuple = None):
         """Generates Static website"""
         import time
         from pyonir.core.utils import create_file, copy_assets, PrntColrs
@@ -724,11 +724,13 @@ class BaseApp(Base):
             ssg_req = PyonirBaseRequest(None, self)
             start_time = time.perf_counter()
             # query all pages
-            all_pages: Generator[DeserializeFile] = query_fs(self.pages_dirpath, app_ctx=self.app_ctx, model='file')
+            all_pages: Generator[DeserializeFile] = query_fs(self.pages_dirpath, app_ctx=self.app_ctx, model='file', exclude_dirs=exclude_routes)
             xmls = []
 
             for pgfile in all_pages:
                 ssg_req.url = pgfile.data.get('url')
+                ssg_req.slug = pgfile.data.get('slug')
+                if ssg_req.slug.startswith(exclude_routes): continue
                 virtual_file, virtual_url = ssg_req.get_virtual_route()
                 # if virtual_file: ssg_req.ssg_request(pgfile, virtual_file.data)
                 try:
@@ -746,15 +748,15 @@ class BaseApp(Base):
             smap = f'<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>{self.domain}</loc><priority>1.0</priority></url> {"".join(xmls)} </urlset>'
             create_file(site_map_path, smap, 0)
 
-            # Copy theme static css, js files into ssg directory
-            copy_assets(self.frontend_assets_dirpath, os.path.join(self.ssg_dirpath, self.FRONTEND_ASSETS_DIRNAME))
-            copy_assets(self.public_assets_dirpath, os.path.join(self.ssg_dirpath, self.PUBLIC_ASSETS_DIRNAME))
-
             end_time = time.perf_counter() - start_time
             ms = end_time * 1000
             count += 3
             msg = f"SSG generated {count} html/json files in {round(end_time, 2)} secs :  {round(ms, 2)} ms"
             print(f'\033[95m {msg}')
+
+            # Copy theme static css, js files into ssg directory
+            copy_assets(self.frontend_assets_dirpath, os.path.join(self.ssg_dirpath, self.FRONTEND_ASSETS_DIRNAME), ignore=exclude_routes)
+            copy_assets(self.public_assets_dirpath, os.path.join(self.ssg_dirpath, self.PUBLIC_ASSETS_DIRNAME), ignore=exclude_routes)
         except Exception as e:
             msg = f"SSG encountered an error: {str(e)}"
             raise

@@ -568,9 +568,9 @@ class RequestInput(BaseSchema):
         return cls(**data)
 
     @classmethod
-    async def from_request(cls, request: StarletteRequest) -> 'RequestInput':
+    async def from_request(cls, request: StarletteRequest, pyonir_app: BaseApp = None) -> 'RequestInput':
         """Extracts user credentials from the incoming request."""
-        pyonir_app: BaseApp = request.app.pyonir_app
+        pyonir_app: BaseApp = pyonir_app or request.app.pyonir_app
         headers = dict(request.headers)
         # cookies = dict(request.cookies)
         session = dict(request.session)
@@ -732,10 +732,16 @@ class PyonirSecurity:
         from starlette_wtf import csrf_token
         if not user:
             user = self.user
-        auth_token = csrf_token(self.request.server_request)
-        hashed_password = hash_password(self.harden_password(self.pyonir_app.salt, self.creds.password, token=auth_token))
+        auth_token, hashed_password = self.secure_credentials(self.creds.password)
         user.auth_token = auth_token
         user.meta.password = hashed_password
+
+    def secure_credentials(self, password: str) -> Tuple[str, str]:
+        """Generates a new auth token and hashes the password."""
+        from starlette_wtf import csrf_token
+        auth_token = csrf_token(self.request.server_request)
+        hashed_password = hash_password(self.harden_password(self.pyonir_app.salt, password, token=auth_token))
+        return auth_token, hashed_password
 
     def has_signin_exceeded(self) -> bool:
         """Checks if the maximum sign-in attempts have been exceeded."""
@@ -998,7 +1004,7 @@ class PyonirBaseRequest:
             self.request_input = RequestInput.from_dict(data or {})
             return
 
-        self.request_input = await RequestInput.from_request(self.server_request)
+        self.request_input = await RequestInput.from_request(self.server_request, self.pyonir_app)
         if data:
             self.request_input.body.update(data)
 

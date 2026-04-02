@@ -215,6 +215,7 @@ class BaseSchema:
     def __init_subclass__(cls,
                           table_name: Optional[str] = None,
                           unique_keys: Optional[List[str]] = None,
+                          foreign_keys: Optional[List[str]] = None,
                           file_name: Optional[str] = None,
                           **kwargs):
         from pyonir.core.mapper import collect_type_hints, unwrap_optional
@@ -226,7 +227,7 @@ class BaseSchema:
             dialect_name = kwargs.get("dialect")
             alias = kwargs.get("alias_map", {})
             frozen = kwargs.get("frozen", False)
-            foreign_keys = kwargs.get("foreign_keys", False)
+            foreign_keys = foreign_keys or set()
             foreign_key_options = kwargs.get("fk_options", {})
             unique_keys = unique_keys or []
             timestamps_keys = kwargs.get("timestamp_keys", set())
@@ -319,6 +320,9 @@ class BaseSchema:
                         value = cls_mapper(value, field_type, type_factory=type_factory, is_fk=True) if not is_nullable else value
                     else:
                         value = coerce_value_to_type(value, field_type, factory_fn=type_factory) if (value is not None) or type_factory else None
+            else:
+                default_value = getattr(cls, field_name, None) if value is None else None
+                value = default_value() if callable(default_value) else default_value
             setattr(self, field_name, value)
         if pkv:
             setattr(self, '__primary_key_value__', int(pkv))

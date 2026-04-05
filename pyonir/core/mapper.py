@@ -208,6 +208,9 @@ def cls_mapper(file_obj: Union[dict, DeserializeFile], cls: Union['BaseSchema', 
     from pyonir import Site
     app_ctx = Site.app_ctx if Site else []
     data_dir = Site.datastore_dirpath if Site else ''
+    is_file = isinstance(file_obj, DeserializeFile)
+    is_generic = isinstance(cls, GenericQueryModel)
+    is_base = issubclass(cls, BaseSchema) if not is_generic else False
 
     if not file_obj and type_factory:
         return type_factory()
@@ -216,11 +219,10 @@ def cls_mapper(file_obj: Union[dict, DeserializeFile], cls: Union['BaseSchema', 
         if not _file_obj:
             raise TypeError(f"Failed to find lookup file for {file_obj}")
         return cls_mapper(_file_obj, cls)
+    if not is_generic and isinstance(file_obj, cls):
+        return file_obj
     if hasattr(cls, 'from_value') and callable(getattr(cls, 'from_value')):
         return cls.from_value(file_obj)
-    is_file = isinstance(file_obj, DeserializeFile)
-    is_generic = isinstance(cls, GenericQueryModel)
-    is_base = issubclass(cls, BaseSchema) if not is_generic else False
     cls_args = {}
     field_hints = cls.__fields__ if is_base or is_generic else collect_type_hints(cls)
     alias_keymap = cls.__alias__ if hasattr(cls, '__alias__') else {}

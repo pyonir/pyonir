@@ -51,7 +51,7 @@ def generate_nginx_conf(app: BaseApp) -> bool:
 
     return create_file(app.nginx_config_filepath, nginx_conf, False)
 
-def route_wrapper(route: RouteConfig, **kwargs):
+def route_wrapper(route_config: RouteConfig, **kwargs):
     """Wraps route function with additional logic for request handling, security checks, and response building"""
     async def dec_wrapper(star_req):
         """Wrapper function for handling incoming requests, performing security checks, and building responses"""
@@ -60,10 +60,11 @@ def route_wrapper(route: RouteConfig, **kwargs):
         star_req.app.pyonir_app.server.request = pyonir_request
         await pyonir_request.set_request_input()
         await pyonir_request.set_page_file()
+        # TODO: route_config should pass security params to request for more dynamic security checks (e.g. based on route params or query params)
         pyonir_request.security.responses.load_responses(pyonir_request.file.data)
         if pyonir_request.security.is_denied:
             pyonir_request.server_response.set_redirect_response(pyonir_request.security.redirect_to or '/')
-        res = await pyonir_request.build_response(route)
+        res = await pyonir_request.build_response(route_config)
         return res
     return dec_wrapper
 

@@ -28,6 +28,7 @@ dependencies = [
   "sqlmodel",
   "pymediainfo",
   "pillow",
+  "pytest-asyncio",
 ]
 
 [project.urls]

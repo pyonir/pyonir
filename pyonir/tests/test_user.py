@@ -1,5 +1,8 @@
 import os
 
+from pyonir.core import RequestInput
+
+from pyonir import PyonirRequest
 from pyonir.tests.conftest import PyonirMocks
 from pyonir.core.authorizer import (
     PyonirUser,
@@ -12,9 +15,9 @@ from pyonir.core.authorizer import (
 valid_credentials = {"email": "test@example.com", "password": "secure123", "flow": "session"}
 
 
-def test_user_credentials(request_input):
+def test_user_credentials(request_input: RequestInput):
     """RequestInput.from_dict handles missing email by reporting the invalid-email message."""
-    request_input.email = ""  # Simulate missing email
+    request_input.body["email"] = ""  # Simulate missing email
     request_input._errors = []
     request_input.validate_email()
     assert len(request_input._errors) >= 1
@@ -62,8 +65,7 @@ def test_meta_contains_password_field():
 # RequestInput tests using the real RequestInput validators — mutate the shared instance for each test
 
 def test_valid_signin(request_input):
-    request_input.email = valid_credentials["email"]
-    request_input.password = valid_credentials["password"]
+    request_input.body = valid_credentials
     request_input._errors = []
     # explicitly re-run validators to be deterministic
     request_input.validate_email()
@@ -75,8 +77,8 @@ def test_valid_signin(request_input):
 
 
 def test_invalid_email_format(request_input):
-    request_input.email = "invalid-email"
-    request_input.password = "secure123"
+    request_input.body['email'] = "invalid-email"
+    request_input.body['password'] = "secure123"
     request_input._errors = []
     request_input.validate_email()
 
@@ -85,8 +87,8 @@ def test_invalid_email_format(request_input):
 
 
 def test_empty_email(request_input):
-    request_input.email = ""
-    request_input.password = "secure123"
+    request_input.body['email'] = ""
+    request_input.body['password'] = "secure123"
     request_input._errors = []
     request_input.validate_email()
 
@@ -96,8 +98,8 @@ def test_empty_email(request_input):
 
 
 def test_empty_password(request_input):
-    request_input.email = "test@example.com"
-    request_input.password = ""
+    request_input.body['email'] = "test@example.com"
+    request_input.body['password'] = ""
     request_input._errors = []
     request_input.validate_password()
 
@@ -107,8 +109,8 @@ def test_empty_password(request_input):
 
 
 def test_short_password(request_input):
-    request_input.email = "test@example.com"
-    request_input.password = "12345"
+    request_input.body['email'] = "test@example.com"
+    request_input.body['password'] = "12345"
     request_input._errors = []
     request_input.validate_password()
 

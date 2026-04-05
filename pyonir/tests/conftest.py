@@ -4,7 +4,7 @@ from typing import Optional
 
 import pytest, os
 
-from pyonir import Pyonir, BaseSchema
+from pyonir import Pyonir, BaseSchema, PyonirRequest
 from pyonir.core.database import PyonirDatabaseService, CollectionQuery
 from pyonir.core.authorizer import RequestInput
 from pyonir.core.parser import DeserializeFile
@@ -120,6 +120,53 @@ def request_input():
     creds = {"email": "test@example.com", "password": "secure123", "flow": "session"}
     return RequestInput(**creds)
 
+async def mock_request(
+    test_app, method: str = "GET",
+    path: str = "/",
+    headers: dict | None = None,
+    query: dict | None = None,
+    body: dict | bytes | None = None,
+    session: dict | bytes | None = None,
+) -> PyonirRequest:
+    from starlette.requests import Request as StarletteRequest
+    import json
+    from urllib.parse import urlencode
+
+    csrf_config = {'csrf_secret': 'test_secret', 'csrf_field_name': 'csrf_token'}
+    if isinstance(body, dict):
+        body_bytes = json.dumps(body).encode()
+    elif isinstance(body, bytes):
+        body_bytes = body
+    else:
+        body_bytes = b""
+
+    async def receive():
+        return {
+            "type": "http.request",
+            "body": body_bytes,
+            "more_body": False,
+        }
+
+    scope = {
+        "type": "http",
+        "http_version": "1.1",
+        "method": method,
+        "path": path,
+        "scheme": "http",
+        "client": ("testclient", 50000),
+        "server": ("testserver", 80),
+        "headers": [
+            (k.lower().encode(), v.encode())
+            for k, v in (headers or {}).items()
+        ],
+        "state":{"csrf_config": csrf_config},
+        "query_string": urlencode(query or {}).encode(),
+        "session": session or {},
+    }
+
+    req = PyonirRequest(StarletteRequest(scope, receive), test_app)
+    await req.set_request_input()
+    return req
 
 @pytest.fixture(scope="session")
 def test_pyonir_db(test_app) -> PyonirMockDataBaseService:

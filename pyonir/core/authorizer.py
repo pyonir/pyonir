@@ -493,6 +493,10 @@ class PyonirUser(BaseSchema, table_name='users'):
         return self.meta and self.meta.email or ''
 
     @property
+    def password(self) -> str:
+        return self.meta and self.meta.password or ''
+
+    @property
     def perms(self) -> list[PermissionLevel]:
         """Returns the permissions for the user based on their role"""
         user_role = getattr(Roles, self.role.name.upper())
@@ -524,32 +528,97 @@ class PyonirUser(BaseSchema, table_name='users'):
         return Role(name=role_value, perms=[]) if r is None else r
 
 class RequestInput(BaseSchema):
-    email: str = ''
-    """User's email address is required for login"""
-
-    password: str = ''
-    """User's password for login is optional, can be empty for SSO"""
-
-    bearer_token: str = ''
-    """User auth token"""
-
-    session_id: str = ''
-    """User session id"""
-
-    remember_me: bool = False
-    """Flag to remember user session, defaults to False"""
-
-    flow: AuthMethod = AuthMethod.NONE
-    """Authentication flow type"""
-
     body: Dict = {}
-    """Request body data"""
-
+    headers: Dict = {}
+    session: Dict = {}
     files: list = []
-    """Uploaded files in the request"""
-
     jwt: dict = {}
-    """Decoded JWT token data"""
+
+    # ---------- Body ----------
+
+    @property
+    def email(self) -> str:
+        if self.basic_credentials:
+            return self.basic_credentials[0]
+        return self.body.get("email", "")
+
+    @property
+    def password(self) -> str:
+        if self.basic_credentials:
+            return self.basic_credentials[1]
+        return self.body.get("password", "")
+
+    @property
+    def remember_me(self) -> bool:
+        return self.body.get("remember_me", False)
+
+    # ---------- Headers ----------
+
+    @property
+    def authorization(self) -> str | None:
+        return self.headers.get("authorization")
+
+    @property
+    def bearer_token(self) -> str | None:
+        auth = self.authorization
+        if not auth:
+            return None
+
+        auth_type, auth_value = auth.split(" ", 1)
+
+        if auth_type.lower() == "bearer":
+            return auth_value
+
+        return None
+
+    @property
+    def basic_credentials(self) -> tuple[str, str] | None:
+        auth = self.authorization
+        if not auth:
+            return None
+
+        auth_type, auth_value = auth.split(" ", 1)
+
+        if auth_type.lower() == "basic":
+            decoded = base64.b64decode(auth_value).decode("utf-8")
+            return tuple(decoded.split(":", 1))
+
+        return None
+
+    # ---------- Session ----------
+
+    @property
+    def session_id(self) -> str | None:
+        print(f"Session data in request input: {self.session}")
+        if not self.pyonir_app:
+            return None
+        session_key = self.pyonir_app.session_key or "pyonir_session"
+        _session_id = self.session.get(session_key)
+        _jwt = decode_jwt(_session_id, self.pyonir_app.salt)
+        if _jwt:
+            _session_id = _jwt.get('sub')
+        else:
+            _session_id = None
+        return _session_id
+
+    # ---------- Auth Flow ----------
+
+    @property
+    def flow(self) -> AuthMethod:
+
+        if self.basic_credentials:
+            return AuthMethod.BASIC
+
+        if self.bearer_token:
+            return AuthMethod.BEARER
+
+        if self.session_id:
+            return AuthMethod.SESSION
+
+        if self.email and self.password:
+            return AuthMethod.BODY
+
+        return AuthMethod.NONE
 
     def validate_email(self):
         """Validates the email format"""
@@ -562,68 +631,32 @@ class RequestInput(BaseSchema):
         if not self.password or len(self.password) < 6:
             self._errors.append(INVALID_PASSWORD_MESSAGE)
 
-    @classmethod
-    def from_dict(cls, data: dict) -> 'RequestInput':
-        """Creates a RequestInput instance from a dictionary."""
-        return cls(**data)
+    # ---------- Constructors ----------
 
     @classmethod
-    async def from_request(cls, request: StarletteRequest, pyonir_app: BaseApp = None) -> 'RequestInput':
-        """Extracts user credentials from the incoming request."""
-        pyonir_app: BaseApp = pyonir_app or request.app.pyonir_app
+    async def from_request(
+        cls,
+        request: StarletteRequest,
+        pyonir_app: BaseApp = None
+    ) -> "RequestInput":
+        """Extracts user credentials and request data from the incoming request."""
         headers = dict(request.headers)
-        # cookies = dict(request.cookies)
         session = dict(request.session)
         path_params = dict(request.path_params) or {}
         query_params = dict(request.query_params) or {}
+
         body, files = await preprocess_request_body(request)
 
-        session_key = pyonir_app.session_key or 'pyonir_session'
-        email = body.get('email')
-        password = body.get('password')
-        remember_me = body.get('remember_me', False)
-        _auth_header = headers.get("authorization")
-        _session_id = session.get(session_key)
-        _jwt = None
-        bearer_token = None
-        flow = AuthMethod.NONE
-
-        if _auth_header:
-            auth_type, auth_value = _auth_header.split(" ", 1)
-
-            if auth_type.lower() == "basic":
-                flow = AuthMethod.BASIC
-                decoded = base64.b64decode(auth_value).decode("utf-8")
-                email, password = decoded.split(":", 1)
-
-            elif auth_type.lower() == "bearer":
-                flow = AuthMethod.BEARER
-                # bearer_token = decode_jwt(auth_value, pyonir_app.salt)
-                # email, _ = bearer_token.get('username') if bearer_token else None, None
-
-        elif _session_id:
-            _jwt = decode_jwt(_session_id, pyonir_app.salt)
-            if _jwt:
-                flow = AuthMethod.SESSION
-                _session_id = _jwt.get('sub')
-            else:
-                _session_id = None
-
-        elif email and password and not _auth_header:
-            flow = AuthMethod.BODY
         if path_params or query_params:
             body.update(path_params)
             body.update(query_params)
 
-        return cls(body=body,
-                   files=files,
-                   flow=flow,
-                   jwt=_jwt,
-                   session_id=_session_id,
-                   email=email,
-                   password=password,
-                   remember_me=remember_me,
-                   bearer_token=bearer_token)
+        return cls(
+            body=body,
+            headers=headers,
+            session=session,
+            files=files,
+        )
 
 class PyonirSecurity:
     """Handles route security checks including authentication and authorization."""
@@ -708,9 +741,11 @@ class PyonirSecurity:
     def get_user_profile(self, user_email: str = None) -> Optional[PyonirUser]:
         """Pyonir queries the file system for user account based on the provided credentials"""
         # access user guid from session or email if available
-        uid = self.request.request_input.session_id if self.has_session else generate_user_id(from_email=user_email or self.creds.email, salt=self.pyonir_app.salt)
+        has_session = self.creds.session_id
+        uid = has_session if has_session else generate_user_id(from_email=user_email or self.creds.email, salt=self.pyonir_app.salt)
         # directory path to query a user profile from file system
-        user_account_path = os.path.join(self.pyonir_app.datastore_dirpath, self.user_model.__table_name__, uid or '', 'profile.json')
+        model_file_name = self.user_model._file_name if hasattr(self.user_model, '_file_name') else 'profile.json'
+        user_account_path = os.path.join(self.pyonir_app.datastore_dirpath, self.user_model.__table_name__, uid or '', model_file_name)
         user_account = self.user_model.from_file(user_account_path, app_ctx=self.request.app_ctx_ref.app_ctx) if os.path.exists(user_account_path) else None
         return user_account
 
@@ -823,14 +858,17 @@ class PyonirSecurity:
             _user: PyonirUser = self.get_user_profile(creds.email)
             if not _user: return None
             requested_passw = self.harden_password(salt, creds.password, _user.auth_token)
-            has_valid_creds = check_pass(_user.meta.password, requested_passw)
+            has_valid_creds = check_pass(_user.password, requested_passw)
             return _user if has_valid_creds else None
 
         elif flow == AuthMethod.SESSION:
             # check active session and query user details
             if not self.has_session:
-                return None #self.end_session()
-            return self.get_user_profile()
+                return None
+            _user = self.get_user_profile()
+            if not _user:
+                self.end_session()
+            return _user
 
         elif flow == AuthMethod.BEARER:
             pass
@@ -846,7 +884,7 @@ class PyonirSecurity:
 
     def end_session(self):
         """Ends the user session by clearing the session data."""
-        if self.session:
+        if self.session and self.session.get(self.pyonir_app.session_key):
             del self.session[self.pyonir_app.session_key]
             self.reset_signin_attempts()
         pass
@@ -1229,10 +1267,10 @@ class PyonirAuthService:
         @security.responses:
             account_exists:
                 status_code: 409
-                message: An account with this email already exists. Please use a different email or <a href="/sign-in">Sign In</a>.
+                message: An account with this email already exists. Please use a different email or <a href="/onboard/sign-in">Sign In</a>.
             success:
                 status_code: 201
-                message: Account created successfully with {user.email}.Try signing in to your account. here <a href="/sign-in">Sign In</a>.
+                message: Account created successfully with {user.email}.Try signing in to your account. here <a href="/onboard/sign-in">Sign In</a>.
             error:
                 status_code: 400
                 message: Validation errors occurred. {user.errors}

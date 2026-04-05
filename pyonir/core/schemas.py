@@ -16,7 +16,7 @@ def get_active_user() -> str:
     from pyonir import Site
     active_uid = "pyonir_system"
     if Site and Site.server.is_active and Site.server.request.security.has_session:
-        active_uid = Site.server.request.security.user and Site.server.request.security.user.uid
+        active_uid = Site.server.request.security.user.uid if Site.server.request.security.user else active_uid
     return active_uid
 
 class BaseModel:
@@ -211,12 +211,14 @@ class BaseSchema:
     created_by: str = lambda: get_active_user()
     created_on: datetime = lambda: BaseSchema.generate_date()
     _file_path: str
+    _file_name: str
 
     def __init_subclass__(cls,
                           table_name: Optional[str] = None,
                           unique_keys: Optional[List[str]] = None,
                           foreign_keys: Optional[List[str]] = None,
                           file_name: Optional[str] = None,
+                          is_singleton: bool = False,
                           **kwargs):
         from pyonir.core.mapper import collect_type_hints, unwrap_optional
         fields = collect_type_hints(cls)
@@ -224,7 +226,6 @@ class BaseSchema:
         if table_name:
             setattr(cls, "__table_name__", table_name)
             primary_key = kwargs.get("primary_key", '')
-            dialect_name = kwargs.get("dialect")
             alias = kwargs.get("alias_map", {})
             frozen = kwargs.get("frozen", False)
             foreign_keys = foreign_keys or set()
@@ -295,6 +296,8 @@ class BaseSchema:
             setattr(cls, "_nullable_keys", nullable_keys)
             setattr(cls, "_timestamp_keys", timestamps_keys)
             setattr(cls, "_lookup_table", lookup_table_key)
+            setattr(cls, "_file_name", file_name or cls.__name__.lower())
+            setattr(cls, "_is_singleton", is_singleton)
 
             sqla_table = cls.generate_sqla_table()
             setattr(cls, "_sqla_table", sqla_table)
@@ -310,6 +313,9 @@ class BaseSchema:
         cls = self.__class__
         for field_name, field_type in self.__fields__:
             value = data.get(field_name)
+            default_value = getattr(cls, field_name, None) if value is None else value
+            value = default_value() if callable(default_value) else default_value
+
             if data:
                 custom_mapper_fn = getattr(self, f'map_to_{field_name}', None)
                 type_factory = getattr(cls, field_name, custom_mapper_fn)
@@ -320,9 +326,6 @@ class BaseSchema:
                         value = cls_mapper(value, field_type, type_factory=type_factory, is_fk=True) if not is_nullable else value
                     else:
                         value = coerce_value_to_type(value, field_type, factory_fn=type_factory) if (value is not None) or type_factory else None
-            else:
-                default_value = getattr(cls, field_name, None) if value is None else None
-                value = default_value() if callable(default_value) else default_value
             setattr(self, field_name, value)
         if pkv:
             setattr(self, '__primary_key_value__', int(pkv))
@@ -392,6 +395,15 @@ class BaseSchema:
         """Dataclass post init callback"""
         self._errors = []
         self.validate_fields()
+
+    def update(self, data: object) -> 'BaseSchema':
+        """Update mutable fields of the schema instance."""
+        for key, _ in self.__fields__:
+            curr_value = getattr(self, key, None)
+            nxt_value = get_attr(data, key) or None
+            if nxt_value is not None and curr_value != nxt_value:
+                setattr(self, key, nxt_value)
+        return self
 
     def remove_file(self):
         if hasattr(self, 'file_path'):

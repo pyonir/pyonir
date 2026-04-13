@@ -1,8 +1,4 @@
-import sys
-import types
-
-from pyonir.core.utils import merge_dict, dict_to_class, get_attr, set_attr, set_deep_attr
-from pyonir.core.parser import FILTER_KEY
+from pyonir.core.utils import merge_dict, set_deep_attr
 
 def test_add_nested_from_path():
 

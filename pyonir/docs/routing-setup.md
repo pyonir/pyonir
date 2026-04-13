@@ -4,6 +4,14 @@
 Configuration based routing defined at startup. All routes live in one place — easier for introspection or auto-generation.
 This allows flexibility for functions to be access from virtual routes and registered at startup.
 
+When a file is discovered and file is within a configured api directory, the response will be JSON otherwise its HTML
+When a file is not discovered and app has a configured Route method returns:
+    None response = 404
+    render(TXT) = 200 HTML
+    render(JSON) = 200 JSON
+    Any[data] = 200 JSON
+    
+
 ```python
 def demo_route(user_id: int = 5):
     # perform logic using the typed arguments passed to this function on request

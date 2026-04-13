@@ -4,12 +4,11 @@ import os, sys
 from pyonir.core.parser import DeserializeFile
 
 from pyonir.core.app import BaseApp, Optional
-from pyonir.core.authorizer import PyonirBaseRequest
 from pyonir.core.utils import get_version
 from pyonir.core.app import BaseApp, BasePlugin
 from pyonir.core.database import CollectionQuery
 from pyonir.core.schemas import BaseSchema
-from pyonir.core.server import PyonirServer
+from pyonir.core.server import PyonirServer, PyonirServerResponse, PyonirRequest
 
 # Pyonir settings
 PYONIR_DIRPATH = os.path.abspath(os.path.dirname(__file__))
@@ -26,7 +25,8 @@ __version__: str = "0.0.53"
 Site: Optional[BaseApp] = None
 
 class PyonirFile(DeserializeFile): pass
-class PyonirRequest(PyonirBaseRequest): pass
+# class PyonirRequest(PyonirBaseRequest): pass
+class PyonirResponse(PyonirServerResponse): pass
 class PyonirCollection(CollectionQuery): pass
 class PyonirSchema(BaseSchema): pass
 class PyonirPlugin(BasePlugin): pass

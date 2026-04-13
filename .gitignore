@@ -11,6 +11,7 @@ venv/
 /pyonir/libs/app_setup/.env
 /pyonir/libs/app_setup/plugins
 /pyonir/libs/app_setup/static_site
+/pyonir/libs/app_setup/test_pyonir_datastore
 pip-wheel-metadata/
 *.crt
 *.csr

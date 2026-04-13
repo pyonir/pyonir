@@ -1,5 +1,7 @@
 import json, os, uuid
+import re
 from datetime import datetime
+from enum import StrEnum, IntEnum, Enum
 from typing import Type, Tuple, TypeVar, Any, Optional, List, Set, Dict
 
 from sqlalchemy import Table
@@ -15,8 +17,9 @@ SYSTEM_COLUMN_TYPES = (('created_on', datetime), ('created_by', str))
 def get_active_user() -> str:
     from pyonir import Site
     active_uid = "pyonir_system"
-    if Site and Site.server.is_active and Site.server.request.security.has_session:
-        active_uid = Site.server.request.security.user.uid if Site.server.request.security.user else active_uid
+    user = Site and Site.server.is_active and Site.server.request.security.authenticated_user
+    if user:
+        active_uid = user.uid
     return active_uid
 
 class BaseModel:
@@ -409,15 +412,15 @@ class BaseSchema:
         if hasattr(self, 'file_path'):
             os.remove(self.file_path)
 
-    def save_to_file(self, file_path: str = None):
+    def save_to_file(self, file_path: str = None, with_props: list = None):
         from pyonir.core.utils import create_file
         from pyonir.core.parser import LOOKUP_DATA_PREFIX
         from pyonir import Site
-        from pyonir.core.authorizer import PyonirUser, PyonirUserMeta
+        from pyonir.core.security import PyonirUser, PyonirUserMeta
         if not file_path:
             file_path = self.file_path if self.file_path else f"{self.__class__.__name__.lower()}.json"
         _filename = os.path.basename(file_path).split('.')[0]
-        file_data = self.to_dict(obfuscate=False, with_extras=False)
+        file_data = self.to_dict(obfuscate=False, with_props=with_props)
         active_user_id = get_attr(Site.server.request, 'security.user.uid') or self.created_by
         use_filename_as_pk = active_user_id if isinstance(self, (PyonirUser, PyonirUserMeta)) else _filename
         _pk_value = get_attr(self, getattr(self, '__primary_key__')) or use_filename_as_pk
@@ -448,24 +451,31 @@ class BaseSchema:
 
         return create_file(file_path, file_data)
 
-    def to_dict(self, obfuscate:bool = True, with_extras: bool = False) -> dict:
+    def to_dict(self, obfuscate: bool = True, with_props: list = None) -> dict:
         """Dictionary representing the instance"""
         is_property = lambda attr: isinstance(getattr(self.__class__, attr, None), property)
         obfuscated = lambda attr: obfuscate and hasattr(self,'_private_keys') and attr in (self._private_keys or [])
         is_ignored = lambda attr: attr in ('file_path','file_dirpath') or attr.startswith("_") or is_property(attr) or callable(getattr(self, attr)) or obfuscated(attr)
+
         def process_value(key, value):
             if hasattr(value, 'to_dict'):
-                return value.to_dict(obfuscate=obfuscate)
+                return value.to_dict(obfuscate=obfuscate, with_props=with_props)
             if isinstance(value, property):
                 return getattr(self, key)
             if isinstance(value, (tuple, list, set)):
                 return [process_value(key, v) for v in value]
             if isinstance(value, datetime):
                 return value.isoformat()
+            if isinstance(value, Enum):
+                return value.value
             return value
 
         res = {key: process_value(key, getattr(self, key)) for key, ktype in self.__fields__ if not is_ignored(key) and not obfuscated(key)}
         # save primary key value under a special key for lookup when reconstructing from file
+        if with_props:
+            for prop in with_props:
+                if not obfuscated(prop):
+                    res[prop] = process_value(prop, getattr(self, prop))
         if hasattr(self, '__primary_key_value__'):
             res["__primary_key_value__"] = self.id
         return res
@@ -725,7 +735,7 @@ def generate_sqla(
         stmt = stmt.on_conflict_do_update(
             index_elements=constraint_cols,
             set_=upsert_set,
-            where=where_clause,
+            # where=where_clause,
         )
 
     # RETURNING
@@ -757,3 +767,51 @@ class GenericQueryModel:
 
         setattr(self, "__fields__", fields)
         setattr(self, "__alias__", aliases)
+
+class Graphiti:
+    """
+    Graphiti is a Graphql like method for modeling an object from strings
+    """
+    def __init__(self, query: str = None):
+        self.__query__ = query
+        self.__fields__ = []
+        self.__as_dict__ = {}
+
+    @classmethod
+    def parse_query(cls, query_model: str, data: object = None):
+        if not data:
+            data = Graphiti()
+        rcls = cls()
+        rcls.__query__ = query_model
+        result = {}
+        query_model = query_model[1:len(query_model)-1] if query_model.startswith('{') and query_model.endswith('}') else query_model
+        outer_keys = re.split(r',\s*(?![^{}]*\})', query_model )
+        get_alias = lambda v: v.split(':') if ':' in v else (v,v)
+
+        for outer_key in outer_keys:
+            has_nested = re.findall(r'([\w:]*|[\w.]*|[\w]){(\s?.*)}', outer_key)
+            src_key, outer_key = get_alias(outer_key if not has_nested else '')
+            outer_value = get_attr(data, src_key)
+            if has_nested:
+                for outer_key, inner_keys in has_nested:
+                    src_key, outer_key = get_alias(outer_key)
+                    outer_value = get_attr(data, src_key)
+                    if isinstance(outer_value, list):
+                        outer_value = [Graphiti.parse_query(inner_keys, itm) for itm in outer_value]
+                    else:
+                        outer_value = Graphiti.parse_query(inner_keys, outer_value)
+                    result[outer_key] = outer_value
+                    rcls._add(outer_key, outer_value)
+            else:
+                result[outer_key] = outer_value
+                rcls._add(outer_key, outer_value)
+
+        return rcls
+
+    def _add(self, key, value):
+        self.__fields__.append((key, type(value) if value else None))
+        self.__as_dict__[key] = value
+        setattr(self, key, value)
+
+    def to_dict(self, **kwargs):
+        return {k: getattr(self,k, None) for k, _ in self.__fields__}

@@ -1,8 +1,7 @@
 import os
 
-from pyonir.core import RequestInput
+from pyonir.core.server import PyonirRequestInput
 
-from pyonir import PyonirRequest
 from pyonir.tests.conftest import PyonirMocks
 from pyonir.core.authorizer import (
     PyonirUser,
@@ -15,7 +14,7 @@ from pyonir.core.authorizer import (
 valid_credentials = {"email": "test@example.com", "password": "secure123", "flow": "session"}
 
 
-def test_user_credentials(request_input: RequestInput):
+def test_user_credentials(request_input: PyonirRequestInput):
     """RequestInput.from_dict handles missing email by reporting the invalid-email message."""
     request_input.body["email"] = ""  # Simulate missing email
     request_input._errors = []

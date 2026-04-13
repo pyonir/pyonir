@@ -6,7 +6,7 @@ import pytest, os
 
 from pyonir import Pyonir, BaseSchema, PyonirRequest
 from pyonir.core.database import PyonirDatabaseService, CollectionQuery
-from pyonir.core.authorizer import RequestInput
+from pyonir.core.server import PyonirRequestInput
 from pyonir.core.parser import DeserializeFile
 
 app_setup_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'libs', 'app_setup')
@@ -112,13 +112,13 @@ class PyonirMocks:
 
 @pytest.fixture
 def request_input():
-    """Provide a RequestInput instance matching the test module's usage.
+    """Provide a PyonirRequestInput instance matching the test module's usage.
 
     This constructs the object the same way you had in `test_user.py`:
-    RequestInput(**valid_credentials)
+    PyonirRequestInput(**valid_credentials)
     """
     creds = {"email": "test@example.com", "password": "secure123", "flow": "session"}
-    return RequestInput(**creds)
+    return PyonirRequestInput(**creds)
 
 async def mock_request(
     test_app, method: str = "GET",
@@ -180,7 +180,6 @@ def test_pyonir_db(test_app) -> PyonirMockDataBaseService:
     yield db
 
     db.destroy()
-    shutil.rmtree(db.datastore_path)
 
 @pytest.fixture(scope="session")
 def test_app():

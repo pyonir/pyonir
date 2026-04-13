@@ -9,7 +9,7 @@ from collections.abc import Iterable as ABCIterable, Mapping as ABCMapping, Gene
 from sqlmodel import SQLModel
 
 from pyonir.core.parser import DeserializeFile, LOOKUP_DATA_PREFIX, parse_lookup_path
-from pyonir.core.schemas import GenericQueryModel
+from pyonir.core.schemas import GenericQueryModel, Graphiti
 from pyonir.core.utils import get_attr, deserialize_datestr
 
 
@@ -129,7 +129,7 @@ def func_request_mapper(func: Callable, pyonir_request: 'PyonirRequest') -> dict
     """Map request data to function parameters"""
     from pyonir import PyonirRequest
     from pyonir import Pyonir
-    from pyonir.core.authorizer import PyonirSecurity
+    from pyonir.core.security import PyonirSecurity
     import inspect
     # param_type_map = collect_type_hints(func)
     default_args = pyonir_request.request_input.body
@@ -161,10 +161,13 @@ def func_request_mapper(func: Callable, pyonir_request: 'PyonirRequest') -> dict
 def lookup_fk(value: str, data_dir: str, app_ctx: list):
     is_json = value.strip().startswith(('{','[')) if isinstance(value, str) else False
     lookup_path, query_params, has_attr_path, is_caller = parse_lookup_path(value, base_path=data_dir)
-    is_file_path = os.path.exists(lookup_path)
-    value = json.loads(value) if is_json else DeserializeFile(lookup_path, app_ctx=app_ctx) if is_file_path else value
-    if has_attr_path:
-        value = get_attr(value, has_attr_path)
+    if lookup_path:
+        is_file_path = os.path.exists(lookup_path)
+        value = DeserializeFile(lookup_path, app_ctx=app_ctx) if is_file_path else value
+        if has_attr_path:
+            value = get_attr(value, has_attr_path)
+    if is_json:
+        value = json.loads(value)
     return value
 
 def coerce_value_to_type(value: Any, target_type: Union[type, Tuple[type]], factory_fn: Callable = None) -> Any:
@@ -209,7 +212,7 @@ def cls_mapper(file_obj: Union[dict, DeserializeFile], cls: Union['BaseSchema', 
     app_ctx = Site.app_ctx if Site else []
     data_dir = Site.datastore_dirpath if Site else ''
     is_file = isinstance(file_obj, DeserializeFile)
-    is_generic = isinstance(cls, GenericQueryModel)
+    is_generic = isinstance(cls, (GenericQueryModel, Graphiti))
     is_base = issubclass(cls, BaseSchema) if not is_generic else False
 
     if not file_obj and type_factory:
@@ -223,7 +226,8 @@ def cls_mapper(file_obj: Union[dict, DeserializeFile], cls: Union['BaseSchema', 
         return file_obj
     if hasattr(cls, 'from_value') and callable(getattr(cls, 'from_value')):
         return cls.from_value(file_obj)
-    cls_args = {}
+
+    cls_args = {} if not is_generic else cls
     field_hints = cls.__fields__ if is_base or is_generic else collect_type_hints(cls)
     alias_keymap = cls.__alias__ if hasattr(cls, '__alias__') else {}
     is_frozen = cls.__frozen__ if hasattr(cls, '__frozen__') else False
@@ -245,8 +249,8 @@ def cls_mapper(file_obj: Union[dict, DeserializeFile], cls: Union['BaseSchema', 
             value = get_attr(ds, name_alias or name)
             if value is not None: break
 
-        if value is None:
-            set_attr(cls_args, name, value)
+        if value is None or is_generic:
+            set_attr(cls_args, name, lookup_fk(value, data_dir, app_ctx))
             continue
 
         if (name, hint) in fks:
@@ -263,9 +267,10 @@ def cls_mapper(file_obj: Union[dict, DeserializeFile], cls: Union['BaseSchema', 
         set_attr(cls_args, name, value)
         processed.add(name)
     if is_generic:
-        cls_args.update({'file_name': get_attr(file_obj, 'file_name'),
-                        'file_created_on': get_attr(file_obj, 'file_created_on')})
-        return dict_to_class(cls_args, 'GenericQueryModel')
+        return cls
+        # cls_args.update({'file_name': get_attr(file_obj, 'file_name'),
+        #                 'file_created_on': get_attr(file_obj, 'file_created_on')})
+        # return dict_to_class(cls_args, f'{model_filename}-GenericQueryModel')
     res = cls(**cls_args)
     if pkey is not None:
         setattr(res, '__primary_key_value__', pkey)

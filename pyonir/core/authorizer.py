@@ -10,7 +10,7 @@ from enum import Enum, StrEnum
 from pyonir.core.mapper import func_request_mapper
 from pyonir.core.parser import DeserializeFile, VIRTUAL_ROUTES_FILENAME
 from pyonir.core.schemas import BaseSchema
-from pyonir.core.server import BaseApp, RouteConfig
+from pyonir.core.server import BaseApp, RouteConfig, PyonirServerResponse, PyonirJSONResponse
 from pyonir.core.utils import merge_dict, get_attr, dict_to_class
 from starlette.requests import Request as StarletteRequest
 
@@ -243,7 +243,7 @@ class PyonirBaseRestResponse:
             media_type = JSON_RES
             content = self.to_json()
         self._media_type = media_type
-        return Response(content=content, media_type=media_type) if content else None
+        return Response(content=content, media_type=media_type, status_code=self.status_code) if content else None
 
     def to_dict(self, context_data: dict = None) -> dict:
         """Converts the response to a dictionary."""
@@ -300,7 +300,7 @@ class PyonirBaseRestResponse:
     def build(self):
         """Builds the response object"""
         from starlette.exceptions import HTTPException
-        if self.status_code >= 400:
+        if self.status_code >= 500:
             raise HTTPException(status_code=self.status_code, detail=self.message or "An error occurred")
         self.set_header('Server', 'Pyonir Web Framework')
         res = self.content
@@ -411,6 +411,20 @@ class DefaultPyonirAuthResponses:
     TOO_MANY_REQUESTS = PyonirRestResponse(message="Too many requests. Try again later", status_code=429)
     """PyonirAuthResponse: Indicates too many requests have been made, triggering rate limiting (HTTP 429)."""
 
+    def add(self,response_name: str, message: str, status_code: int, data: dict = None):
+        data = data or {}
+        setattr(self, response_name.upper(), PyonirRestResponse(message=message, status_code=status_code, data=data))
+
+    def add_responses(self, responses: dict):
+        for res_name, res_obj in (responses or {}).items():
+            message = res_obj.get('message', '')
+            status_code = res_obj.get('status_code', 200)
+            data = {}
+            for key, value in res_obj.items():
+                if key.lower() in ('message', 'status_code'): continue
+                data[key] = value
+            self.add(res_name, message, status_code, data)
+
     def load_responses(self, responses: dict):
         """Loads custom responses into the enum."""
         _responses = get_attr(responses, '@security.responses') or {}
@@ -421,7 +435,8 @@ class DefaultPyonirAuthResponses:
             for key, value in res_obj.items():
                 if key.lower() in ('message', 'status_code'): continue
                 data[key] = value
-            setattr(self, res_name.upper(), PyonirRestResponse(message=message, status_code=status_code, data=data))
+            self.add(res_name, message, status_code, data)
+            # setattr(self, res_name.upper(), PyonirRestResponse(message=message, status_code=status_code, data=data))
 
 class AuthenticationTypes(StrEnum):
     BASIC = "basic"
@@ -589,7 +604,6 @@ class RequestInput(BaseSchema):
 
     @property
     def session_id(self) -> str | None:
-        print(f"Session data in request input: {self.session}")
         if not self.pyonir_app:
             return None
         session_key = self.pyonir_app.session_key or "pyonir_session"
@@ -659,39 +673,53 @@ class RequestInput(BaseSchema):
         )
 
 class PyonirSecurity:
-    """Handles route security checks including authentication and authorization."""
     MAX_SIGNIN_ATTEMPTS = 3
     """Maximum number of sign-in attempts allowed before locking the account."""
 
     MAX_LOCKOUT_TIME = 300
     """Time in seconds to lock the account after exceeding sign-in attempts."""
 
-    _user_model: Type[PyonirUser] = PyonirUser
-
     _prefix = f"@security"
 
-    def __init__(self, request: PyonirBaseRequest):
+    _user_model: Optional[PyonirUser] = PyonirUser
+
+    def __init__(self, request: PyonirBaseRequest, route_config: RouteConfig = None):
+        self._user = None
         self._request: PyonirBaseRequest = request
-        self._user: Optional[PyonirUser] = None
+        self._route_config: RouteConfig = route_config
         self._signin_attempts: int = 0
         self._signin_locked_until: str = ''
-        self._redirect_route = '/'
-        self.responses = DefaultPyonirAuthResponses()
+        self._security_configs: dict = None
 
     @property
-    def requires_authentication(self) -> bool:
-        """Indicates if authentication is required for route based on type."""
-        security_data = self.request.file.data.get(self._prefix, {}) if self.request.file else {}
-        auth_type = security_data.get('type','')
-        is_req = auth_type in set(AuthenticationTypes)
-        return is_req
+    def is_denied(self) -> bool:
+        """Checks if the user is authorized to access the route."""
+        user = self.authenticated_user
+        security_configs = self._security_configs or {}
+        requires_basic_auth = bool(security_configs and security_configs.get('type') == 'basic')
+        is_denied = requires_basic_auth and (self.authenticated_user is None)
+        self._user = user
+        return is_denied
+
+    @property
+    def responses(self):
+        return self.request.server_response.responses
+
+    @property
+    def creds(self):
+        return self.request.request_input if self.request else None
+
+    @property
+    def session(self) -> dict:
+        if not self._request or not self._request.session: return {}
+        return self._request.session
 
     @property
     def user_model(self):
         return self._user_model
 
     @property
-    def pyonir_app(self):
+    def pyonir_app(self) -> BaseApp:
         return self.request.pyonir_app
 
     @property
@@ -699,44 +727,79 @@ class PyonirSecurity:
         return self._request if self._request else None
 
     @property
-    def session(self):
-        """Starlette server session"""
-        return self.request.server_request.session if self.request else {}
-
-    @property
     def redirect_to(self):
-        return self.request.request_input.body.get('redirect_to', self._redirect_route)
+        return self.creds.body.get('redirect_to')
 
     @property
-    def user(self) -> Optional[Type[PyonirUser]]:
-        if not self._user:
-            self._user = self.get_authenticated_user(AuthMethod.SESSION)
-        return self._user
+    def authenticated_user(self):
+        if self._user:
+            return self._user
+        flow = self.request.request_input.flow
+        creds = self.creds
 
-    @property
-    def is_denied(self) -> bool:
-        """Checks if the user is authorized to access the route."""
-        if not self.requires_authentication:
-            return False
-        return not self.is_authenticated
+        if flow in {AuthMethod.BASIC, AuthMethod.BODY}:
+            # check creds with datasource
+            _user: PyonirUser = self._get_user_profile(creds.email)
+            if not _user: return None
+            requested_passw = self.harden_password(self.pyonir_app.salt, creds.password, _user.auth_token)
+            has_valid_creds = check_pass(_user.password, requested_passw)
+            return _user if has_valid_creds else None
 
-    @property
-    def is_authenticated(self) -> bool:
-        """Criteria to assert an authenticated user"""
-        return self.user is not None
+        elif flow == AuthMethod.SESSION:
+            # check active session and query user details
+            if not self.session:
+                return None
+            _user = self._get_user_profile()
+            if not _user:
+                self.end_session()
+            return _user
 
-    @property
-    def has_session(self) -> bool:
-        return bool(self.request.request_input.session_id) if self.request.request_input else False
+        elif flow == AuthMethod.BEARER:
+            pass
 
-    @property
-    def signin_attempts(self) -> int:
-        """Returns the current number of sign-in attempts from session."""
-        return self.session.get('signin_attempts', 0)
+        return None
 
-    @property
-    def creds(self):
-        return self.request.request_input
+    def _create_jwt(self, user_id: str = None, user_role: str = '', exp_time=None):
+        """Returns session jwt object based on profile info"""
+        import datetime
+        exp_time = exp_time or self.MAX_LOCKOUT_TIME
+        exp_in = (datetime.datetime.now() + datetime.timedelta(minutes=exp_time)).timestamp()
+        user_jwt = {
+            "sub": user_id,
+            "role": user_role,
+            "remember_for": exp_time,
+            "iat": datetime.datetime.now(),
+            "iss": self.pyonir_app.domain,
+            "exp": exp_in
+            }
+        jwt_token = _encode_jwt(user_jwt, self.pyonir_app.salt)
+        return jwt_token
+
+    def _get_user_profile(self, user_email: str = None) -> Optional[PyonirUser]:
+        """Pyonir queries the file system for user account based on the provided credentials"""
+        # access user guid from session or email if available
+        has_session = self.creds.session_id
+        uid = has_session if has_session else generate_user_id(from_email=user_email or self.creds.email, salt=self.pyonir_app.salt)
+        # directory path to query a user profile from file system
+        model_file_name = getattr(self.user_model, '_file_name', 'profile.json')
+        user_account_path = os.path.join(self.pyonir_app.datastore_dirpath, self.user_model.__table_name__, uid or '', model_file_name)
+        user_account = self.user_model.from_file(user_account_path, app_ctx=self.request.app_ctx_ref.app_ctx) if os.path.exists(user_account_path) else None
+        return user_account
+
+    def _reset_signin_attempts(self):
+        """Resets the sign-in attempts counter in the session."""
+        if self.session:
+            if 'signin_attempts' in self.session:
+                del self.session['signin_attempts']
+            if 'signin_locked_until' in self.session:
+                del self.session['signin_locked_until']
+
+    def end_session(self):
+        """Ends the user session by clearing the session data."""
+        if self.session and self.session.get(self.pyonir_app.session_key):
+            del self.session[self.pyonir_app.session_key]
+            self._reset_signin_attempts()
+        pass
 
     def get_user_profile(self, user_email: str = None) -> Optional[PyonirUser]:
         """Pyonir queries the file system for user account based on the provided credentials"""
@@ -751,32 +814,8 @@ class PyonirSecurity:
 
     def create_session(self, user: PyonirUser):
         """Creates a user session for the authenticated user."""
-        user_jwt = self.create_jwt(user_id=user.uid, user_role=user.role.name, exp_time=1440 if self.creds.remember_me else 60)
+        user_jwt = self._create_jwt(user_id=user.uid, user_role=user.role.name, exp_time=1440 if self.creds.remember_me else 60)
         self.session[self.pyonir_app.session_key] = user_jwt
-
-    def create_user(self) -> PyonirUser:
-        """Creates a new user instance of user_model based on the provided credentials."""
-        user = self.user_model(meta={'email': self.creds.email,
-                                     'username': self.creds.email.split('@')[0]},)
-        self.secure_user_credentials(user)
-        user._file_path = os.path.join(self.pyonir_app.datastore_dirpath, getattr(user, '__table_name__', ''), user.uid, 'profile.json')
-        return user
-
-    def secure_user_credentials(self, user: PyonirUser = None):
-        """Generates a new auth token for the user."""
-        from starlette_wtf import csrf_token
-        if not user:
-            user = self.user
-        auth_token, hashed_password = self.secure_credentials(self.creds.password)
-        user.auth_token = auth_token
-        user.meta.password = hashed_password
-
-    def secure_credentials(self, password: str) -> Tuple[str, str]:
-        """Generates a new auth token and hashes the password."""
-        from starlette_wtf import csrf_token
-        auth_token = csrf_token(self.request.server_request)
-        hashed_password = hash_password(self.harden_password(self.pyonir_app.salt, password, token=auth_token))
-        return auth_token, hashed_password
 
     def has_signin_exceeded(self) -> bool:
         """Checks if the maximum sign-in attempts have been exceeded."""
@@ -825,56 +864,6 @@ class PyonirSecurity:
             if 'signin_locked_until' in self.session:
                 del self.session['signin_locked_until']
 
-    def create_jwt(self, user_id: str = None, user_role: str = '', exp_time=None):
-        """Returns session jwt object based on profile info"""
-        import datetime
-        exp_time = exp_time or self.MAX_LOCKOUT_TIME
-        exp_in = (datetime.datetime.now() + datetime.timedelta(minutes=exp_time)).timestamp()
-        user_jwt = {
-            "sub": user_id,
-            "role": user_role,
-            "remember_for": exp_time,
-            "iat": datetime.datetime.now(),
-            "iss": self.pyonir_app.domain,
-            "exp": exp_in
-            }
-        jwt_token = _encode_jwt(user_jwt, self.pyonir_app.salt)
-        return jwt_token
-
-    @classmethod
-    def set_user_model(cls, model: Type[PyonirUser]):
-        cls._user_model = model
-
-    @abstractmethod
-    def get_authenticated_user(self, flow: AuthMethod = None) -> Optional[PyonirUser]:
-        """Retrieves the user associated with the request based on credentials."""
-        # check user credentials
-        flow = flow or self.request.request_input.flow
-        creds = self.request.request_input
-        salt = self.pyonir_app.salt
-
-        if flow in {AuthMethod.BASIC, AuthMethod.BODY}:
-            # check creds with datasource
-            _user: PyonirUser = self.get_user_profile(creds.email)
-            if not _user: return None
-            requested_passw = self.harden_password(salt, creds.password, _user.auth_token)
-            has_valid_creds = check_pass(_user.password, requested_passw)
-            return _user if has_valid_creds else None
-
-        elif flow == AuthMethod.SESSION:
-            # check active session and query user details
-            if not self.has_session:
-                return None
-            _user = self.get_user_profile()
-            if not _user:
-                self.end_session()
-            return _user
-
-        elif flow == AuthMethod.BEARER:
-            pass
-
-        return None
-
     @staticmethod
     def harden_password(site_salt: str, password: str, token: str):
         """Strengthen all passwords by adding a site salt and token."""
@@ -882,13 +871,235 @@ class PyonirSecurity:
             raise ValueError("site_salt, password, and token must be provided")
         return f"{site_salt}${password}${token}"
 
-    def end_session(self):
-        """Ends the user session by clearing the session data."""
-        if self.session and self.session.get(self.pyonir_app.session_key):
-            del self.session[self.pyonir_app.session_key]
-            self.reset_signin_attempts()
-        pass
+    @classmethod
+    def set_user_model(cls, model):
+        cls._user_model = model
 
+# class _xPyonirSecurity:
+#     """Handles route security checks including authentication and authorization."""
+#     MAX_SIGNIN_ATTEMPTS = 3
+#     """Maximum number of sign-in attempts allowed before locking the account."""
+#
+#     MAX_LOCKOUT_TIME = 300
+#     """Time in seconds to lock the account after exceeding sign-in attempts."""
+#
+#     _user_model: Type[PyonirUser] = PyonirUser
+#
+#     _prefix = f"@security"
+#
+#     def __init__(self, request: PyonirBaseRequest):
+#         self._request: PyonirBaseRequest = request
+#         self._user: Optional[PyonirUser] = None
+#         self._signin_attempts: int = 0
+#         self._signin_locked_until: str = ''
+#         self._redirect_route = '/'
+#
+#     @property
+#     def requires_authentication(self) -> bool:
+#         """Indicates if authentication is required for route based on type."""
+#         security_data = self.request.file.data.get(self._prefix, {}) if self.request.file else {}
+#         auth_type = security_data.get('type','')
+#         is_req = auth_type in set(AuthenticationTypes)
+#         return is_req
+#
+#     @property
+#     def user_model(self):
+#         return self._user_model
+#
+#     @property
+#     def pyonir_app(self):
+#         return self.request.pyonir_app
+#
+#     @property
+#     def request(self) -> PyonirBaseRequest:
+#         return self._request if self._request else None
+#
+#     @property
+#     def redirect_to(self):
+#         return self.request.request_input.body.get('redirect_to', self._redirect_route)
+#
+#     @property
+#     def user(self) -> Optional[Type[PyonirUser]]:
+#         if not self._user:
+#             self._user = self.get_authenticated_user(AuthMethod.SESSION)
+#         return self._user
+#
+#     @property
+#     def is_denied(self) -> bool:
+#         """Checks if the user is authorized to access the route."""
+#         if not self.requires_authentication:
+#             return False
+#         return not self.is_authenticated
+#
+#     @property
+#     def is_authenticated(self) -> bool:
+#         """Criteria to assert an authenticated user"""
+#         return self.user is not None
+#
+#     @property
+#     def has_session(self) -> bool:
+#         return bool(self.request.request_input.session_id) if self.request.request_input else False
+#
+#     @property
+#     def signin_attempts(self) -> int:
+#         """Returns the current number of sign-in attempts from session."""
+#         return self.session.get('signin_attempts', 0)
+#
+#     @property
+#     def creds(self):
+#         return self.request.request_input
+#
+#     def get_user_profile(self, user_email: str = None) -> Optional[PyonirUser]:
+#         """Pyonir queries the file system for user account based on the provided credentials"""
+#         # access user guid from session or email if available
+#         has_session = self.creds.session_id
+#         uid = has_session if has_session else generate_user_id(from_email=user_email or self.creds.email, salt=self.pyonir_app.salt)
+#         # directory path to query a user profile from file system
+#         model_file_name = self.user_model._file_name if hasattr(self.user_model, '_file_name') else 'profile.json'
+#         user_account_path = os.path.join(self.pyonir_app.datastore_dirpath, self.user_model.__table_name__, uid or '', model_file_name)
+#         user_account = self.user_model.from_file(user_account_path, app_ctx=self.request.app_ctx_ref.app_ctx) if os.path.exists(user_account_path) else None
+#         return user_account
+#
+#     def create_session(self, user: PyonirUser):
+#         """Creates a user session for the authenticated user."""
+#         user_jwt = self.create_jwt(user_id=user.uid, user_role=user.role.name, exp_time=1440 if self.creds.remember_me else 60)
+#         self.session[self.pyonir_app.session_key] = user_jwt
+#
+#     def create_user(self) -> PyonirUser:
+#         """Creates a new user instance of user_model based on the provided credentials."""
+#         user = self.user_model(meta={'email': self.creds.email,
+#                                      'username': self.creds.email.split('@')[0]},)
+#         self.secure_user_credentials(user)
+#         user._file_path = os.path.join(self.pyonir_app.datastore_dirpath, getattr(user, '__table_name__', ''), user.uid, 'profile.json')
+#         return user
+#
+#     def secure_user_credentials(self, user: PyonirUser = None):
+#         """Generates a new auth token for the user."""
+#         from starlette_wtf import csrf_token
+#         if not user:
+#             user = self.user
+#         auth_token, hashed_password = self.secure_credentials(self.creds.password)
+#         user.auth_token = auth_token
+#         user.meta.password = hashed_password
+#
+    # def secure_credentials(self, password: str) -> Tuple[str, str]:
+    #     """Generates a new auth token and hashes the password."""
+    #     from starlette_wtf import csrf_token
+    #     auth_token = csrf_token(self.request.server_request)
+    #     hashed_password = hash_password(self.harden_password(self.pyonir_app.salt, password, token=auth_token))
+    #     return auth_token, hashed_password
+#
+#     def has_signin_exceeded(self) -> bool:
+#         """Checks if the maximum sign-in attempts have been exceeded."""
+#         _signin_attempts = self.session.get('signin_attempts', 0)
+#         time_remaining, lockout_expired = self.get_lockout_time()
+#         max_attempt_exceeded = _signin_attempts >= self.MAX_SIGNIN_ATTEMPTS
+#         is_spamming = max_attempt_exceeded and time_remaining
+#         if is_spamming or max_attempt_exceeded:
+#             return True
+#         return False
+#
+#     def set_signin_attempt(self):
+#         """Increments the sign-in attempts counter in the session."""
+#         if self.request.server_request:
+#             current_attempts = self.request.server_request.session.get('signin_attempts', 0)
+#             self.request.server_request.session['signin_attempts'] = current_attempts + 1
+#
+#     def set_timeout_signin(self):
+#         """Locks the sign-in attempts for a specified duration."""
+#         import time
+#         self._signin_locked_until = time.time() + self.MAX_LOCKOUT_TIME
+#         self.session['signin_locked_until'] = self._signin_locked_until
+#
+#     def get_lockout_time(self) -> Tuple[str, bool]:
+#         """Checks if lockout time has expired to allow signin"""
+#         import time
+#         if not self.request.server_request: return '', False
+#         lock_timeout = self.session.get('signin_locked_until', 0)
+#         if lock_timeout:
+#             now = time.time()
+#             time_remaining = lock_timeout - now
+#             fmt_remaining = format_time_remaining(time_remaining)
+#             print(fmt_remaining)
+#             if time_remaining <= 0:
+#                 print("lockout time expired!!")
+#                 self.reset_signin_attempts()
+#                 return fmt_remaining, True
+#             return fmt_remaining, False
+#         return '', False
+#
+#     def reset_signin_attempts(self):
+#         """Resets the sign-in attempts counter in the session."""
+#         if self.session:
+#             if 'signin_attempts' in self.session:
+#                 del self.session['signin_attempts']
+#             if 'signin_locked_until' in self.session:
+#                 del self.session['signin_locked_until']
+#
+#     def create_jwt(self, user_id: str = None, user_role: str = '', exp_time=None):
+#         """Returns session jwt object based on profile info"""
+#         import datetime
+#         exp_time = exp_time or self.MAX_LOCKOUT_TIME
+#         exp_in = (datetime.datetime.now() + datetime.timedelta(minutes=exp_time)).timestamp()
+#         user_jwt = {
+#             "sub": user_id,
+#             "role": user_role,
+#             "remember_for": exp_time,
+#             "iat": datetime.datetime.now(),
+#             "iss": self.pyonir_app.domain,
+#             "exp": exp_in
+#             }
+#         jwt_token = _encode_jwt(user_jwt, self.pyonir_app.salt)
+#         return jwt_token
+#
+#     @classmethod
+#     def set_user_model(cls, model: Type[PyonirUser]):
+#         cls._user_model = model
+#
+#     @abstractmethod
+#     def get_authenticated_user(self, flow: AuthMethod = None) -> Optional[PyonirUser]:
+#         """Retrieves the user associated with the request based on credentials."""
+#         # check user credentials
+#         flow = flow or self.request.request_input.flow
+#         creds = self.request.request_input
+#         salt = self.pyonir_app.salt
+#
+#         if flow in {AuthMethod.BASIC, AuthMethod.BODY}:
+#             # check creds with datasource
+#             _user: PyonirUser = self.get_user_profile(creds.email)
+#             if not _user: return None
+#             requested_passw = self.harden_password(salt, creds.password, _user.auth_token)
+#             has_valid_creds = check_pass(_user.password, requested_passw)
+#             return _user if has_valid_creds else None
+#
+#         elif flow == AuthMethod.SESSION:
+#             # check active session and query user details
+#             if not self.has_session:
+#                 return None
+#             _user = self.get_user_profile()
+#             if not _user:
+#                 self.end_session()
+#             return _user
+#
+#         elif flow == AuthMethod.BEARER:
+#             pass
+#
+#         return None
+#
+#     @staticmethod
+#     def harden_password(site_salt: str, password: str, token: str):
+#         """Strengthen all passwords by adding a site salt and token."""
+#         if not site_salt or not password or not token:
+#             raise ValueError("site_salt, password, and token must be provided")
+#         return f"{site_salt}${password}${token}"
+#
+#     def end_session(self):
+#         """Ends the user session by clearing the session data."""
+#         if self.session and self.session.get(self.pyonir_app.session_key):
+#             del self.session[self.pyonir_app.session_key]
+#             self.reset_signin_attempts()
+#         pass
+#
 
 class PyonirBaseRequest:
     PAGINATE_LIMIT: int = 6
@@ -899,9 +1110,9 @@ class PyonirBaseRequest:
         self.file: Optional[DeserializeFile] = None
         self.file_resolver: Optional[Callable] = None
         self.server_request: StarletteRequest = server_request
-        self.server_response: PyonirRestResponse = PyonirRestResponse()
-        self.security: Optional[PyonirSecurity] = PyonirSecurity(self)
+        self.server_response: PyonirServerResponse = PyonirServerResponse()
         self.request_input: RequestInput = RequestInput() if not server_request else None
+        self.security: Optional[PyonirSecurity] = PyonirSecurity(self)
 
         # path params
         self.host = str(server_request.base_url).rstrip('/') if server_request else app.host
@@ -972,7 +1183,7 @@ class PyonirBaseRequest:
     @property
     def user(self) -> Optional[Type[PyonirUser]]:
         """Returns the authenticated user for the current request"""
-        return self.security.user
+        return self.security.authenticated_user
 
     @property
     def session_token(self):
@@ -993,47 +1204,85 @@ class PyonirBaseRequest:
         file_redirect = self.request_input.body.get('redirect_to', self.request_input.body.get('redirect'))
         return file_redirect
 
+    def add_page_context(self, context: dict):
+        """Safely adds context data onto existing page file"""
+        if not self.file:
+            raise AttributeError("Page file was not discovered.")
+        self.file.data.update(context)
+        self.file.apply_filters()
+
     def redirect(self, url: str, code: int = 302) -> PyonirRestResponse:
         """Redirects web request to the provided route or redirect_to value"""
         self.file = None
-        return self.server_response.set_redirect_response(url, code=code)
+        return self.server_response.set_redirect(url, code=code)
 
-    async def build_response(self, route: RouteConfig) -> Any:
-        """Builds the server response for the current request by executing the route function and processing the file."""
-        route_func = self.file_resolver or route.func
-        root_static_file_request = self.is_static and route.is_index
-        if callable(route_func) and self.pyonir_app.is_dev:
-            route_func = self.pyonir_app.reload_module(route_func, reload=True)
-        is_async = inspect.iscoroutinefunction(route_func)
-        route_func_response = None
+    def render(self,
+               media_type: Union[TEXT_RES, JSON_RES, EVENT_RES] = None,
+               data: Any = None,
+               status_code: int = 200, template: str = None
+               ) -> PyonirResponse:
+        """Renders web response object based on parameters"""
+        res = PyonirServerResponse(status_code=status_code, media_type=JSON_RES if self.is_api else None)
+        res._pyonir_request = self
 
-        if callable(route_func) and not root_static_file_request:
-            args = func_request_mapper(route_func, self)
-            self.server_response.status_code = 200
-            route_func_response = await route_func(**args) if is_async else route_func(**args)
+        if not data: return res
 
-        # Perform redirects
-        if self.redirect_to:
-            return self.server_response.set_redirect_response(self.redirect_to).build()
+        if not self.file:
+            self.file = DeserializeFile('')
+            self.file.data = {
+                "url": self.url,
+                "slug": self.slug,
+            }
 
-        # Execute plugins hooks initial request
-        await self.pyonir_app.plugin_manager.run_async_plugins(PyonirHooks.ON_REQUEST, self)
+        if isinstance(data, dict) and template is not None:
+            data['template'] = template
+            self.add_page_context(data)
 
-        if isinstance(route_func_response, PyonirRestResponse):
-            return route_func_response.build()
+        html = self.file.output_html(self)
+        json_data = self.file.data
+        if self.is_api or media_type == JSON_RES:
+            res.set_json(json_data)
+        elif media_type == TEXT_RES:
+            res.set_html(html)
 
-        if self.is_sse:
-            self.server_response.set_stream(route_func_response)
-        elif self.is_api:
-            if route_func_response is not None and self.file.file_exists and self.method == 'GET':
-                self.file.data['router_content'] = route_func_response
-                route_func_response = None
-            self.server_response.set_json(route_func_response or self.file.data)
-        elif self.is_static: # allow route functions to return file responses for static files
-            self.server_response.set_file_response(route_func_response)
-        else:
-            self.server_response.set_html(self.file.output_html(self))
-        return self.server_response.build()
+        return res
+
+    # async def _xbuild_response(self, route: RouteConfig) -> Any:
+    #     """Builds the server response for the current request by executing the route function and processing the file."""
+    #     route_func = self.file_resolver or route.func
+    #     root_static_file_request = self.is_static and route.is_index
+    #     if callable(route_func) and self.pyonir_app.is_dev:
+    #         route_func = self.pyonir_app.reload_module(route_func, reload=True)
+    #
+    #     has_route_func = callable(route_func) and not root_static_file_request
+    #     if has_route_func:
+    #         is_async = inspect.iscoroutinefunction(route_func) # verify dynamic and static async route funcs
+    #         args = func_request_mapper(route_func, self)
+    #         self.server_response.status_code = 200
+    #         route_func_response = await route_func(**args) if is_async else route_func(**args)
+    #
+    #     # Perform redirects
+    #     if self.redirect_to:
+    #         return self.server_response.set_redirect_response(self.redirect_to).build()
+    #
+    #     # Execute plugins hooks initial request
+    #     await self.pyonir_app.plugin_manager.run_async_plugins(PyonirHooks.ON_REQUEST, self)
+    #
+    #     if isinstance(route_func_response, PyonirRestResponse):
+    #         return route_func_response.build()
+    #
+    #     if self.is_sse:
+    #         self.server_response.set_stream(route_func_response)
+    #     elif self.is_api:
+    #         if route_func_response is not None and self.file.file_exists and self.method == 'GET':
+    #             self.file.data['router_content'] = route_func_response
+    #             route_func_response = None
+    #         self.server_response.set_json(route_func_response or self.file.data)
+    #     elif self.is_static: # allow route functions to return file responses for static files
+    #         self.server_response.set_file_response(route_func_response)
+    #     else:
+    #         self.server_response.set_html(self.file.output_html(self))
+    #     return self.server_response.build()
 
     async def set_request_input(self, data: Optional[Dict] = None):
         """Sets the request input data from the web request. This gathers credentials and query parameters into a single RequestInput object."""
@@ -1106,10 +1355,8 @@ class PyonirBaseRequest:
                     self.set_file_resolver()
                     return None
         if not virtual_path:
-            error_page = DeserializeFile('404_ERROR')
-            error_page.data = self.render_error()
             self.server_response.status_code = 404
-            self.file = error_page
+            if self.is_static: return
         else:
             virtual_route.replay_retry()
             self.file = virtual_route
@@ -1258,7 +1505,7 @@ class PyonirAuthService:
         return str(filepath)
 
     @staticmethod
-    async def sign_up(request: PyonirBaseRequest) -> PyonirRestResponse:
+    async def sign_up(request: PyonirBaseRequest) -> PyonirJSONResponse:
         """
         Handles the user sign-up process for the authentication system.
         ---
@@ -1285,26 +1532,26 @@ class PyonirAuthService:
                 a `response` object to be returned to the client.
 
         Returns:
-            PyonirRestResponse:
+            PyonirJSONResponse:
                 An authentication response containing status, message, and
                 additional data (e.g., user ID or error details).
         """
-        authorizer = request.security
-        if authorizer.creds.is_valid():
-            existing_user = authorizer.get_user_profile()
+        security = request.security
+        if security.creds.is_valid():
+            existing_user = security._get_user_profile()
             if existing_user:
-                response = authorizer.responses.ACCOUNT_EXISTS
+                response = security.responses.ACCOUNT_EXISTS
                 response.status_code = 409
             else:
-                response = authorizer.responses.SERVER_OK
+                response = security.responses.SERVER_OK
         else:
-            response = authorizer.responses.ERROR
+            response = security.responses.ERROR
             response.status_code = 400
 
         return response
 
     @staticmethod
-    async def sign_in(request: PyonirBaseRequest) -> PyonirRestResponse:
+    async def sign_in(request: PyonirBaseRequest) -> PyonirJSONResponse:
         """
         Authenticate a user and return a JWT or session token.
         ---
@@ -1318,26 +1565,26 @@ class PyonirAuthService:
         :param request: PyonirBaseRequest - The web request
         :return: PyonirAuthResponse - A JWT or session token if authentication is successful, otherwise None.
         """
-        authorizer = request.security
-        authorizer.set_signin_attempt()
-        if not authorizer.creds.is_valid():
-            server_response = authorizer.responses.INVALID_CREDENTIALS
+        security = request.security
+        security.set_signin_attempt()
+        if not security.creds.is_valid():
+            server_response = security.responses.INVALID_CREDENTIALS
         else:
-            if authorizer.has_signin_exceeded():
-                server_response = authorizer.responses.TOO_MANY_REQUESTS
+            if security.has_signin_exceeded():
+                server_response = security.responses.TOO_MANY_REQUESTS
             else:
-                _user = authorizer.get_authenticated_user()
+                _user = security.authenticated_user
                 if not _user:
-                    server_response = authorizer.responses.NO_ACCOUNT_EXISTS
+                    server_response = security.responses.NO_ACCOUNT_EXISTS
                 else:
-                    authorizer.create_session(_user)
-                    server_response = authorizer.responses.SUCCESS
-                    authorizer.reset_signin_attempts()
+                    security.create_session(_user)
+                    server_response = security.responses.SUCCESS
+                    security.reset_signin_attempts()
 
         return server_response
 
     @staticmethod
-    async def sign_out(request: PyonirBaseRequest) -> PyonirRestResponse:
+    async def sign_out(request: PyonirBaseRequest) -> PyonirJSONResponse:
         """
         Invalidate a user's active session or token.
         ---

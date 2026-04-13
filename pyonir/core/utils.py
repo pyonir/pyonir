@@ -3,6 +3,39 @@ from datetime import datetime
 from collections.abc import Generator
 from typing import Optional, Union, Callable, Any, Dict
 
+import re
+import unicodedata
+
+def slugify_filename(method_name: str, ext: str | None = None) -> str:
+    """
+    Convert a method/function name into a URL-safe filename.
+    """
+
+    # normalize unicode
+    name = unicodedata.normalize("NFKD", method_name)
+
+    # convert camelCase to hyphen-case
+    name = re.sub(r'([a-z0-9])([A-Z])', r'\1-\2', name)
+
+    # replace underscores and spaces
+    name = re.sub(r'[_\s]+', '-', name)
+
+    # remove invalid characters
+    name = re.sub(r'[^a-zA-Z0-9\-]', '', name)
+
+    # lowercase
+    name = name.lower()
+
+    # collapse repeated hyphens
+    name = re.sub(r'-{2,}', '-', name)
+
+    # trim
+    name = name.strip('-')
+
+    if ext:
+        return f"{name}.{ext}"
+
+    return name
 
 def get_file_created(file_path: str, platform: str = 'ios') -> datetime:
     from datetime import datetime
@@ -77,7 +110,7 @@ def process_contents(path, app_ctx=None, file_model: any = None) -> object:
         setattr(res, name, pg.to_named_tuple() if hasattr(pg, 'to_named_tuple') else pg)
     return res
 
-def json_serial(obj):
+def json_serial(obj, with_props: list[str] = None):
     """JSON serializer for nested objects not serializable by default jsonify"""
     from datetime import datetime
     if isinstance(obj, datetime):
@@ -85,7 +118,10 @@ def json_serial(obj):
     elif isinstance(obj, Generator) or hasattr(obj, 'mapping'):
         return list(obj)
     elif hasattr(obj, 'to_dict'):
-        return obj.to_dict()
+        return obj.to_dict(with_props=with_props)
+
+def to_json(data: Union[dict, 'DeserializeFile']) -> str:
+    return json.dumps(data, default=json_serial)
 
 def deserialize_datestr(
     datestr: Union[str, datetime],
@@ -222,7 +258,7 @@ def get_attr(row_obj, attr_path=None, default=None, rtn_none=True):
                 targetObj = getattr(row_obj, key, None)
             pass
     if targetObj is None and rtn_none:
-        return default or None
+        return default if default is not None else None
 
     return targetObj
 
@@ -367,16 +403,6 @@ def dict_to_class(data: dict, name: Union[str, callable] = None, deep: bool = Tr
 
     return instance
 
-def parse_query_model_to_object(model_fields: str) -> object:
-    if not model_fields: return None
-    mapper = {}
-    params = {"_orm_options": {'mapper': mapper},'file_created_on': None, 'file_name': None}
-    for k in model_fields.split(','):
-        if ':' in k:
-            k,_, src = k.partition(':')
-            mapper[k] = src
-        params[k] = None
-    return type('GenericQueryModel', (object,), params)
 
 def merge_dict(derived: Dict, src: Dict) -> None:
     """

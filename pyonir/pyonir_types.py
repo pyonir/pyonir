@@ -1,3 +1,4 @@
+from abc import abstractmethod
 from dataclasses import dataclass, field
 from enum import unique, Enum
 from typing import Any, Dict, Generator, Optional, Union, Callable, List, Tuple, Iterator
@@ -115,7 +116,7 @@ class BasePagination:
     def __iter__(self) -> Iterator[DeserializeFile]:
         return iter(self.items)
 
-    def to_dict(self) -> dict:
+    def to_dict(self, **kwargs) -> dict:
         from pyonir.core.utils import json_serial
         return {
             "limit": self.limit,

@@ -268,22 +268,15 @@ class DeserializeFile:
             file_dirname=self.file_dirname,
         )
 
-    def to_dict(self):
+    def to_dict(self,**kwargs):
         """Returns a dictionary representation of the file data"""
-        return {
-            **self.data,
-            "file_name": self.file_name,
-            "file_created_on": self.file_created_on,
-            "file_modified_on": self.file_modified_on,
-            "file_dirname": self.file_dirname,
-        }
+        return {k: v for k,v in self.data.items() if not k.startswith('@')} if self.file_exists else self.data
 
     def output_html(self, req: "PyonirRequest") -> str:
         """Renders and html output"""
         from pyonir import Site
         from pyonir.core.page import BasePage
         from pyonir.core.mapper import cls_mapper
-
 
         # from pyonir.core.mapper import add_props_to_object
         # refresh_model = get_attr(req, 'query_params.rmodel')
@@ -293,14 +286,11 @@ class DeserializeFile:
         Site.TemplateEnvironment.block_pull_cache.clear()
         return html
 
-    def output_json(self, data_value: any = None, as_str=True) -> str:
+    def output_json(self, data_value: any = None) -> str:
         """Outputs a json string"""
-        from .utils import json_serial
-
+        from .utils import to_json
         data = data_value or self
-        # if not as_str:
-        #     return data
-        return json.dumps(data, default=json_serial)
+        return to_json(data)
 
     def generate_static_file(self, page_request=None, rtn_results=False):
         """Generate target file as html or json. Takes html or json content to save"""
@@ -521,7 +511,7 @@ def parse_ref_to_files(filepath, file_name, app_ctx, attr_path: str = None, quer
     from pyonir.core.database import CollectionQuery, DeserializeFile
     from pyonir.core.utils import get_attr
     from pyonir.core.loaders import import_module
-    from pyonir.core.schemas import GenericQueryModel
+    from pyonir.core.schemas import GenericQueryModel, Graphiti
     as_dir = os.path.isdir(filepath)
     if as_dir:
         # use proper app context for path reference outside of scope is always the root level
@@ -535,8 +525,8 @@ def parse_ref_to_files(filepath, file_name, app_ctx, attr_path: str = None, quer
                 pkg, mod = os.path.splitext(generic_model_properties)
                 mod = mod[1:]
                 model = import_module(pkg, callable_name=mod)
-            if not model:
-                model = GenericQueryModel(generic_model_properties)
+            else:
+                model = Graphiti.parse_query(generic_model_properties, None)
 
         collection = CollectionQuery(filepath, app_ctx=app_ctx,
                                      model=model,
@@ -552,9 +542,9 @@ def parse_ref_to_files(filepath, file_name, app_ctx, attr_path: str = None, quer
 
 def parse_lookup_path(value_path: str, base_path: str, rel_base_path: str = None):
     from pyonir.core.utils import parse_url_params
-    if not isinstance(value_path, str):
-        raise TypeError(f"Must be a string value. {value_path}")
-    # base_path = app_ctx[-1:][0] if value_path.startswith(LOOKUP_DATA_PREFIX) else file_contents_dirpath
+    has_lookup = isinstance(value_path, str) and value_path.strip().startswith((LOOKUP_CALLER_PREFIX, LOOKUP_DATA_PREFIX, LOOKUP_DIR_PREFIX))
+    if not has_lookup:
+        return None, None, None, None
     _query_params = value_path.split("?").pop() if "?" in value_path else False
     query_params = parse_url_params(_query_params) if _query_params else {}
     has_attr_path = value_path.split("#")[-1] if "#" in value_path else ''
@@ -581,7 +571,6 @@ def process_lookups(value_str: str, file_ctx: DeserializeFile = None) -> Optiona
 
     value_str = value_str.strip()
     has_lookup = value_str.startswith((LOOKUP_DIR_PREFIX, LOOKUP_DATA_PREFIX, LOOKUP_CALLER_PREFIX))
-
 
     if has_lookup:
         from pyonir.core.utils import parse_url_params

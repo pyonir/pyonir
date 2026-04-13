@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 from typing import Optional, Generator, List, Callable
 
@@ -248,7 +249,7 @@ class Base:
     def generate_resolvers(self, cls: callable, namespace: str = '', output_dirpath: str = None):
         """Automatically generate api endpoints from service class or module."""
         import textwrap, inspect, datetime
-        from pyonir.core.utils import create_file
+        from pyonir.core.utils import create_file, slugify_filename
 
         def process_docs(meth: callable):
             docs = meth.__doc__
@@ -263,6 +264,13 @@ class Base:
         {meta}
         ===
         {docs}
+        """).strip()
+        resolver_js_template = textwrap.dedent("""\
+        /* {generated_date}
+        {docs}
+        */
+        const {service_name} = {services}
+        ===
         """).strip()
 
         name = ''
@@ -286,19 +294,25 @@ class Base:
         default_output_path = os.path.join(self.contents_dirpath, self.API_DIRNAME)
         output_dirpath = output_dirpath or default_output_path
         output_dirpath = os.path.join(output_dirpath, self.GENERATED_API_DIRNAME, namespace)
+        endpoint = self.endpoint or self.API_ROUTE
 
-        print(f"Generating {name} API endpoint {self.endpoint} definitions for:")
+        print(f"Generating {name} API endpoint {endpoint} definitions for:")
+        services = []
         for meth_name in endpoint_meths:
-            file_path = os.path.join(output_dirpath, meth_name+'.md')
+            file_name = slugify_filename(meth_name)
+            file_path = os.path.join(output_dirpath, file_name+'.md')
             method_import_path = call_path_fn(meth_name)
             meth: callable = getattr(cls, meth_name)
-            is_router = hasattr(meth, "_generate_file")
-            meta, docs, *args = meth._generate_file if is_router else process_docs(meth)
+            is_router = getattr(meth, "_generate_file", None)
+            meta, docs, *args = is_router if is_router else process_docs(meth)
             if not meta: continue
             meta = textwrap.dedent(meta.replace('{method_import_path}', method_import_path)).strip()
             m_temp = resolver_template.format(docs=docs, meta=meta, generated_date=datetime.datetime.now())
             create_file(file_path, m_temp)
-            print(f"\t{meth_name} at {file_path}")
+            services.append(f"\n{meth_name}: '{endpoint}/{namespace}/{file_name}'")
+            print(f"\t{meth_name} at {endpoint}/{namespace}/{file_name}")
+        js_temp = resolver_js_template.format(docs=docs, service_name=self.name, services=f"{{{services}}}", generated_date=datetime.datetime.now())
+        print(js_temp)
 
     def query_fs(self, dir_path: str, model_type: any = None, app_ctx = None) -> AbstractFSQuery:
         """Query files in a directory and return instances of the specified model type."""

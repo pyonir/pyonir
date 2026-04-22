@@ -751,67 +751,90 @@ def generate_sqla(
         )
     )
 
-class GenericQueryModel:
-    """A generic model to hold dynamic fields from query strings."""
-    file_created_on: str
-    file_name: str
-    def __init__(self, model_str: str):
-        aliases = {}
-        fields = list()
-        for k in model_str.split(','):
-            if ':' in k:
-                k,_, src = k.partition(':')
-                aliases[k] = src
-            fields.append((k, str))
-            setattr(self, k, '')
-
-        setattr(self, "__fields__", fields)
-        setattr(self, "__alias__", aliases)
+# class GenericQueryModel:
+#     """A generic model to hold dynamic fields from query strings."""
+#     file_created_on: str
+#     file_name: str
+#     def __init__(self, model_str: str):
+#         aliases = {}
+#         fields = list()
+#         for k in model_str.split(','):
+#             if ':' in k:
+#                 k,_, src = k.partition(':')
+#                 aliases[k] = src
+#             fields.append((k, str))
+#             setattr(self, k, '')
+#
+#         setattr(self, "__fields__", fields)
+#         setattr(self, "__alias__", aliases)
 
 class Graphiti:
     """
     Graphiti is a Graphql like method for modeling an object from strings
     """
-    def __init__(self, query: str = None):
-        self.__query__ = query
-        self.__fields__ = []
+    def __init__(self, query: str = None, from_data: object = None, app_ctx: list = None):
+        self.__query__ = Graphiti.parse_query(query) if isinstance(query, str) else query
         self.__as_dict__ = {}
+        self.__app_ctx__ = app_ctx or (None, None, None, None, None)
+        if query and from_data:
+            self._hydrate(from_data)
 
-    @classmethod
-    def parse_query(cls, query_model: str, data: object = None):
-        if not data:
-            data = Graphiti()
-        rcls = cls()
-        rcls.__query__ = query_model
-        result = {}
-        query_model = query_model[1:len(query_model)-1] if query_model.startswith('{') and query_model.endswith('}') else query_model
-        outer_keys = re.split(r',\s*(?![^{}]*\})', query_model )
-        get_alias = lambda v: v.split(':') if ':' in v else (v,v)
+    def create(self, data: Any):
+        if isinstance(data, list):
+            return [Graphiti(self.__query__, from_data=itm, app_ctx=self.__app_ctx__) for itm in data]
+        res = Graphiti(self.__query__, app_ctx=self.__app_ctx__, from_data=data)
+        return res
 
-        for outer_key in outer_keys:
-            has_nested = re.findall(r'([\w:]*|[\w.]*|[\w]){(\s?.*)}', outer_key)
-            src_key, outer_key = get_alias(outer_key if not has_nested else '')
-            outer_value = get_attr(data, src_key)
-            if has_nested:
-                for outer_key, inner_keys in has_nested:
-                    src_key, outer_key = get_alias(outer_key)
-                    outer_value = get_attr(data, src_key)
-                    if isinstance(outer_value, list):
-                        outer_value = [Graphiti.parse_query(inner_keys, itm) for itm in outer_value]
-                    else:
-                        outer_value = Graphiti.parse_query(inner_keys, outer_value)
-                    result[outer_key] = outer_value
-                    rcls._add(outer_key, outer_value)
+    def _hydrate(self, data: Any):
+        from pyonir.core.mapper import lookup_fk
+        _, _, _, _, data_dir = self.__app_ctx__
+        for alias_key, src_key, rt_ref_key, nested in self.__query__:
+            v = get_attr(data, rt_ref_key or src_key)
+            if nested:
+                v = lookup_fk(v, data_dir, self.__app_ctx__) if data_dir else v
+                outer_value = nested.create(v)
+                self._add(alias_key, outer_value)
             else:
-                result[outer_key] = outer_value
-                rcls._add(outer_key, outer_value)
+                # v = get_attr(data, rt_ref_key or src_key)
+                lv = lookup_fk(v, data_dir, self.__app_ctx__) if data_dir else v
+                outer_value = get_attr(lv, src_key) if v != lv else v
+                self._add(alias_key, outer_value)
 
-        return rcls
+        return self
+
+    @staticmethod
+    def get_alias(v: str, gobj: 'Graphiti' = None):
+        """Returns a tuple of strings where the left value is the alias and right is the source"""
+        src_alias, src_key = v.split(':',1) if ':' in v else (v,v)
+        if gobj: gobj.set_alias(src_alias, src_key)
+        return src_alias, src_key
+
+    @staticmethod
+    def parse_query(query_model: str):
+        """deserialize query model"""
+        query_model = query_model[1:len(query_model)-1] if query_model.startswith('{') and query_model.endswith('}') else query_model
+        src_keys = re.split(r',\s*(?![^{}]*\})', query_model )
+        res = []
+        for src_key in src_keys:
+            has_nested = re.findall(r'([\w:]*|[\w.]*|[\w]){(\s?.*)}', src_key)
+            if has_nested:
+                for src_key, inner_keys in has_nested:
+                    alias_key, src_key = Graphiti.get_alias(src_key)
+                    rt_ref_key = src_key.split('.',1)[0] if '.' in src_key else None
+                    res.append((alias_key, src_key, rt_ref_key, Graphiti(inner_keys)))
+            else:
+                alias_key, src_key = Graphiti.get_alias(src_key)
+                rt_ref_key = src_key.split('.',1)[0] if '.' in src_key else None
+                res.append((alias_key, src_key, rt_ref_key, None))
+        return res
+
+    def set_alias(self, src_alias: str, src_key: str):
+        if src_alias != src_key:
+            self.__alias__[src_alias] = src_key
 
     def _add(self, key, value):
-        self.__fields__.append((key, type(value) if value else None))
         self.__as_dict__[key] = value
         setattr(self, key, value)
 
     def to_dict(self, **kwargs):
-        return {k: getattr(self,k, None) for k, _ in self.__fields__}
+        return self.__as_dict__

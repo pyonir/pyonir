@@ -311,8 +311,8 @@ class Base:
             create_file(file_path, m_temp)
             services.append(f"\n{meth_name}: '{endpoint}/{namespace}/{file_name}'")
             print(f"\t{meth_name} at {endpoint}/{namespace}/{file_name}")
-        js_temp = resolver_js_template.format(docs=docs, service_name=self.name, services=f"{{{services}}}", generated_date=datetime.datetime.now())
-        print(js_temp)
+        # js_temp = resolver_js_template.format(docs=docs, service_name=name, services=f"{{{','.join(services)}}}", generated_date=datetime.datetime.now())
+        # print(js_temp)
 
     def query_fs(self, dir_path: str, model_type: any = None, app_ctx = None) -> AbstractFSQuery:
         """Query files in a directory and return instances of the specified model type."""
@@ -323,7 +323,6 @@ class Base:
     def query_files(dir_path: str, app_ctx: tuple, model_type: any = None) -> object:
         from pyonir.core.utils import process_contents
         return process_contents(dir_path, app_ctx, model_type)
-
 
 class BasePlugin(Base):
 
@@ -660,7 +659,7 @@ class BaseApp(Base):
         app_ctx = list(filter(lambda p: p.name == module_path.split('.')[0], self.activated_plugins))
         app_ctx = app_ctx[0] if len(app_ctx) else self
         resolver = app_ctx.reload_resolver(module_path)
-        return resolver
+        return resolver or get_attr(app_ctx, module_path)
 
     def load_static_path(self,url: str, path: str) -> None:
         """Loads a static file path into the application server"""

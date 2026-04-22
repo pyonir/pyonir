@@ -511,7 +511,7 @@ def parse_ref_to_files(filepath, file_name, app_ctx, attr_path: str = None, quer
     from pyonir.core.database import CollectionQuery, DeserializeFile
     from pyonir.core.utils import get_attr
     from pyonir.core.loaders import import_module
-    from pyonir.core.schemas import GenericQueryModel, Graphiti
+    from pyonir.core.schemas import Graphiti
     as_dir = os.path.isdir(filepath)
     if as_dir:
         # use proper app context for path reference outside of scope is always the root level
@@ -521,12 +521,12 @@ def parse_ref_to_files(filepath, file_name, app_ctx, attr_path: str = None, quer
         include_names = tuple(query_params.get('include_names').split('|')) if query_params.get('include_names') else None
         return_all_files = query_params.get('limit','') == '*'
         if generic_model_properties:
-            if '.' in generic_model_properties:
+            if '.' in generic_model_properties and not generic_model_properties.startswith('{'):
                 pkg, mod = os.path.splitext(generic_model_properties)
                 mod = mod[1:]
                 model = import_module(pkg, callable_name=mod)
             else:
-                model = Graphiti.parse_query(generic_model_properties, None)
+                model = Graphiti(generic_model_properties, app_ctx=app_ctx)
 
         collection = CollectionQuery(filepath, app_ctx=app_ctx,
                                      model=model,
@@ -580,7 +580,7 @@ def process_lookups(value_str: str, file_ctx: DeserializeFile = None) -> Optiona
         if is_caller:
             from pyonir import Site
             func = Site.load_function_from_path(lookup_fpath) if Site else None
-            data = func() if callable(func) else None
+            data = func() if callable(func) else func
             return data
 
         if not os.path.exists(lookup_fpath):

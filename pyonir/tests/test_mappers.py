@@ -5,7 +5,7 @@ from typing import Optional, Union, List, Dict
 from datetime import datetime
 
 from pyonir import PyonirRequest, Pyonir
-from pyonir.core.schemas import BaseSchema, GenericQueryModel
+from pyonir.core.schemas import BaseSchema, Graphiti
 
 from pyonir.core.mapper import cls_mapper, dict_to_class
 from pyonir.core.parser import DeserializeFile
@@ -109,7 +109,7 @@ def test_parsely_to_custom_mapping():
 
 
 def test_no_hint_mapping():
-    generic_model = GenericQueryModel('title,url,author,date:file_created_on')
+    generic_model = Graphiti('title,url,author,date:file_created_on')
     obj = {"title": "hunter", "author": "Alice", "url": "/foo", "date": None}
     genmodel = cls_mapper(obj, generic_model)
     assert genmodel.author == "Alice"

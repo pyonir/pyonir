@@ -9,7 +9,7 @@ from collections.abc import Iterable as ABCIterable, Mapping as ABCMapping, Gene
 from sqlmodel import SQLModel
 
 from pyonir.core.parser import DeserializeFile, LOOKUP_DATA_PREFIX, parse_lookup_path
-from pyonir.core.schemas import GenericQueryModel, Graphiti
+from pyonir.core.schemas import Graphiti
 from pyonir.core.utils import get_attr, deserialize_datestr
 
 
@@ -212,8 +212,11 @@ def cls_mapper(file_obj: Union[dict, DeserializeFile], cls: Union['BaseSchema', 
     app_ctx = Site.app_ctx if Site else []
     data_dir = Site.datastore_dirpath if Site else ''
     is_file = isinstance(file_obj, DeserializeFile)
-    is_generic = isinstance(cls, (GenericQueryModel, Graphiti))
+    is_generic = isinstance(cls, Graphiti)
     is_base = issubclass(cls, BaseSchema) if not is_generic else False
+
+    if is_generic:
+        return cls.create(file_obj.data if is_file else file_obj)
 
     if not file_obj and type_factory:
         return type_factory()
@@ -243,14 +246,14 @@ def cls_mapper(file_obj: Union[dict, DeserializeFile], cls: Union['BaseSchema', 
     for name, hint in field_hints:
         if name.startswith("_") or name == "return":
             continue
-        name_alias = get_attr(alias_keymap, name, None)
+        alias_key = get_attr(alias_keymap, name, None)
         # access untyped value from data, file_obj, cls (in that order)
         for ds in (nested_data, data, file_obj, cls):
-            value = get_attr(ds, name_alias or name)
+            value = get_attr(ds, alias_key or name)
             if value is not None: break
 
-        if value is None or is_generic:
-            set_attr(cls_args, name, lookup_fk(value, data_dir, app_ctx))
+        if value is None:
+            set_attr(cls_args, name, value)
             continue
 
         if (name, hint) in fks:
@@ -266,11 +269,7 @@ def cls_mapper(file_obj: Union[dict, DeserializeFile], cls: Union['BaseSchema', 
             value = coerce_value_to_type(value, hint, factory_fn=fn_factory)
         set_attr(cls_args, name, value)
         processed.add(name)
-    if is_generic:
-        return cls
-        # cls_args.update({'file_name': get_attr(file_obj, 'file_name'),
-        #                 'file_created_on': get_attr(file_obj, 'file_created_on')})
-        # return dict_to_class(cls_args, f'{model_filename}-GenericQueryModel')
+
     res = cls(**cls_args)
     if pkey is not None:
         setattr(res, '__primary_key_value__', pkey)

@@ -325,6 +325,11 @@ class PyonirJSONResponse:
         self.data: dict = data or {}
         """Response data, typically a dictionary containing the response payload."""
 
+    @property
+    def is_ok(self) -> bool:
+        """Indicates if the response status code represents a successful request."""
+        return 200 <= self.status_code < 300
+
     def response(self, message: str = None, status_code: int = None,  data: dict = None):
         self.message = message or self.message
         self.status_code = status_code or self.status_code
@@ -467,6 +472,9 @@ class PyonirServerResponse:
         self._data = value
         return self
 
+    def set_headers(self, key, value):
+        self._headers[key] = value
+
     async def setup_security(self, route_config: RouteConfig):
         # TODO: route_config should pass security params to request for more dynamic security checks (e.g. based on route params or query params)
         from .utils import get_attr
@@ -500,7 +508,7 @@ class PyonirServerResponse:
     @classmethod
     async def from_request(cls, pyonir_request: 'PyonirRequest', route_config: RouteConfig) -> PyonirServerResponse:
         pyonir_request.pyonir_app.server.request = pyonir_request
-        res = cls(404)
+        res = pyonir_request.server_response
         res._pyonir_request = pyonir_request
         await pyonir_request.set_request_input()
         await pyonir_request.set_page_file()
@@ -946,7 +954,8 @@ class PyonirRequest:
         custom_response_headers = get_attr(resolver_action, 'headers', {})
 
         if custom_response_headers:
-            self.server_response.set_headers_from_dict(custom_response_headers)
+            for k, v in custom_response_headers.items():
+                self.server_response.set_headers(k,v)
             resolver_action.pop('headers')
 
         self.file.data.update(resolver_action)

@@ -1,6 +1,8 @@
 from typing import Optional, List
 from dataclasses import dataclass
 
+from pyonir.core.mapper import cls_mapper
+
 from pyonir.core.schemas import Graphiti
 
 from pyonir import PyonirSchema
@@ -56,10 +58,32 @@ def test_item():
         ),
         variations=[Color('red',222), Color('blue', 444), Color('green', 999)]
     )
+    another_item = Item(
+        title="Another Item",
+        url="https://example.com",
+        product=Product(
+            price=4.99,
+            weight=1.2
+        ),
+        variations=[Color('red',222), Color('blue', 444), Color('green', 999)]
+    )
 
-    schema = "{title,url,product:item{price:cost,weight:wt},variations{name}}"
-    mock = Graphiti.parse_query(schema, item)
-    print(mock)
+    schema = "{title,url,item:product{cost:price,wt:weight},variations{name}}"
+    schemab = "{num:product.price}"
+    base = Graphiti(schema)
+    itm_one = base.create(item)
+    itm_two = base.create(another_item)
+
+    assert itm_two.item.cost == another_item.product.price
+    pass
+
+
+    # mock = Graphiti.from_query(schema, item)
+    # another_mock = Graphiti.from_query(schema, another_item)
+    # mockb = Graphiti.from_query(schemab, item)
+    #
+    # assert mockb.num == item.product.price
+    # print(mock)
 
 def test_sql_create(test_pyonir_db: PyonirMockDataBaseService):
     email, password = "foo@pyonir.com", "123456"

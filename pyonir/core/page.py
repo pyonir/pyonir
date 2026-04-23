@@ -71,7 +71,7 @@ class BasePage:
 
         return category, subcategories
 
-    def to_dict(self):
+    def to_dict(self, **kwargs):
         cat, sub_cat = self.parse_taxonomy(self.slug)
         res = {"category": cat}
         res.update(self.__dict__)

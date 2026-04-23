@@ -619,7 +619,7 @@ class BaseApp(Base):
     @property
     def frontend_assets_dirpath(self) -> str:
         """Directory location for template related assets"""
-        theme_assets_dirpath = self.themes.active_theme.static_dirpath if self.themes else None
+        theme_assets_dirpath = self.themes.active_theme.static_dirpath if self.themes and self.themes.active_theme else None
         return theme_assets_dirpath or os.path.join(self.frontend_dirpath, self.FRONTEND_ASSETS_DIRNAME)
 
     @property
@@ -646,12 +646,17 @@ class BaseApp(Base):
             return
 
         self.themes = PyonirThemes(themes_dir_path)
-        app_active_theme = self.themes.active_theme
-        if app_active_theme is None:
-            raise ValueError(f"No active theme name {get_attr(self.configs, 'app.theme_name')} found in {self.frontend_dirpath} themes directory. Please ensure a theme is available.")
+        self.TemplateEnvironment.load_template_path(self.themes.themes_dirpath)
+        for n, t in self.themes.available_themes.items():
+            static_route = t.static_route or '/static'
+            self.server.add_static_route(static_route, t.static_dirpath)
+
+        # app_active_theme = self.themes.active_theme
+        # if app_active_theme is None:
+        #     raise ValueError(f"No active theme name '{get_attr(self.configs, 'app.theme_name')}' found in {self.frontend_dirpath} themes directory. Please ensure a theme is available.")
 
         # Load theme templates
-        self.TemplateEnvironment.load_template_path(app_active_theme.jinja_template_path, priority=True)
+        # self.TemplateEnvironment.load_template_path(app_active_theme.jinja_template_path, priority=True)
 
     # RUNTIME
     def load_function_from_path(self, module_path: str) -> Optional[Callable]:

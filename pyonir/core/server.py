@@ -229,7 +229,7 @@ class PyonirServer(Starlette):
         self.route_map[name] = RouteConfig(path=path)
 
     def init_default_static_routes(self):
-        if self.pyonir_app.use_themes:
+        if self.pyonir_app.use_themes and self.pyonir_app.themes.active_theme:
             self.add_static_route(self.pyonir_app.frontend_assets_route, self.pyonir_app.themes.active_theme.static_dirpath)
         else:
             self.add_static_route(self.pyonir_app.frontend_assets_route, self.pyonir_app.frontend_assets_dirpath)

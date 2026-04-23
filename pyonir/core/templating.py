@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from typing import Optional, Dict
 
 from jinja2 import Environment
+from pyonir.core.parser import DeserializeFile
 
 
 class TemplateEnvironment(Environment):
@@ -74,32 +75,40 @@ class TemplateEnvironment(Environment):
 
 @dataclass
 class Theme:
-    _orm_options = {'mapper': {'theme_dirname': 'file_dirname', 'theme_dirpath': 'file_dirpath'}}
     name: str
     theme_dirname: str = ''
     """Directory name for theme folder within frontend/themes directory"""
     theme_dirpath: str = ''
     """Directory path for theme folder within frontend/themes directory"""
-    details: Optional['DeserializeFile'] = None
-    """Represents a theme available in the frontend/themes directory."""
-    _template_dirname = 'templates'
-    _static_dirname = 'static'
+    _templates_dirname = ''
+    _static_dirname = ''
+    _read_me: DeserializeFile = None
 
     def __post_init__(self):
-        self.details = self.readme()
-        for k, v in self.details.data.items():
-            if k in ('static_dirname', 'templates_dirname'):
-                setattr(self, k, v)
+        self._read_me = self.readme()
+
+    @property
+    def details(self):
+        readme = self._read_me
+        return {
+            "name": self.name,
+            **readme.data
+        } if readme else {}
 
     @property
     def static_dirname(self):
         """directory name for theme's jinja templates"""
-        return self.details.data.get('static_dirname', self._static_dirname) if self.details else self._static_dirname
+        return self.details.get('static_dirname', self._static_dirname) if self.details else self._static_dirname
+
+    @property
+    def static_route(self):
+        """directory name for theme's jinja templates"""
+        return self.details.get('static_route')
 
     @property
     def templates_dirname(self):
         """directory name for theme's jinja templates"""
-        return self.details.data.get('templates_dirname', self._template_dirname) if self.details else self._template_dirname
+        return self.details.get('templates_dirname', self._templates_dirname) if self.details else self._templates_dirname
 
     @property
     def static_dirpath(self):
@@ -108,7 +117,8 @@ class Theme:
 
     @property
     def jinja_template_path(self):
-        return os.path.join(self.theme_dirpath, self.templates_dirname)
+        t = os.path.join(self.theme_dirpath, self.templates_dirname)
+        return t if os.path.exists(t) else os.path.join(self.theme_dirpath)
 
     def readme(self):
         """Returns the theme's README.md file content if available"""
@@ -130,7 +140,7 @@ class PyonirThemes:
         if not os.path.exists(theme_dirpath):
             raise ValueError(f"Theme directory {theme_dirpath} does not exist.")
         self.themes_dirpath: str = theme_dirpath # directory path to available site themes
-        self.available_themes: Optional[Dict[str, Theme]] = self.query_themes() # collection of themes available in frontend/themes directory
+        self.available_themes: Dict[str, Theme] = self.query_themes() # collection of themes available in frontend/themes directory
 
     @property
     def active_theme(self) -> Optional[Theme]:
@@ -151,8 +161,7 @@ class PyonirThemes:
             if theme_dir.startswith(BaseApp.IGNORE_WITH_PREFIXES): continue
             theme = Theme(name=theme_dir, theme_dirname=theme_dir,
                           theme_dirpath=os.path.join(self.themes_dirpath, theme_dir))
-            theme._template_dirname = Site.TEMPLATES_DIRNAME
+            theme._templates_dirname = Site.TEMPLATES_DIRNAME
             theme._static_dirname = Site.FRONTEND_ASSETS_DIRNAME
             themes_map[theme_dir] = theme
-        return themes_map if themes_map else None
-
+        return themes_map if themes_map else {}

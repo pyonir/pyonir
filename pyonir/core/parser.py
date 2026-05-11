@@ -85,9 +85,7 @@ class DeserializeFile:
         if not self.text_string:
             ctx_name, ctx_url, contents_dirpath, ssg_path, datastore_path = app_ctx or ("", "", "", "", "",)
             contents_relpath = (
-                file_path.replace(contents_dirpath, "").lstrip("/")
-                if contents_dirpath
-                else ""
+                file_path.replace(contents_dirpath, "").lstrip("/") if contents_dirpath else ""
             )
             contents_dirname = contents_relpath.split("/")[0]
             is_page = contents_dirname == self._routes_dirname
@@ -246,6 +244,11 @@ class DeserializeFile:
             return None
         return CollectionQuery.prev_next(self)
 
+    def to_schema(self):
+        """Returns a schema representation of the file data"""
+        from pyonir.core.mapper import dto_mapper
+        return dto_mapper(self, self.schema) if self.schema and self.data else self.data
+
     def to_named_tuple(self):
         """Returns a tuple representation of the file data"""
         from collections import namedtuple
@@ -276,11 +279,11 @@ class DeserializeFile:
         """Renders and html output"""
         from pyonir import Site
         from pyonir.core.page import BasePage
-        from pyonir.core.mapper import cls_mapper
+        from pyonir.core.mapper import dto_mapper
 
         # from pyonir.core.mapper import add_props_to_object
         # refresh_model = get_attr(req, 'query_params.rmodel')
-        page = cls_mapper(self, self.schema or BasePage)
+        page: BasePage = dto_mapper(self, BasePage)
         Site.apply_globals({"prevNext": self.prev_next, "page": page})
         html = Site.TemplateEnvironment.get_template(page.template).render()
         Site.TemplateEnvironment.block_pull_cache.clear()
@@ -691,10 +694,9 @@ def parse_line(line: str, from_block_str: bool = False, file_ctx: Any = None) ->
             value = deserialize_line(value, container_type=line_type, file_ctx=file_ctx) if value else None
         elif value:
             value += '\n'
-        return line_count, key, line_type, value or None, (is_str_block, is_parent)
+        return line_count, key, line_type, value, (is_str_block, is_parent)
     except Exception as e:
         raise e
-        # return None, None, line.strip(), None, None
 
 def group_tuples_to_objects(items: list[tuple],
                             parent_container: any = None,

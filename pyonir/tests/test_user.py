@@ -1,9 +1,7 @@
-import os
+from copy import deepcopy
 
-from pyonir.core.server import PyonirRequestInput
-
-from pyonir.tests.conftest import PyonirMocks
-from pyonir.core.authorizer import (
+from pyonir.tests.conftest import PyonirMocks, mock_request
+from pyonir.core.security import (
     PyonirUser,
     PyonirUserMeta,
     PermissionLevel,
@@ -14,13 +12,14 @@ from pyonir.core.authorizer import (
 valid_credentials = {"email": "test@example.com", "password": "secure123", "flow": "session"}
 
 
-def test_user_credentials(request_input: PyonirRequestInput):
+async def test_user_credentials(test_app: PyonirMocks.App):
     """RequestInput.from_dict handles missing email by reporting the invalid-email message."""
-    request_input.body["email"] = ""  # Simulate missing email
-    request_input._errors = []
-    request_input.validate_email()
-    assert len(request_input._errors) >= 1
-    assert INVALID_EMAIL_MESSAGE in request_input._errors[0]
+    invalid_creds = deepcopy(valid_credentials)
+    invalid_creds["email"] = ""  # Simulate missing email
+    req = await mock_request(test_app, method="POST", path="/signin", body=invalid_creds)
+    req.request_input.validate_email()
+    assert len(req.request_input._errors) >= 1
+    assert INVALID_EMAIL_MESSAGE in req.request_input._errors[0]
 
 
 def test_user_from_dict(mock_data):
@@ -61,21 +60,23 @@ def test_meta_contains_password_field():
     assert getattr(user.meta, "password", None) == "supersecret"
 
 
-# RequestInput tests using the real RequestInput validators — mutate the shared instance for each test
+async def test_valid_signin(test_app: PyonirMocks.App):
+    print(f"Request input: {valid_credentials}")
+    req = await mock_request(test_app, method="POST", path="/signin", body=valid_credentials)
+    request_input = req.request_input
 
-def test_valid_signin(request_input):
-    request_input.body = valid_credentials
-    request_input._errors = []
     # explicitly re-run validators to be deterministic
     request_input.validate_email()
     request_input.validate_password()
-
+    print(f"Request input errors: {request_input.is_valid()}, {request_input.email}, {request_input._errors}")
     assert request_input.is_valid()
     assert request_input.email == valid_credentials["email"]
     assert request_input.password == valid_credentials["password"]
 
 
-def test_invalid_email_format(request_input):
+async def test_invalid_email_format(test_app: PyonirMocks.App):
+    req = await mock_request(test_app, method="POST", path="/signin", body=valid_credentials)
+    request_input = req.request_input
     request_input.body['email'] = "invalid-email"
     request_input.body['password'] = "secure123"
     request_input._errors = []
@@ -85,7 +86,9 @@ def test_invalid_email_format(request_input):
     assert any(INVALID_EMAIL_MESSAGE in e for e in request_input._errors)
 
 
-def test_empty_email(request_input):
+async def test_empty_email(test_app: PyonirMocks.App):
+    req = await mock_request(test_app, method="POST", path="/signin", body=valid_credentials)
+    request_input = req.request_input
     request_input.body['email'] = ""
     request_input.body['password'] = "secure123"
     request_input._errors = []
@@ -96,7 +99,9 @@ def test_empty_email(request_input):
     assert any(INVALID_EMAIL_MESSAGE in e for e in request_input._errors)
 
 
-def test_empty_password(request_input):
+async def test_empty_password(test_app: PyonirMocks.App):
+    req = await mock_request(test_app, method="POST", path="/signin", body=valid_credentials)
+    request_input = req.request_input
     request_input.body['email'] = "test@example.com"
     request_input.body['password'] = ""
     request_input._errors = []
@@ -107,7 +112,9 @@ def test_empty_password(request_input):
     assert any(INVALID_PASSWORD_MESSAGE in e for e in request_input._errors)
 
 
-def test_short_password(request_input):
+async def test_short_password(test_app: PyonirMocks.App):
+    req = await mock_request(test_app, method="POST", path="/signin", body=valid_credentials)
+    request_input = req.request_input
     request_input.body['email'] = "test@example.com"
     request_input.body['password'] = "12345"
     request_input._errors = []

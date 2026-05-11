@@ -33,7 +33,7 @@ user_data = {
 }
 
 class PyonirMockRole(BaseSchema, table_name='roles_table', primary_key='rid', lookup_table='name'):
-    rid: str = BaseSchema.generate_id
+    rid: str = lambda : BaseSchema.generate_uuid()
     name: str
 
     @classmethod
@@ -42,6 +42,7 @@ class PyonirMockRole(BaseSchema, table_name='roles_table', primary_key='rid', lo
         for role in PyonirMockRoles.all():
             _file_dirpath = str(os.path.join(dbc.datastore_path, role.__table_name__))
             role._file_path = os.path.join(_file_dirpath, role.name+'.json')
+            dbc.insert(role)
             if not os.path.exists(role.file_path):
                 role.save_to_file()
 
@@ -62,7 +63,7 @@ class PyonirMockRoles:
         return [role for role in vars(cls).values() if isinstance(role, PyonirMockRole)]
 
 class PyonirMockStatus(BaseSchema, table_name='statuses_table', primary_key='sid', lookup_table='name'):
-    sid: str = BaseSchema.generate_id
+    sid: str = BaseSchema.generate_uuid
     name: str = lambda : "unknown"
 
     @classmethod
@@ -84,7 +85,7 @@ class PyonirMockStatuses:
         return [status for status in vars(cls).values() if isinstance(status, PyonirMockStatus)]
 
 class PyonirMockUser(BaseSchema, table_name='pyonir_users', primary_key='uid', foreign_keys={PyonirMockRole}, fk_options={"role": {"ondelete": "RESTRICT", "onupdate": "RESTRICT"}}):
-    uid: str = BaseSchema.generate_id
+    uid: str = BaseSchema.generate_uuid
     username: str
     email: str
     gender: Optional[str] = "godly"
@@ -120,8 +121,13 @@ def request_input():
     creds = {"email": "test@example.com", "password": "secure123", "flow": "session"}
     return PyonirRequestInput(**creds)
 
+
+def pytest_configure(config):
+    config.option.asyncio_mode = "auto"
+
 async def mock_request(
-    test_app, method: str = "GET",
+    test_app,
+    method: str = "GET",
     path: str = "/",
     headers: dict | None = None,
     query: dict | None = None,
@@ -134,7 +140,7 @@ async def mock_request(
 
     csrf_config = {'csrf_secret': 'test_secret', 'csrf_field_name': 'csrf_token'}
     if isinstance(body, dict):
-        body_bytes = json.dumps(body).encode()
+        body_bytes = json.dumps({**body}).encode()
     elif isinstance(body, bytes):
         body_bytes = body
     else:
@@ -168,7 +174,7 @@ async def mock_request(
     await req.set_request_input()
     return req
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="module")
 def test_pyonir_db(test_app) -> PyonirMockDataBaseService:
     """
     Session-scoped fixture providing a global mock database service.
@@ -180,6 +186,7 @@ def test_pyonir_db(test_app) -> PyonirMockDataBaseService:
     yield db
 
     db.destroy()
+    shutil.rmtree(db.datastore_path)
 
 @pytest.fixture(scope="session")
 def test_app():

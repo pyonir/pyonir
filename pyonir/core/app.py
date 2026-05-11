@@ -726,7 +726,7 @@ class BaseApp(Base):
         """Generates Static website"""
         import time
         from pyonir.core.utils import create_file, copy_assets, PrntColrs
-        from pyonir.core.authorizer import PyonirBaseRequest
+        from pyonir.core.server import PyonirRequest
         from pyonir.core.parser import DeserializeFile
         from pyonir.core.database import query_fs
         self.SSG_IN_PROGRESS = True
@@ -739,7 +739,7 @@ class BaseApp(Base):
             print(f"{PrntColrs.OKCYAN}3. Generating Static Pages")
 
             self.TemplateEnvironment.globals['is_ssg'] = True
-            ssg_req = PyonirBaseRequest(None, self)
+            ssg_req = PyonirRequest(None, self)
             start_time = time.perf_counter()
             # query all pages
             all_pages: Generator[DeserializeFile] = query_fs(self.pages_dirpath, app_ctx=self.app_ctx, model='file', exclude_dirs=exclude_routes)
@@ -748,7 +748,7 @@ class BaseApp(Base):
             for pgfile in all_pages:
                 ssg_req.url = pgfile.data.get('url')
                 ssg_req.slug = pgfile.data.get('slug')
-                if ssg_req.slug.startswith(exclude_routes): continue
+                if ssg_req.slug.startswith(exclude_routes or tuple()): continue
                 virtual_file, virtual_url = ssg_req.get_virtual_route()
                 # if virtual_file: ssg_req.ssg_request(pgfile, virtual_file.data)
                 try:

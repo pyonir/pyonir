@@ -18,6 +18,7 @@ from starlette.staticfiles import StaticFiles
 from pyonir import BaseSchema, BaseApp
 from pyonir.core.parser import DeserializeFile
 from pyonir.core.mapper import func_request_mapper
+from pyonir.core.schemas import BaseModel
 from pyonir.pyonir_types import PyonirRoute, PyonirHooks
 from pyonir.core.utils import merge_dict, dict_to_class, to_json
 from starlette.requests import Request as StarletteRequest
@@ -208,7 +209,7 @@ class PyonirServer(Starlette):
         if new_route.is_static:
             self.add_static_route(new_route.route, new_route.static_path)
         elif new_route.use_ws:
-            self.add_websocket_route(new_route.route, new_route.func, new_route.name)
+            self.add_websocket_route(new_route.route, route_func_wrapper, new_route.name)
         else:
             self.add_route(path=new_route.route, route=route_func_wrapper, methods=new_route.methods, **new_route.params)
 
@@ -425,6 +426,10 @@ class PyonirJSONResponses:
             self.add(res_name, message, status_code, data)
 
 class PyonirServerResponse:
+    JSON_RES = JSON_RES
+    TEXT_RES = TEXT_RES
+    EVENT_RES = EVENT_RES
+    STATIC_RES = STATIC_RES
 
     def __init__(self, status_code: int = None, media_type: Union[TEXT_RES, JSON_RES, EVENT_RES, STATIC_RES] = None):
         # from pyonir.core.authorizer import PyonirRequest, DefaultPyonirAuthResponses
@@ -442,6 +447,7 @@ class PyonirServerResponse:
 
         self._security_configs: dict = None
         self._route_security_configs: dict = None
+        self._json_dict: Optional[dict] = None
 
     @property
     def responses(self) -> 'DefaultPyonirAuthResponses':
@@ -449,6 +455,7 @@ class PyonirServerResponse:
 
     def set_json(self, json_data: dict):
         self.media_type = self.media_type or JSON_RES
+        self._json_dict = json_data
         self._json = to_json({
             'status_code': self.status_code,
             'message': self._message,
@@ -475,14 +482,11 @@ class PyonirServerResponse:
     def set_headers(self, key, value):
         self._headers[key] = value
 
-    async def setup_security(self, route_config: RouteConfig):
+    def setup_security(self, route_config: RouteConfig):
         # TODO: route_config should pass security params to request for more dynamic security checks (e.g. based on route params or query params)
         from .utils import get_attr
         file = self._pyonir_request.file
-        if file:
-            self.status_code = 200
-            if self._pyonir_request.is_api: self.set_json(file)
-            else: self.set_html(file.output_html(self._pyonir_request))
+
         file_data = file.data if file else None
         route_headers_configs = get_attr(route_config.configs, '@response.headers', {})
         route_security_configs = get_attr(route_config.configs, '@security', {})
@@ -512,7 +516,7 @@ class PyonirServerResponse:
         res._pyonir_request = pyonir_request
         await pyonir_request.set_request_input()
         await pyonir_request.set_page_file()
-        await res.setup_security(route_config)
+        res.setup_security(route_config)
         if not res._redirect:
             # extract response file data
             router_func = pyonir_request.file_resolver or route_config.func
@@ -524,9 +528,6 @@ class PyonirServerResponse:
             is_async = inspect.iscoroutinefunction(router_func) # verify dynamic and static async route funcs
             args = func_request_mapper(router_func, pyonir_request)
             router_func_response = await router_func(**args) if is_async else router_func(**args)
-            if isinstance(router_func_response, PyonirServerResponse):
-                router_func_response._pyonir_request = pyonir_request
-                return router_func_response
             res.set_data(router_func_response)
         return res
 
@@ -546,8 +547,13 @@ class PyonirServerResponse:
         from starlette.exceptions import HTTPException
         from starlette.responses import Response, StreamingResponse
         from pyonir.core.utils import to_json
-        has_form_redirect = not self._redirect and self._pyonir_request.security.creds.body.get('redirect')
-        if has_form_redirect:
+        from pyonir.core.schemas import Graphiti
+
+        file = self._pyonir_request.file
+        has_form_redirect = self._pyonir_request.security.creds.body.get('redirect')
+        has_data = self._data is not None
+
+        if not self._redirect and has_form_redirect:
             self.set_redirect(has_form_redirect)
 
         if self.status_code >= 500:
@@ -560,7 +566,21 @@ class PyonirServerResponse:
         if self.media_type == EVENT_RES:
             return StreamingResponse(content=self._stream, media_type=EVENT_RES)
 
-        content = self._data or self._html or self._json
+        if isinstance(self._data, PyonirJSONResponse):
+            self.set_json(self._data.to_dict())
+        if isinstance(self._data, PyonirServerResponse):
+            return self._data.build()
+
+        if file or has_data:
+            self.status_code = 200
+            if self._pyonir_request.is_api: self.set_json(self._data if has_data else file.data)
+            else: self.set_html(self._data if has_data else file.output_html(self._pyonir_request))
+
+        graphiti_model = self._pyonir_request.form.get(Graphiti.QUERY_KEY)
+        if self.media_type == JSON_RES and graphiti_model:
+            self.set_json(Graphiti(graphiti_model, self._json_dict).__as_dict__)
+
+        content = self._html or self._json
         is_404 = not content
         if is_404:
             self.media_type = JSON_RES if self._pyonir_request.is_api else TEXT_RES
@@ -575,14 +595,23 @@ class PyonirServerResponse:
 
         return server_res
 
-class PyonirRequestInput(BaseSchema):
-    body: Dict = {}
-    headers: Dict = {}
-    session: Dict = {}
-    files: list = []
-    jwt: dict = {}
+# @dataclass
+class PyonirRequestInput(BaseModel):
+
+    def __init__(self, body: dict = None, headers: Dict = None, session: Dict = None, files: List = None, jwt: Dict = None):
+        self.body: Dict = body or {}
+        self.headers: Dict = headers or {}
+        self.session: Dict = session or {}
+        self.files: list = files or []
+        self.jwt: dict = jwt or {}
+        self._errors = []
 
     # ---------- Body ----------
+
+    @property
+    def pyonir_app(self):
+        from pyonir import Site
+        return Site
 
     @property
     def email(self) -> str:
@@ -709,6 +738,7 @@ class PyonirRequestInput(BaseSchema):
             headers=headers,
             session=session,
             files=files,
+            jwt={}
         )
 
 class PyonirRequest:
@@ -729,14 +759,13 @@ class PyonirRequest:
         self.host = str(server_request.base_url).rstrip('/') if server_request else app.host
         self.protocol = server_request.scope.get('type') + "://" if server_request else app.protocol
         self.raw_path = "/".join(str(server_request.url).split(str(server_request.base_url))) if server_request else ''
-        self.method = server_request.method if server_request else 'GET'
+        self.method = server_request.method if server_request and hasattr(server_request,'method') else 'GET'
         self.path = server_request.url.path if server_request else '/'
         self.url = self.path if server_request else {}
         self.slug = self.path.lstrip('/').rstrip('/')
         self.parts = self.slug.split('/') if self.slug else []
         self._path_params: object = None
         self._query_params: object = None
-        # self.path_params: Dict[str, Any] = dict(self.server_request.path_params) if server_request else {}
 
         # boolean flags
         self.is_home = (self.slug == '')
@@ -752,6 +781,10 @@ class PyonirRequest:
 
         # Update template globals for request
         app.TemplateEnvironment.globals['request'] = self
+
+    @property
+    def is_websocket(self):
+        return self.server_request.scope['type'] == "websocket" if self.server_request else False
 
     @property
     def csrf_token(self):
@@ -815,6 +848,11 @@ class PyonirRequest:
         file_redirect = self.request_input.body.get('redirect_to', self.request_input.body.get('redirect'))
         return file_redirect
 
+    @property
+    def referer(self):
+        """previous web address from client"""
+        return self.headers.get('referer', self.url)
+
     def add_page_context(self, context: dict):
         """Safely adds context data onto existing page file"""
         if not self.file:
@@ -830,9 +868,12 @@ class PyonirRequest:
     def render(self,
                media_type: Union[TEXT_RES, JSON_RES, EVENT_RES] = None,
                data: Any = None,
-               status_code: int = 200, template: str = None
-               ) -> PyonirResponse:
+               status_code: int = 200,
+               template: str = None
+               ) -> PyonirServerResponse:
         """Renders web response object based on parameters"""
+        if isinstance(data, PyonirServerResponse):
+            return data
         res = PyonirServerResponse(status_code=status_code, media_type=JSON_RES if self.is_api else None)
         res._pyonir_request = self
 
@@ -849,8 +890,8 @@ class PyonirRequest:
             data['template'] = template
             self.add_page_context(data)
 
-        html = self.file.output_html(self)
-        json_data = self.file.data
+        html = self.file.output_html(self) if media_type == TEXT_RES else None
+        json_data = data or self.file.data
         if self.is_api or media_type == JSON_RES:
             res.set_json(json_data)
         elif media_type == TEXT_RES:

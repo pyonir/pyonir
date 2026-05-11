@@ -1,6 +1,7 @@
 import os
 import sqlite3
 from abc import abstractmethod
+from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
 from typing import Any, Dict, Optional, Type, Union, Iterator, Generator, List, Callable, Tuple, Iterable
@@ -8,7 +9,7 @@ from urllib.parse import quote_plus
 
 from sortedcontainers import SortedList
 
-from pyonir.core.mapper import cls_mapper
+from pyonir.core.mapper import dto_mapper, UnwrappedType
 from pyonir.core.parser import DeserializeFile
 from pyonir.core.schemas import BaseSchema
 from pyonir.core.app import BaseApp
@@ -110,7 +111,7 @@ class PyonirDBQuery:
     def __init__(self, db_service: 'PyonirDatabaseService'):
         self.db_service = db_service
         self.sql: str = ""
-        self._model: BaseSchema = None
+        self._model: Union[BaseSchema, Callable] = None
         self._model_aliases = {}
         self._table = None
         self._alias = None
@@ -133,22 +134,23 @@ class PyonirDBQuery:
 
     def select(self, columns: Optional[Iterable[str]] = None):
         prefix = (self._alias or self._table)
-        columns = columns or self._model.__table_columns__
+        columns: List[str|UnwrappedType] = columns or self._model.schema_columns()
         for col in columns:
-            if col in self._model._foreign_key_names:
-                # skip foreign key columns for now
-                continue
-            self._columns.append(f"{prefix}.{col}")
+            if col.is_fk or col.is_private: continue
+            self._columns.append(f"{prefix}.{col.column_name}")
         return self
 
     def join_all(self, kind="INNER"):
-        for fk_name, fk_type in getattr(self._model, '__foreign_keys__', []):
-            fk_model = fk_type if isinstance(fk_type, type) and issubclass(fk_type, BaseSchema) else None
+        fks = self._model.fks()
+        for fk_type in fks:
+            fk_name = fk_type.column_name
+            fk_model = fk_type.base #fk_type if isinstance(fk_type, type) and issubclass(fk_type, BaseSchema) else None
             if not fk_model: continue
+            fk_columns = [col.column_name for col in fk_model.schema_columns()]
             table_alias = fk_model.__table_name__[0]
             fk_pk = get_attr(fk_model,'__primary_key__') or 'id'
             on_expr = f"{self._model_aliases[self._model]}.{fk_name} = {table_alias}.{fk_pk}"
-            self.join(fk_model, on=on_expr, json_object=(fk_name,) + tuple(fk_model.__table_columns__), alias=table_alias, kind=kind)
+            self.join(fk_model, on=on_expr, json_object=(fk_name,) + tuple(fk_columns), alias=table_alias, kind=kind)
         return self
 
     def join(self, model: type[BaseSchema], on: str, kind="INNER", alias: str = None, json_object: tuple[str] = None):
@@ -175,6 +177,8 @@ class PyonirDBQuery:
             # conditions param arguments will always contain the list item and executed during mapping
             self._where_func = (conditions, params)
         else:
+            if not isinstance(conditions, list):
+                raise TypeError("Where expects a list of conditions")
             for condition in conditions:
                 self._where.append(condition)
         return self
@@ -255,9 +259,9 @@ class PyonirDatabaseService:
     def __init__(self, app: BaseApp) -> None:
         from pyonir.core.utils import get_attr
         db_env_configs = get_attr(app.env, 'database') or {}
-        dc = cls_mapper(db_env_configs, DatabaseConfig)
+        dc = dto_mapper(db_env_configs, DatabaseConfig)
         self.connection: Optional[sqlite3.Connection] = None
-        self.app = app
+        self.pyonir_app = app
         self._query: PyonirDBQuery = None
         self._datastore_dirpath: str = ""
         self._dbconfig: DatabaseConfig = dc
@@ -276,11 +280,11 @@ class PyonirDatabaseService:
     @property
     def datastore_path(self):
         """Path to the app datastore directory"""
-        return self._datastore_dirpath or self.app.datastore_dirpath
+        return self._datastore_dirpath or self.pyonir_app.datastore_dirpath
 
     @property
     def db_name(self) -> str:
-        return self._dbconfig.name or self.app.name
+        return self._dbconfig.name or self.pyonir_app.name
 
     @property
     def driver(self) -> str:
@@ -326,7 +330,7 @@ class PyonirDatabaseService:
     def use(self, db_url: str) -> "PyonirDatabaseService":
         """Creates New database service instance using the given database URL."""
         db_type, database, host, port, username, password = self.parse_db_url(db_url)
-        dbc = PyonirDatabaseService(self.app)
+        dbc = PyonirDatabaseService(self.pyonir_app)
         dbc.set_driver(db_type)
         dbc.set_dbname(os.path.basename(database))
         dbc.set_datastore_path(os.path.dirname(database))
@@ -371,8 +375,9 @@ class PyonirDatabaseService:
     def build_table_from_model(self, model: Type[BaseSchema]):
         """Create a table in the database."""
         self.execute_sql(model._sql_create_table)
-        for fk_name, fk_type in model.__foreign_keys__:
-            fk_model = fk_type if isinstance(fk_type, type) and issubclass(fk_type, BaseSchema) else None
+        for fk_type in model.fks():
+            # fk_model = fk_type if isinstance(fk_type, type) and issubclass(fk_type, BaseSchema) else None
+            fk_model: UnwrappedType = fk_type.base
             if not fk_model: continue
             self.build_table_from_model(fk_model)
         model.sql_after_create(dbc=self)
@@ -450,15 +455,6 @@ class PyonirDatabaseService:
     def parse_db_url(db_url: str) -> tuple[str, str, str | None, int | None, str | None, str | None]:
         """
         Parse a database URL into its components.
-        Returns:
-            (
-                db_type,     # dialect / driver (e.g. "sqlite", "postgresql", "mysql+pymysql")
-                database,    # database name or sqlite file path
-                host,        # hostname or None
-                port,        # port number or None
-                username,    # username or None
-                password,    # password or None
-            )
         """
         from urllib.parse import urlparse, unquote
         parsed = urlparse(db_url)
@@ -482,6 +478,21 @@ class PyonirDatabaseService:
 
         return db_type, database, host, port, username, password
 
+    def sql_migrate(self, sql: str):
+        self.connect()
+        if not self.connection:
+            raise RuntimeError("Database connection is not established.")
+
+        cursor = self.connection.cursor()
+        try:
+            cursor.executescript(sql)
+        except Exception as e:
+            self.connection.rollback()
+            raise e
+        finally:
+            cursor.close()
+            self.connection.commit()
+
     def execute_sql(self, sql: str, params: tuple = None):
         """
         Execute a raw SQL query safely against the SQLite database.
@@ -494,6 +505,7 @@ class PyonirDatabaseService:
         cursor = self.connection.cursor()
         try:
             cursor.execute(sql, params or ())
+            cursor.executescript(sql)
         except Exception as e:
             self.connection.rollback()
             raise e
@@ -539,11 +551,36 @@ class PyonirDatabaseService:
             self.connection = None
         return self
 
-    def save_to_file_system(self, entity: BaseSchema, filepath: Optional[str] = None) -> str:
-        default_filename = entity.generate_id() + '.json'
-        default_directory = entity.file_dirpath or os.path.join(self.datastore_path, entity.__table_name__)
-        fullpath = os.path.join(default_directory, default_filename)
-        return entity.save_to_file(filepath or fullpath)
+    def save_to_file_system(self, entity: BaseSchema, filepath: Optional[str] = None, update: bool = False) -> str:
+        if not isinstance(entity, BaseSchema) and not filepath:
+            raise TypeError(f"entity must be BaseSchema: {type(entity)}: {entity} was provided. Try providing a file path instead.")
+        default_filename = "" if filepath else entity.generate_uuid() + '.json'
+        default_directory = "" if filepath else entity.file_dirpath or os.path.join(self.datastore_path, entity.__table_name__)
+        fullpath = filepath or os.path.join(default_directory, default_filename)
+        if not update and os.path.exists(fullpath):
+            raise FileExistsError(f"{default_filename} exists")
+        return entity.save_to_file(fullpath)
+
+    def schema_params(self, entity: BaseSchema, as_upsert: bool = False):
+        """Returns all schema columns with parameter values"""
+        import json
+        from pyonir.core.utils import json_serial
+
+        def process_column(field: UnwrappedType):
+            col = field.column_name
+            v = get_attr(entity, col)
+            is_nullable = field.is_optional and v is None
+            if field in fkeys and v is not None:
+                v.created_by = entity.created_by
+                return self.insert(v, as_upsert) if not is_nullable else None
+            v = json.dumps(v, default=json_serial) if isinstance(v,(BaseSchema, datetime, dict, list, tuple, set)) else v
+            return v
+
+        fkeys = entity.fks()
+        column_params: list[UnwrappedType] = entity.schema_columns()
+        keys = [c.column_name for c in column_params if not c.is_private]
+        values = [process_column(c) for c in column_params if not c.is_private]
+        return keys, values
 
     @abstractmethod
     def upsert(self, entity: type[BaseSchema]) -> Any:
@@ -551,29 +588,13 @@ class PyonirDatabaseService:
 
     @abstractmethod
     def insert(self, entity: type[BaseSchema], as_upsert: bool = False) -> Optional[int]:
-        import json
-        from pyonir.core.utils import json_serial
 
         if not isinstance(entity, BaseSchema):
             raise TypeError(f"entity must be BaseSchema: {type(entity)}: {entity} was provided.")
         self.connect()
 
-        def process_column(col):
-            v = get_attr(entity, col)
-            is_nullable = col in entity._nullable_keys and not v
-            if v and not is_nullable and col in entity.foreign_key_names:
-                v.created_by = entity.created_by
-                _v = self.insert(v, as_upsert) if not is_nullable else v
-                return _v
-            v = json.dumps(v, default=json_serial) if isinstance(v,(BaseSchema, dict, list, tuple, set)) else v
-            return v
-
-        if entity.created_by is None or callable(entity.created_by):
-            entity.created_by = entity.get_active_user()
-
-        keys = entity.__table_columns__
-        values = [process_column(c) for c in keys]
-        sql = entity._sql_insert if not as_upsert else entity._sql_upsert
+        keys, values = self.schema_params(entity, as_upsert)
+        sql = entity.sql_insert if not as_upsert else entity.sql_upsert
 
         cursor = self.connection.cursor()
         try:
@@ -581,13 +602,13 @@ class PyonirDatabaseService:
             r = cursor.fetchone()
             if r:
                 r = r[0]
-            elif entity._unique_keys: #and entity.is_lookup_table:
+            elif entity._unique_keys:
                 table_pk = get_attr(entity,'__primary_key__') or 'id'
                 ukey = entity._unique_keys[0]
                 uval = getattr(entity, ukey, None)
                 q = f"""SELECT (id) FROM {entity.__table_name__} WHERE {ukey} = "{uval}";"""
                 r = dict(cursor.execute(q).fetchone()).get(table_pk)
-            entity.__primary_key_value__ = r
+            entity.set_primary_key(r)
         except Exception as e:
             raise e
         finally:
@@ -615,14 +636,26 @@ class PyonirDatabaseService:
         return any(result)
 
     @abstractmethod
+    def patch(self, entity: Type[BaseSchema], data: Dict) -> Iterator[Any]:
+        """Patch entity row using table primary key."""
+        if not entity.id:
+            raise ValueError(f"Entity {entity} does not have a primary key defined.")
+        columns, _values = self.schema_params(entity)
+        for k,v in data.items():
+            if k not in columns: continue
+            setattr(entity, k, v)
+        return self.upsert(entity)
+
+    @abstractmethod
     def update(self, entity: BaseSchema, id: Any, data: Dict) -> bool:
         """Update entity row using table primary key."""
         table = entity.__table_name__ if hasattr(entity, '__table_name__') else str(entity)
         if self.driver == Driver.SQLITE:
             pk = self.get_pk(table)
-            columns, _values = BaseSchema.dict_to_tuple(data, as_update_keys=True)
-            query = f"UPDATE {table} SET {columns} WHERE {pk} = ?"
-            values = list(_values) + [id]
+            columns = list(data.keys())
+            columnq = ', '.join(['?' for i in range(len(columns))])
+            query = f"UPDATE {table} SET {', '.join(columns)} = {columnq} WHERE {pk} = ?"
+            values = list(data.values()) + [id]
             cursor = self.connection.cursor()
             cursor.execute(query, values)
             self.connection.commit()
@@ -713,7 +746,7 @@ def query_fs(abs_dirpath: str,
         if model == 'file':
             return pf
         schema = BasePage if (pf.is_page and not model) else model
-        res = cls_mapper(pf, schema) if schema else pf
+        res = dto_mapper(pf, schema) if schema else pf
         return res
 
     def skip_file(file_path: Path) -> bool:

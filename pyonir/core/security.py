@@ -1,7 +1,9 @@
 import os
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Optional, Tuple, Union
+from typing import Optional, Tuple, Union, Dict, List, Any
+
+from starlette.datastructures import UploadFile
 
 from pyonir.core.server import RouteConfig
 from pyonir import PyonirRequest, BaseApp
@@ -264,7 +266,7 @@ class PyonirSecurity:
     def authenticated_user(self):
         if self._user:
             return self._user
-        flow = self.request.request_input.flow
+        flow = self.request.request_input.flow if self.request.request_input else None
         creds = self.creds
 
         if flow in {AuthMethod.BASIC, AuthMethod.BODY}:
@@ -415,8 +417,10 @@ class PyonirSecurity:
 
 
 
-async def preprocess_request_body(request: StarletteRequest):
+async def preprocess_request_body(request: StarletteRequest) -> tuple[Dict, list]:
     """Get form data and file upload contents from request"""
+    if request.scope['type'] == 'websocket':
+        return {}, []
     from pyonir.core.utils import expand_dotted_keys
     import json
     body = dict(request.query_params)
@@ -429,19 +433,30 @@ async def preprocess_request_body(request: StarletteRequest):
     except Exception as ee:
         # multipart/form-data
         _body = await request.form()
+        _list_keys = []
         for name, content in _body.multi_items():
+            # File handling
             if hasattr(content, "filename"):
                 setattr(content, "ext", os.path.splitext(content.filename)[1])
                 files.append(content)
+                continue
+
+            # Normalize key
+            is_list = name.endswith("[]")
+            key = name[:-2] if is_list else name
+
+            if is_list:
+                body.setdefault(key, []).append(content)
             else:
-                if body.get(name): # convert form name into a list
-                    currvalue = body[name]
-                    if isinstance(currvalue, list):
-                        currvalue.append(content)
+                if key in body:
+                    # optional: promote to list if repeated
+                    if isinstance(body[key], list):
+                        body[key].append(content)
                     else:
-                        body[name] = [currvalue, content]
+                        body[key] = [body[key], content]
                 else:
-                    body[name] = content
+                    body[key] = content
+
     body = expand_dotted_keys(body, return_as_dict=True)
     return body, files
 

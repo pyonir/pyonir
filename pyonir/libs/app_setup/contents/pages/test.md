@@ -1,3 +1,4 @@
+is_int: -1
 inline_list_of_scalrs_types:- 1, true, hello, 3.14
 single_item_list:- just one thing here
 string_phonenumber: (111) 123-3456

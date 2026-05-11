@@ -34,7 +34,11 @@ def test_crud_operations(test_pyonir_db: PyonirMocks.DatabaseService):
     assert (mock_role_results.name == mock_user.role.name)
 
     # Update
-    updated = test_pyonir_db.update(table_name, user_id, {
+    mock_user.update({
+        "username": "newusername",
+        "email": "newemail@example.com"
+    })
+    updated = test_pyonir_db.patch(mock_user, {
         "username": "newusername",
         "email": "newemail@example.com"
     })
@@ -43,6 +47,9 @@ def test_crud_operations(test_pyonir_db: PyonirMocks.DatabaseService):
     test_pyonir_db.add_table_columns(table_name, {
         "age": "INTEGER DEFAULT 0"
     })
+
+    tcols = test_pyonir_db.get_existing_columns(table_name)
+    assert tcols.get('age') is not None
 
     # Verify update
     results = next(test_pyonir_db.find(PyonirMockUser, {'where': [f"{table_key} = '{user_id}'"]}))
@@ -63,7 +70,7 @@ def test_crud_operations(test_pyonir_db: PyonirMocks.DatabaseService):
     assert not test_pyonir_db.exists()
 
 def test_lookup_tables(test_app: PyonirMocks.App, test_pyonir_db: PyonirMocks.DatabaseService):
-    test_pyonir_db.build_fs_dirs_from_model(PyonirMockRole)
+    test_pyonir_db.build_table_from_model(PyonirMockRole)
 
     req_data = {'email': 'fileuser@example.com', 'gender': None, 'role': PyonirMockRoles.GUEST_TESTER.name, 'username': 'fileuser'}
     req_user = PyonirMockUser(**req_data)

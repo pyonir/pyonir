@@ -7,7 +7,7 @@ from datetime import datetime
 from pyonir import PyonirRequest, Pyonir
 from pyonir.core.schemas import BaseSchema, Graphiti
 
-from pyonir.core.mapper import cls_mapper, dict_to_class
+from pyonir.core.mapper import dto_mapper, dict_to_class
 from pyonir.core.parser import DeserializeFile
 from pyonir.libs.plugins.navigation import Menu
 from pyonir.tests.conftest import app_setup_path, PyonirMocks, PyonirMockUser
@@ -68,18 +68,21 @@ def test_request_mapper(test_app: PyonirMocks.App, mock_data: PyonirMocks.user_d
 
     from pyonir.core.mapper import func_request_mapper
 
-    def demo_route(user_id: int, user: PyonirMockUser, request: PyonirRequest): pass
+    def demo_route(user_id: int, user: PyonirMockUser, request: PyonirRequest, items: list, meta: dict, stuff: dict[str, int]): pass
+
     request_input = {
         "user": mock_data,
-        "user_id": "42"
+        "user_id": "42",
+        "items": "foo",
+        "meta": {"bar": 22}
     }
     pyonir_request = PyonirRequest(None, test_app)
     pyonir_request.request_input.body = request_input
-    args = func_request_mapper(demo_route, pyonir_request)
+    args = func_request_mapper(demo_route, pyonir_request, enforce_type_checker=0)
     assert args['user_id'] == 42
     assert args['request'] == pyonir_request
 
-def test_cls_mapper_menu():
+def test_dto_mapper_menu():
     data = {
         'menu': {
             'url': '/home',
@@ -90,7 +93,7 @@ def test_cls_mapper_menu():
             'status': 'active'
         }
     }
-    menu_obj = cls_mapper(data, Menu)
+    menu_obj = dto_mapper(data, Menu)
     assert isinstance(menu_obj, Menu)
     assert menu_obj.url == '/home'
     assert menu_obj.slug == 'home'
@@ -102,7 +105,7 @@ def test_cls_mapper_menu():
 
 def test_parsely_to_custom_mapping():
     obj = DeserializeFile(article_filepath)
-    article = cls_mapper(obj, Article)
+    article = dto_mapper(obj, Article)
     assert isinstance(article, Article)
     assert article.id is not None
     assert article.caption == obj.data['content']
@@ -111,13 +114,13 @@ def test_parsely_to_custom_mapping():
 def test_no_hint_mapping():
     generic_model = Graphiti('title,url,author,date:file_created_on')
     obj = {"title": "hunter", "author": "Alice", "url": "/foo", "date": None}
-    genmodel = cls_mapper(obj, generic_model)
+    genmodel = dto_mapper(obj, generic_model)
     assert genmodel.author == "Alice"
     assert genmodel.url == '/foo'
 
 def test_scalar_mapping():
     obj = {"uid": "123", "name": "Alice", "email": None, "address": None, "tags": [], "meta": {}}
-    user = cls_mapper(obj, MockUser)
+    user = dto_mapper(obj, MockUser)
     assert isinstance(user.uid, int)
     assert user.uid == 123
     assert user.name == "Alice"
@@ -125,22 +128,22 @@ def test_scalar_mapping():
 
 def test_optional_mapping():
     obj = {"id": 1, "name": "Bob", "email": "bob@test.com", "address": None, "tags": [], "meta": {}}
-    user = cls_mapper(obj, MockUser)
+    user = dto_mapper(obj, MockUser)
     assert user.email == "bob@test.com"
     obj2 = {"id": 2, "name": "Charlie", "email": None, "address": None, "tags": [], "meta": {}}
-    user2 = cls_mapper(obj2, MockUser)
+    user2 = dto_mapper(obj2, MockUser)
     assert user2.email is None
 
 def test_nested_object():
     addr = {"street": "Main St", "zip_code": "90210"}
-    mock_address = cls_mapper(addr, MockAddress)
+    mock_address = dto_mapper(addr, MockAddress)
     obj = {
         "uid": 10, "name": "Diana", "email": "diana@test.com",
         "address": addr,
         "tags": ["admin", "staff"],
         "meta": {"age": "30", "score": 95}
     }
-    user = cls_mapper(obj, MockUser)
+    user = dto_mapper(obj, MockUser)
     assert isinstance(user.address, MockAddress)
     assert user.address.street == "Main St"
     assert isinstance(user.address.zip_code, int)
@@ -155,7 +158,7 @@ def test_list_mapping():
         "tags": ["one", "two"],
         "meta": {}
     }
-    user = cls_mapper(obj, MockUser)
+    user = dto_mapper(obj, MockUser)
     assert isinstance(user.tags, list)
     assert user.tags == ["one", "two"]
 
@@ -166,6 +169,6 @@ def test_dict_mapping_with_union():
         "tags": [],
         "meta": {"age": 42, "nickname": "franky"}
     }
-    user = cls_mapper(obj, MockUser)
+    user = dto_mapper(obj, MockUser)
     assert isinstance(user.meta["age"], int)
     assert isinstance(user.meta["nickname"], str)

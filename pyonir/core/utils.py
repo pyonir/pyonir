@@ -6,6 +6,17 @@ from typing import Optional, Union, Callable, Any, Dict
 import re
 import unicodedata
 
+def generate_uuid(from_string: str = None) -> str:
+    import uuid, base64, hashlib
+    if from_string:
+        keys = from_string.encode("utf-8")
+        hkeys = hashlib.sha256(keys).hexdigest().encode()
+        return base64.urlsafe_b64encode(hkeys).decode()[:9]
+    return uuid.uuid4().hex
+
+def generate_date(date_value: str = None) -> datetime:
+    return deserialize_datestr(date_value or datetime.now())
+
 def slugify_filename(method_name: str, ext: str | None = None) -> str:
     """
     Convert a method/function name into a URL-safe filename.

@@ -129,10 +129,12 @@ def test_scalar_mapping():
 def test_optional_mapping():
     obj = {"id": 1, "name": "Bob", "email": "bob@test.com", "address": None, "tags": [], "meta": {}}
     user = dto_mapper(obj, MockUser)
+    assert user.uid == None
     assert user.email == "bob@test.com"
     obj2 = {"id": 2, "name": "Charlie", "email": None, "address": None, "tags": [], "meta": {}}
     user2 = dto_mapper(obj2, MockUser)
     assert user2.email is None
+    assert user2.uid is None
 
 def test_nested_object():
     addr = {"street": "Main St", "zip_code": "90210"}

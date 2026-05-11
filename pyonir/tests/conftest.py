@@ -30,6 +30,8 @@ user_data = {
     "role": "pythonista",
     "email": "mocks@pyonir.dev",
     "username": "pyonir",
+    "password": "123abc",
+    "name": "pyonir"
 }
 
 class PyonirMockRole(BaseSchema, table_name='roles_table', primary_key='rid', lookup_table='name'):

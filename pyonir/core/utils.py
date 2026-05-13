@@ -1,10 +1,11 @@
-import os, json
+import os, json, pytz
 from datetime import datetime
 from collections.abc import Generator
 from typing import Optional, Union, Callable, Any, Dict
 
 import re
 import unicodedata
+DEFAULT_DATE_FORMAT = "%Y-%m-%d %I:%M:%S"
 
 def generate_uuid(from_string: str = None) -> str:
     import uuid, base64, hashlib
@@ -134,7 +135,7 @@ def json_serial(obj, with_props: list[str] = None):
 def to_json(data: Union[dict, 'DeserializeFile']) -> str:
     return json.dumps(data, default=json_serial)
 
-def deserialize_datestr(
+def _deserialize_datestr(
     datestr: Union[str, datetime],
     fmt: str = "%Y-%m-%d %I:%M:%S",   # %I for 12-hour format
     zone: str = "US/Eastern",
@@ -164,7 +165,7 @@ def deserialize_datestr(
     def correct_format(raw: str, dfmt: str) -> tuple[str, str]:
         """Try to normalize sloppy date strings like 2025/8/9 13:00."""
         try:
-            raw = raw.strip().replace("/", "-")
+            raw = raw.strip().lstrip('"').rstrip('"').replace("/", "-")
             if 'T' in raw:
                 date_part, _, time_part = raw.partition('T')
             else:
@@ -202,16 +203,18 @@ def deserialize_datestr(
     try:
         # Try direct parse first
         dt = datetime.strptime(datestr, fmt)
-    except ValueError:
+    except ValueError as ve:
+        print(ve)
         if not auto_correct:
             return None
         corrected, fmt = correct_format(datestr, fmt)
         if not corrected:
             return None
-        try:
-            dt = datetime.strptime(corrected, fmt)
-        except ValueError:
-            return None
+        return deserialize_datestr(corrected, fmt)
+        # try:
+        #     dt = datetime.strptime(corrected, fmt)
+        # except ValueError:
+        #     return None
 
     # Localize to input zone, then convert to UTC
     return tz.localize(dt).astimezone(pytz.utc)
@@ -525,6 +528,134 @@ def load_env(path=".env") -> 'EnvConfig':
             set_nested(env_data, keys, value)
 
     return dict_to_class(env_data, EnvConfig)
+
+
+def deserialize_datestr(
+    value: str | datetime,
+    fmt: str = DEFAULT_DATE_FORMAT,
+    zone: str = "US/Eastern",
+    auto_correct: bool = True,
+) -> Optional[datetime]:
+    """
+    Convert a date string into a UTC timezone-aware datetime.
+
+    Args:
+        value:
+            Input datetime or datetime string.
+        fmt:
+            Expected datetime format.
+        zone:
+            Source timezone for naive datetime strings.
+        auto_correct:
+            Attempt to normalize sloppy date formats before parsing.
+
+    Returns:
+        UTC-aware datetime or None if parsing fails.
+    """
+
+
+    tz = pytz.timezone(zone)
+
+    if isinstance(value, datetime):
+        return _to_utc(value)
+
+    if not isinstance(value, str):
+        return None
+
+    raw = _normalize_datestr(value, fmt) if auto_correct else value
+
+    try:
+        dt = datetime.strptime(raw, _infer_format(raw, fmt))
+    except ValueError:
+        return None
+
+    return tz.localize(dt).astimezone(pytz.utc)
+
+
+def _to_utc(dt: datetime) -> datetime:
+    """Convert naive or aware datetime into UTC."""
+    if dt.tzinfo is None:
+        return pytz.utc.localize(dt)
+
+    return dt.astimezone(pytz.utc)
+
+
+def _normalize_datestr(raw: str, fmt: str) -> str:
+    """
+    Normalize sloppy datetime inputs.
+
+    Examples:
+        2025/8/9 13:00
+        "2025-08-09T13:00:00"
+    """
+    raw = raw.strip().strip('"').replace("/", "-").replace("T", " ")
+
+    if " " not in raw:
+        return raw
+
+    date_part, time_part = raw.split(" ", 1)
+
+    # Remove UTC offset if present
+    time_part = time_part.split("+", 1)[0]
+
+    date_parts = date_part.split("-")
+    if len(date_parts) != 3:
+        return raw
+
+    year, month, day = date_parts
+
+    try:
+        month = f"{int(month):02d}"
+        day = f"{int(day):02d}"
+
+        # Handle accidental YYYY/DD/MM-style swaps
+        if int(year) < int(day):
+            year, day = day, year
+
+        time_part = _normalize_time(time_part)
+
+    except (TypeError, ValueError):
+        return raw
+
+    return f"{year}-{month}-{day} {time_part}"
+
+
+def _normalize_time(time_part: str) -> str:
+    """
+    Normalize incomplete time values.
+
+    Examples:
+        13:00      -> 13:00:00
+        13:00:01.5 -> 13:00:01
+    """
+    if not time_part:
+        return "00:00:00"
+
+    parts = time_part.split(":")
+    parts += ["00"] * (3 - len(parts))
+
+    hour, minute, second = parts[:3]
+    second = second.split(".", 1)[0]
+
+    return f"{int(hour):02d}:{int(minute):02d}:{int(second):02d}"
+
+
+def _infer_format(raw: str, default_fmt: str) -> str:
+    """
+    Switch between 12-hour and 24-hour parsing formats
+    based on detected hour values.
+    """
+    try:
+        time_part = raw.split(" ", 1)[1]
+        hour = int(time_part.split(":", 1)[0])
+
+        if hour == 0 or hour > 12:
+            return default_fmt.replace("%I", "%H")
+
+    except (IndexError, ValueError):
+        pass
+
+    return default_fmt
 
 class PrntColrs:
     RESET = '\033[0m'

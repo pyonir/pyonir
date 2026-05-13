@@ -229,7 +229,7 @@ class PyonirSecurity:
         user = self.authenticated_user
         security_configs = self._security_configs or {}
         requires_basic_auth = bool(security_configs and security_configs.get('type') == 'basic')
-        is_denied = requires_basic_auth and (self.authenticated_user is None)
+        is_denied = requires_basic_auth and (user is None)
         self._user = user
         return is_denied
 
@@ -354,7 +354,8 @@ class PyonirSecurity:
     def create_session(self, user: PyonirUser):
         """Creates a user session for the authenticated user."""
         user_jwt = self._create_jwt(user_id=user.uid, user_role=user.role.name, exp_time=1440 if self.creds.remember_me else 60)
-        self.session[self.pyonir_app.session_key] = user_jwt
+        self.request.session[self.pyonir_app.session_key] = user_jwt
+        print("SESSION:", self.request.session)
 
     def has_signin_exceeded(self) -> bool:
         """Checks if the maximum sign-in attempts have been exceeded."""

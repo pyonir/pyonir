@@ -4,7 +4,7 @@ import base64
 import inspect
 import os, sys
 from dataclasses import dataclass
-from typing import Optional, Callable, List, Union, AsyncGenerator, Any, Dict
+from typing import Optional, Callable, List, Union, AsyncGenerator, Any, Dict, Type
 
 from starlette.responses import FileResponse, RedirectResponse
 
@@ -15,7 +15,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.staticfiles import StaticFiles
 
-from pyonir import BaseSchema, BaseApp
+from pyonir import BaseApp
 from pyonir.core.parser import DeserializeFile
 from pyonir.core.mapper import func_request_mapper
 from pyonir.core.schemas import BaseModel

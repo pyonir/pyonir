@@ -559,7 +559,7 @@ class BaseApp(Base):
         return int(get_attr(self.env, 'app.port', 5000)) #if self.configs else 5000
 
     @property
-    def protocol(self) -> str: return 'https' if self.is_secure else 'http'
+    def protocol(self) -> str: return 'https' if self.use_ssl else 'http'
 
     @property
     def is_secure(self) -> bool:

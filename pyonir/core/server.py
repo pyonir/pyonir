@@ -224,6 +224,7 @@ class PyonirServer(Starlette):
         if not os.path.exists(directory_path):
             print(f"Unable to mount '{url}' static files at {directory_path}")
             return
+        self.pyonir_app.add_static_path(url, directory_path)
         self.mount(url, StaticFiles(directory=directory_path))
 
     def add_url_route(self, name: str, path: str):

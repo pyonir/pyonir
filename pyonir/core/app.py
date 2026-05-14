@@ -625,8 +625,12 @@ class BaseApp(Base):
     @property
     def static_paths(self) -> set:
         """Set of all static file paths to be served by the application"""
-        paths = {(self.public_assets_route, self.public_assets_dirpath), (self.frontend_assets_route, self.frontend_assets_dirpath), (self.uploads_route, self.uploads_dirpath)}
-        return paths.union(self._static_paths)
+        paths = {
+            (self.public_assets_route, self.public_assets_dirpath),
+            (self.frontend_assets_route, self.frontend_assets_dirpath),
+            (self.uploads_route, self.uploads_dirpath)
+        }
+        return paths.union(self._static_paths) if self._static_paths else paths
 
     # SETUP
     def install_sys_plugins(self):
@@ -651,14 +655,10 @@ class BaseApp(Base):
             static_route = t.static_route or '/static'
             self.server.add_static_route(static_route, t.static_dirpath)
 
-        # app_active_theme = self.themes.active_theme
-        # if app_active_theme is None:
-        #     raise ValueError(f"No active theme name '{get_attr(self.configs, 'app.theme_name')}' found in {self.frontend_dirpath} themes directory. Please ensure a theme is available.")
-
-        # Load theme templates
-        # self.TemplateEnvironment.load_template_path(app_active_theme.jinja_template_path, priority=True)
-
     # RUNTIME
+    def add_static_path(self, url: str, directory_path: str):
+        self._static_paths.add((url, directory_path))
+
     def load_function_from_path(self, module_path: str) -> Optional[Callable]:
         """Loads a function resolver from a module path"""
         app_ctx = list(filter(lambda p: p.name == module_path.split('.')[0], self.activated_plugins))
@@ -731,7 +731,6 @@ class BaseApp(Base):
         from pyonir.core.database import query_fs
         self.SSG_IN_PROGRESS = True
         count = 0
-        print(f"{PrntColrs.OKBLUE}1. Coping Assets")
         try:
             self.apply_globals()
             self.install_sys_plugins()
@@ -750,7 +749,6 @@ class BaseApp(Base):
                 ssg_req.slug = pgfile.data.get('slug')
                 if ssg_req.slug.startswith(exclude_routes or tuple()): continue
                 virtual_file, virtual_url = ssg_req.get_virtual_route()
-                # if virtual_file: ssg_req.ssg_request(pgfile, virtual_file.data)
                 try:
                     merge_dict(derived=virtual_file.data, src=pgfile.data)
                     pgfile.apply_filters()
@@ -773,8 +771,9 @@ class BaseApp(Base):
             print(f'\033[95m {msg}')
 
             # Copy theme static css, js files into ssg directory
-            copy_assets(self.frontend_assets_dirpath, os.path.join(self.ssg_dirpath, self.FRONTEND_ASSETS_DIRNAME), ignore=exclude_routes)
-            copy_assets(self.public_assets_dirpath, os.path.join(self.ssg_dirpath, self.PUBLIC_ASSETS_DIRNAME), ignore=exclude_routes)
+            print(f"{PrntColrs.OKBLUE}1. Coping Assets")
+            for static_url, static_path in self.static_paths:
+                copy_assets(static_path, os.path.join(self.ssg_dirpath, os.path.join(self.ssg_dirpath, static_url[1:])), ignore=exclude_routes)
         except Exception as e:
             msg = f"SSG encountered an error: {str(e)}"
             raise

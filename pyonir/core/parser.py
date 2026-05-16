@@ -404,8 +404,8 @@ def update_nested(attr_path, data_src: dict, data_merge=None, data_update=None, 
         return update_nested(None, data_src, merged_val)
 
     # Navigate deeper if not at last key
+    current_data = {}
     if not completed:
-        current_data = {}
         for i, key in enumerate(attr_path):
             if find:
                 current_data = (data_src.get(key) if not current_data else current_data.get(key))
@@ -756,7 +756,7 @@ def collect_block_lines(lines: list, curr_tabs: int, is_str_block: tuple[bool, b
         ln = lines[cursor]
         lt, lk, ld, lv, lb = parse_line(ln, from_block_str=pis_str_block, file_ctx=file_ctx)
         if lb is None:
-            if cursor == max - 1:
+            if BLOCK_CODE_FENCE == ln:
                 cursor += 1
             break
         lis_block_str, lis_parent = lb
@@ -809,7 +809,7 @@ def process_lines(file_lines: list[str], cursor: int = 0, data_container: Dict[s
                 parent_container=line_type,
                 file_ctx=file_ctx
             )
-            cursor = (_cursor + cursor) + 1 #if line_tabs else _cursor
+            cursor = (_cursor + cursor) + 1
         else:
             cursor += 1
 

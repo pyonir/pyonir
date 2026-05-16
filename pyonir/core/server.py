@@ -454,12 +454,12 @@ class PyonirServerResponse:
     def responses(self) -> 'DefaultPyonirAuthResponses':
         return self._responses
 
-    def set_json(self, json_data: dict):
+    def set_json(self, json_data: dict, message: str = None):
         self.media_type = self.media_type or JSON_RES
         self._json_dict = json_data
         self._json = to_json({
             'status_code': self.status_code,
-            'message': self._message,
+            'message': message or self._message,
             'data': json_data,
         })
         return self
@@ -866,11 +866,18 @@ class PyonirRequest:
         self.file = None
         return self.server_response.set_redirect(url, code=code)
 
+    def json(self, data: Any = None, status_code: int = 200, message: str = None) -> PyonirServerResponse:
+        return self.render(JSON_RES, data, status_code, json_message=message)
+
+    def html(self, data: Any = None, status_code: int = 200, template: str = None) -> PyonirServerResponse:
+        return self.render(TEXT_RES, data, status_code, template)
+
     def render(self,
                media_type: Union[TEXT_RES, JSON_RES, EVENT_RES] = None,
                data: Any = None,
                status_code: int = 200,
-               template: str = None
+               template: str = None,
+               json_message: str = None
                ) -> PyonirServerResponse:
         """Renders web response object based on parameters"""
         if isinstance(data, PyonirServerResponse):
@@ -894,7 +901,7 @@ class PyonirRequest:
         html = self.file.output_html(self) if media_type == TEXT_RES else None
         json_data = data or self.file.data
         if self.is_api or media_type == JSON_RES:
-            res.set_json(json_data)
+            res.set_json(json_data, message=json_message)
         elif media_type == TEXT_RES:
             res.set_html(html)
 
@@ -947,20 +954,17 @@ class PyonirRequest:
         ]
 
         # Skip if no paths or route doesn't match
-        if not ctx_paths or (not is_home and not path_str.startswith(ctx_route)):
+        has_private = any(s.startswith(self.pyonir_app.HIDDEN_ROUTE_FILES_PREFIX) for s in request_segments)
+        if has_private or not ctx_paths or (not is_home and not path_str.startswith(ctx_route)):
             return None
-
-        # Try resolving to actual file paths
-        protected_segment = [s if i > len(request_segments)-1 else f'_{s}' for i,s in enumerate(request_segments)]
 
         for root_path in ctx_paths:
             if not self.is_api and root_path.endswith(app_ctx.API_DIRNAME): continue
             category_index = os.path.join(root_path, *request_segments, 'index.md')
             single_page = os.path.join(root_path, *request_segments) + BaseApp.EXTENSIONS['file']
             generated_page = os.path.join(root_path,app_ctx.GENERATED_API_DIRNAME, *request_segments) + BaseApp.EXTENSIONS['file']
-            single_protected_page = os.path.join(root_path, *protected_segment) + BaseApp.EXTENSIONS['file']
 
-            for candidate in (category_index, single_page, generated_page, single_protected_page):
+            for candidate in (category_index, single_page, generated_page):
                 if os.path.exists(candidate):
                     route_page = DeserializeFile(candidate, app_ctx=app_ctx.app_ctx)
                     if virtual_route:

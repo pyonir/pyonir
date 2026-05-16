@@ -38,6 +38,8 @@ class Base:
     API_ROUTE = f"/{API_DIRNAME}"  # Api base path for accessing pages as JSON
     GENERATED_API_DIRNAME = "@generated" # API dirname stores generated files
 
+    HIDDEN_ROUTE_FILES_PREFIX = ('_', '.')
+
     app_dirpath: str = '' # absolute path to context directory
     name: str = ''# context name
     _configs: Optional[object] # context settings

@@ -387,6 +387,7 @@ class BaseSchema(BaseModel):
         # save primary key value under a special key for lookup when reconstructing from file
         if with_props:
             for prop in with_props:
+                if not hasattr(self, prop): continue
                 if not obfuscated(prop):
                     res[prop] = process_value(prop, getattr(self, prop))
         if hasattr(self, '__primary_key_value__'):

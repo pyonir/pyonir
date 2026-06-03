@@ -6,14 +6,13 @@ import os, sys
 from dataclasses import dataclass
 from typing import Optional, Callable, List, Union, AsyncGenerator, Any, Dict, Type
 
-from starlette.responses import FileResponse, RedirectResponse
-
-
+from starlette.responses import FileResponse, RedirectResponse, Response, StreamingResponse
 from starlette.applications import Starlette, P
 from starlette.middleware import _MiddlewareFactory
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException
 
 from pyonir import BaseApp
 from pyonir.core.parser import DeserializeFile
@@ -338,14 +337,14 @@ class PyonirJSONResponse:
         self.data = data or self.data
         return self
 
-    def to_dict(self, context_data: dict = None) -> dict:
+    def to_dict(self, with_props: dict = None) -> dict:
         """Converts the response to a dictionary."""
         from pyonir import Site
         return {
             'status_code': self.status_code,
             'message': Site.TemplateEnvironment.render_python_string(self.message or ''),
             'data': self.data,
-            **(context_data or {})
+            **(with_props or {})
         }
 
 class PyonirJSONResponses:
@@ -407,6 +406,8 @@ class PyonirJSONResponses:
     TOO_MANY_REQUESTS = PyonirJSONResponse(message="Too many requests. Try again later", status_code=429)
     """PyonirAuthResponse: Indicates too many requests have been made, triggering rate limiting (HTTP 429)."""
 
+    SSO_REQUIRED = PyonirJSONResponse(message="This account uses Single Sign-On to sign in", status_code=200)
+
     @classmethod
     def response(cls, message: str, status_code: int = 200, data: dict = None):
         data = data or {}
@@ -433,7 +434,6 @@ class PyonirServerResponse:
     STATIC_RES = STATIC_RES
 
     def __init__(self, status_code: int = None, media_type: Union[TEXT_RES, JSON_RES, EVENT_RES, STATIC_RES] = None):
-        # from pyonir.core.authorizer import PyonirRequest, DefaultPyonirAuthResponses
         self.status_code: int = status_code or 404
         self.media_type: Union[TEXT_RES, JSON_RES, EVENT_RES] = media_type
         self._json: Optional[str] = None
@@ -453,6 +453,9 @@ class PyonirServerResponse:
     @property
     def responses(self) -> 'DefaultPyonirAuthResponses':
         return self._responses
+
+    def set_message(self, message: str = None):
+        self._message = message
 
     def set_json(self, json_data: dict, message: str = None):
         self.media_type = self.media_type or JSON_RES
@@ -480,10 +483,14 @@ class PyonirServerResponse:
         self._data = value
         return self
 
-    def set_headers(self, key, value):
+    def set_headers(self, data: dict):
+        for key, value in data.items():
+            self._headers[key] = str(value)
+
+    def set_header(self, key, value):
         self._headers[key] = value
 
-    def setup_security(self, route_config: RouteConfig):
+    def __setup_security(self, route_config: RouteConfig):
         # TODO: route_config should pass security params to request for more dynamic security checks (e.g. based on route params or query params)
         from .utils import get_attr
         file = self._pyonir_request.file
@@ -510,28 +517,6 @@ class PyonirServerResponse:
         if security_auth.is_denied:
             self.set_redirect(security_auth.redirect_to or '/')
 
-    @classmethod
-    async def from_request(cls, pyonir_request: 'PyonirRequest', route_config: RouteConfig) -> PyonirServerResponse:
-        pyonir_request.pyonir_app.server.request = pyonir_request
-        res = pyonir_request.server_response
-        res._pyonir_request = pyonir_request
-        await pyonir_request.set_request_input()
-        await pyonir_request.set_page_file()
-        res.setup_security(route_config)
-        if not res._redirect:
-            # extract response file data
-            router_func = pyonir_request.file_resolver or route_config.func
-
-            # auto reload router functions during local dev
-            if callable(router_func) and pyonir_request.pyonir_app.is_dev:
-                router_func = pyonir_request.pyonir_app.reload_module(router_func, reload=True)
-
-            is_async = inspect.iscoroutinefunction(router_func) # verify dynamic and static async route funcs
-            args = func_request_mapper(router_func, pyonir_request)
-            router_func_response = await router_func(**args) if is_async else router_func(**args)
-            res.set_data(router_func_response)
-        return res
-
     def set_redirect(self, url: str, code: int = 302):
         from starlette.responses import RedirectResponse
         self._redirect = RedirectResponse(url, status_code=code)
@@ -543,10 +528,35 @@ class PyonirServerResponse:
         f.data = self._pyonir_request.render_error()
         return f
 
-    def build(self):
+    @classmethod
+    async def from_request(cls, pyonir_request: 'PyonirRequest', route_config: RouteConfig) -> PyonirServerResponse:
+        pyonir_request.pyonir_app.server.request = pyonir_request
+        res = pyonir_request.server_response
+        res._pyonir_request = pyonir_request
+        await pyonir_request.set_request_input() # consolidates all query parameters and payloads into one object
+        await pyonir_request.set_page_file() # resolves request to file on disk if applicable
+        pyonir_request.security.apply_security_configs(route_config) # Collects security configurations from page file and route config.(file configs overrides route configs)
+        pyonir_request.security.verify_request_access() # check request for authorization access
+
+        if not res._redirect:
+            app_ctx: BaseApp = pyonir_request.app_ctx_ref
+            # extract response file data
+            router_func = pyonir_request.file_resolver or route_config.func
+
+            # auto reload router functions during local dev
+            if callable(router_func) and pyonir_request.pyonir_app.is_dev:
+                router_func = pyonir_request.pyonir_app.reload_module(router_func, reload=True)
+
+            is_async = inspect.iscoroutinefunction(router_func) # verify dynamic and static async route funcs
+            args = func_request_mapper(router_func, pyonir_request)
+            router_func_response = await router_func(**args) if is_async else router_func(**args)
+            res.set_data(router_func_response)
+            await app_ctx.on_request(request=pyonir_request)
+
+        return res
+
+    def build(self) -> Response:
         """Builds the Starlette server response object"""
-        from starlette.exceptions import HTTPException
-        from starlette.responses import Response, StreamingResponse
         from pyonir.core.utils import to_json
         from pyonir.core.schemas import Graphiti
 
@@ -573,7 +583,7 @@ class PyonirServerResponse:
             return self._data.build()
 
         if file or has_data:
-            self.status_code = 200
+            if not self.status_code: self.status_code = 200
             if self._pyonir_request.is_api: self.set_json(self._data if has_data else file.data)
             else: self.set_html(self._data if has_data else file.output_html(self._pyonir_request))
 
@@ -583,7 +593,7 @@ class PyonirServerResponse:
 
         content = self._html or self._json
         is_404 = not content
-        if is_404:
+        if is_404 and not self._pyonir_request.is_static:
             self.media_type = JSON_RES if self._pyonir_request.is_api else TEXT_RES
             _e = self.error_page()
             content = to_json(_e) if self._pyonir_request.is_api else _e.output_html(self._pyonir_request)
@@ -596,8 +606,7 @@ class PyonirServerResponse:
 
         return server_res
 
-# @dataclass
-class PyonirRequestInput(BaseModel):
+class PyonirRequestInput:
 
     def __init__(self, body: dict = None, headers: Dict = None, session: Dict = None, files: List = None, jwt: Dict = None):
         self.body: Dict = body or {}
@@ -625,6 +634,10 @@ class PyonirRequestInput(BaseModel):
         if self.basic_credentials:
             return self.basic_credentials[1]
         return self.body.get("password", "")
+
+    @property
+    def errors(self):
+        return self._errors
 
     @property
     def remember_me(self) -> bool:
@@ -712,6 +725,11 @@ class PyonirRequestInput(BaseModel):
         from pyonir.core.security import INVALID_PASSWORD_MESSAGE
         if not self.password or len(self.password) < 6:
             self._errors.append(INVALID_PASSWORD_MESSAGE)
+
+    def is_valid(self) -> bool:
+        self.validate_email()
+        self.validate_password()
+        return len(self._errors) == 0
 
     # ---------- Constructors ----------
 
@@ -985,32 +1003,36 @@ class PyonirRequest:
 
     def set_file_resolver(self):
         """Updates request data a callable method to execute during request."""
-        from pyonir import Site
         from pyonir.core.utils import get_attr
-        if not self.file: return
-        resolver_obj = self.file.data.get('@resolvers', {})
+        resolver_obj = self.file.data.get('@resolvers', {}) if self.file else {}
         resolver_action = resolver_obj.get(self.method)
-        if not resolver_action: return
-        resolver_path = resolver_action.pop('call')
+        if not resolver_obj: return
+        if resolver_obj and not resolver_action:
+            self.file.data = self.render_error()
+            return
+        resolver_path = resolver_action.pop('call', False)
+        resolver = None
 
-        # TODO: use the app ctx activated plugins instead of global app
-        app_plugin = list(filter(lambda p: p.name == resolver_path.split('.')[0], Site.activated_plugins))
-        app_plugin = app_plugin[0] if len(app_plugin) else self.pyonir_app
-        resolver = app_plugin.reload_resolver(resolver_path)
+        if resolver_path:
+            app_plugin = self.app_ctx_ref if self.app_ctx_ref != self.pyonir_app else self.pyonir_app
+            resolver = app_plugin.reload_resolver(resolver_path)
+
+        # Set custom headers from file spec into response values
         custom_response_headers = get_attr(resolver_action, 'headers', {})
-
         if custom_response_headers:
             for k, v in custom_response_headers.items():
-                self.server_response.set_headers(k,v)
+                self.server_response.set_header(k, v)
             resolver_action.pop('headers')
 
-        self.file.data.update(resolver_action)
+        self.file.data = resolver_action
+        # self.file.data.update(resolver_action)
         self.request_input.body.update(resolver_action)
         self.file_resolver = resolver
 
 
     def render_error(self):
         """Data output for an unknown file path for a web request"""
+        self.server_response.status_code = 404
         return {
             "url": self.url,
             "title": f"{self.path} was not found!",
@@ -1030,9 +1052,9 @@ class PyonirRequest:
         ctx_virtual_file.data = {'url': self.url, 'slug': self.slug, **(vdata or {})}
         ctx_virtual_file.is_virtual_route = bool(vkey)
         if wildcard_vdata:
-            merge_dict(wildcard_vdata, ctx_virtual_file.data)
+            merge_dict(wildcard_vdata, vdata or ctx_virtual_file.data)
         ctx_virtual_file.apply_filters()
-        return ctx_virtual_file, vkey
+        return ctx_virtual_file, ("*" if not vkey and wildcard_vdata else vkey)
 
     def _get_virtual_params(self, virtual_data: Dict = None) -> Union[tuple[str, dict, dict, dict], tuple[None, None, None, dict]]:
         """Performs url pattern matching against virtual routes and returns vitual page data and new path parameter values."""

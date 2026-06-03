@@ -118,6 +118,7 @@ class DeserializeFile:
         self.deserializer()
         # Post-processing
         self.apply_filters()
+        self.extend_data()
         # if self.file_exists and self.is_page:
         #     # Cache object
         #     FileCache[self.file_path] = self
@@ -144,6 +145,12 @@ class DeserializeFile:
             pass
 
         RETRY_MAP.clear()
+
+    def extend_data(self):
+        """Merges file data from another file"""
+        ext = self.data.get('@extends')
+        if not ext: return
+        self.data = {**ext, **self.data}
 
     def apply_filters(self):
         """Applies filter methods to data attributes"""
@@ -236,6 +243,7 @@ class DeserializeFile:
         self._blob_keys.clear()
         self.deserializer()
         self.apply_filters()
+        self.extend_data()
 
     def prev_next(self):
         from pyonir.core.database import CollectionQuery
@@ -516,20 +524,20 @@ def parse_ref_to_files(filepath, file_name, app_ctx, attr_path: str = None, quer
     from pyonir.core.loaders import import_module
     from pyonir.core.schemas import Graphiti
     as_dir = os.path.isdir(filepath)
+    # Ref parameters with model will return a generic model to represent the data value
+    model = None
+    generic_model_properties = query_params.get('model')
+    if generic_model_properties:
+        if '.' in generic_model_properties and not generic_model_properties.startswith('{'):
+            pkg, mod = os.path.splitext(generic_model_properties)
+            mod = mod[1:]
+            model = import_module(pkg, callable_name=mod)
+        else:
+            model = Graphiti(generic_model_properties, app_ctx=app_ctx)
     if as_dir:
         # use proper app context for path reference outside of scope is always the root level
-        # Ref parameters with model will return a generic model to represent the data value
-        model = None
-        generic_model_properties = query_params.get('model')
         include_names = tuple(query_params.get('include_names').split('|')) if query_params.get('include_names') else None
         return_all_files = query_params.get('limit','') == '*'
-        if generic_model_properties:
-            if '.' in generic_model_properties and not generic_model_properties.startswith('{'):
-                pkg, mod = os.path.splitext(generic_model_properties)
-                mod = mod[1:]
-                model = import_module(pkg, callable_name=mod)
-            else:
-                model = Graphiti(generic_model_properties, app_ctx=app_ctx)
 
         collection = CollectionQuery(filepath, app_ctx=app_ctx,
                                      model=model,
@@ -539,7 +547,8 @@ def parse_ref_to_files(filepath, file_name, app_ctx, attr_path: str = None, quer
         _data = collection.set_params(query_params).paginated_collection()
     else:
         if not attr_path: attr_path = 'data'
-        _data = DeserializeFile(filepath, app_ctx=app_ctx)
+        _data = DeserializeFile(filepath, app_ctx=app_ctx, model=model)
+        if model: _data = _data.to_schema()
     res = get_attr(_data, attr_path) or _data
     return res
 

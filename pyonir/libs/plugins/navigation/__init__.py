@@ -30,7 +30,7 @@ class Navigation(PyonirPlugin):
     name = 'pyonir_navigation'
 
     def __init__(self, app: Pyonir):
-        self.app = app
+        super().__init__(app=app, parent=self)
         self.menus = {}
         self.active_page = None
         self.build_navigation(app=app)
@@ -40,17 +40,17 @@ class Navigation(PyonirPlugin):
         self.add_menus_to_environment(app)
         pass
 
-    def after_init(self, data: any, app: Pyonir):
-        self.build_plugins_navigation(app)
+    def after_init(self, data: any):
+        self.build_plugins_navigation(self.pyonir_app)
 
-    async def on_request(self, request: PyonirRequest, app: Pyonir):
+    async def on_request(self, request: PyonirRequest):
         """Executes task on web request"""
         refresh_nav = bool(getattr(request.request_input.body,'rnav', None))
-        curr_nav = app.TemplateEnvironment.globals.get('navigation')
+        curr_nav = self.pyonir_app.TemplateEnvironment.globals.get('navigation')
         if curr_nav and not refresh_nav: return None
         self.active_page = request.path
-        self.build_navigation(app)
-        self.add_menus_to_environment(app)
+        self.build_navigation(self.pyonir_app)
+        self.add_menus_to_environment(self.pyonir_app)
 
     def add_menus_to_environment(self, app: Pyonir):
         app.TemplateEnvironment.globals['navigation'] = self.menus.get(app.name)
@@ -84,10 +84,10 @@ class Navigation(PyonirPlugin):
             return dict(grouped)  # convert to plain dict if you like
         result = group_by_menu(file_list)
         # merge menus
-        main_ref = self.menus.get(self.app.name, {})
+        main_ref = self.menus.get(self.pyonir_app.name, {})
         if main_ref:
             for k,v in main_ref.items():
                 if result.get(k):
                     main_ref[k] += result[k]
-            self.menus[self.app.name] = main_ref
+            self.menus[self.pyonir_app.name] = main_ref
         self.menus[app.name] = result

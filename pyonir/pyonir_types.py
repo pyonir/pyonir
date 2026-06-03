@@ -250,6 +250,7 @@ class AbstractFSQuery:
         if not self.sorted_files:
             self.sorted_files = SortedList(self.query_fs, lambda x: get_attr(x, self.order_by) or x)
         target = list(self.sorted_files)
+        self.max_count = sum(1 for _ in filter(match, target))
         self.sorted_files = filter(match, target)
         return self
 

@@ -5,7 +5,7 @@ from pyonir import PyonirRequest
 
 from pyonir.core.app import BaseApp
 from pyonir.core.server import PyonirJSONResponse
-from pyonir.core.security import PyonirSecurity, PyonirUser
+from pyonir.core.security import PyonirSecurity, PyonirUser, AuthProvider
 
 
 class BaseService(ABC):
@@ -138,7 +138,8 @@ class PyonirAuthService:
             else:
                 response = security.responses.SERVER_OK
         else:
-            response = security.responses.ERROR
+            errs = '\n<br/>'.join(security.creds.errors)
+            response = security.responses.ERROR.response(f"{errs}")
             response.status_code = 400
 
         return response
@@ -161,7 +162,8 @@ class PyonirAuthService:
         security = request.security
         security.set_signin_attempt()
         if not security.creds.is_valid():
-            server_response = security.responses.INVALID_CREDENTIALS
+            errs = '\n<br/>'.join(security.creds.errors)
+            server_response = security.responses.INVALID_CREDENTIALS.response(f"{errs}")
         else:
             if security.has_signin_exceeded():
                 server_response = security.responses.TOO_MANY_REQUESTS
@@ -169,6 +171,8 @@ class PyonirAuthService:
                 _user = security.authenticated_user
                 if not _user:
                     server_response = security.responses.NO_ACCOUNT_EXISTS
+                elif _user and _user.auth_provider != AuthProvider.LOCAL:
+                    server_response = security.responses.SSO_REQUIRED
                 else:
                     security.create_session(_user)
                     server_response = security.responses.SUCCESS

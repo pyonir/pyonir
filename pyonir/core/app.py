@@ -45,6 +45,7 @@ class Base:
     _configs: Optional[object] # context settings
     _resolvers = Optional[dict] # resolver registry
     _virtual_file: Optional[DeserializeFile] = None
+    is_plugin = False
 
     # FIELDS
     @property
@@ -167,6 +168,14 @@ class Base:
 
 
     # RUNTIME
+    def after_init(self, data: any):
+        """Execute plugin after Pyonir application starts"""
+        pass
+
+    async def on_request(self, request: 'BaseRequest'):
+        """Executed during web request"""
+        pass
+
     def process_configs(self):
         """Processes all context settings"""
         from pyonir.core.utils import process_contents
@@ -247,7 +256,6 @@ class Base:
 
         return resolver
 
-    # @staticmethod
     def generate_resolvers(self, cls: callable, namespace: str = '', output_dirpath: str = None):
         """Automatically generate api endpoints from service class or module."""
         import textwrap, inspect, datetime
@@ -328,23 +336,15 @@ class Base:
 
 class BasePlugin(Base):
 
-    def after_init(self, data: any, app: BaseApp):
-        """Execute plugin after Pyonir application starts"""
-        pass
-
-    def on_request(self, request: 'BaseRequest', app: BaseApp):
-        """Executed during web request"""
-        pass
-
     def __init__(self, app, parent):
         from pyonir import Pyonir
-        self.app: Pyonir = app
+        self.pyonir_app: Pyonir = app
         self.name: str = parent.__class__.__name__.lower()
 
     @property
     def app_ctx(self):
         """plugins app context is relative to the application context"""
-        return self.name, self.endpoint, self.contents_dirpath, os.path.join(self.app.ssg_dirpath, self.endpoint), self.app.datastore_dirpath
+        return self.name, self.endpoint, self.contents_dirpath, os.path.join(self.pyonir_app.ssg_dirpath, self.endpoint), self.pyonir_app.datastore_dirpath
 
     @property
     def request_paths(self):
@@ -359,38 +359,38 @@ class BasePlugin(Base):
     @property
     def datastore_dirpath(self) -> str:
         """Child Directory path for file system data storage within parent application datastore path"""
-        return os.path.join(self.app.datastore_dirpath, self.name)
+        return os.path.join(self.pyonir_app.datastore_dirpath, self.name)
 
     @property
     def contents_dirpath(self) -> str:
         """path to plugin contents within the application contents directory"""
-        return os.path.join(self.app.contents_dirpath, f'@{self.name}')
+        return os.path.join(self.pyonir_app.contents_dirpath, f'@{self.name}')
 
     @property
     def pages_dirpath(self) -> str:
         """Directory path for serving shop pages and routes"""
-        return os.path.join(self.contents_dirpath, self.app.PAGES_DIRNAME)
+        return os.path.join(self.contents_dirpath, self.pyonir_app.PAGES_DIRNAME)
 
     @property
     def api_dirpath(self) -> str:
         """API directory for the plugin"""
-        return os.path.join(self.contents_dirpath, self.app.API_DIRNAME)
+        return os.path.join(self.contents_dirpath, self.pyonir_app.API_DIRNAME)
 
     @property
     def ssg_dirpath(self) -> str:
         """SSG Directory path for generating shop pages and routes"""
-        return os.path.join(self.app.ssg_dirpath, self.endpoint)
+        return os.path.join(self.pyonir_app.ssg_dirpath, self.endpoint)
 
     @property
     def configs(self) -> object:
         """Plugin settings are pulled from the application settings"""
-        plugin_settings = getattr(self.app.configs, self.name)
+        plugin_settings = getattr(self.pyonir_app.configs, self.name)
         return plugin_settings
 
     @property
     def env(self):
         """Application context environment configurations"""
-        plugin_env_configs = getattr(self.app.env, self.name)
+        plugin_env_configs = getattr(self.pyonir_app.env, self.name)
         return plugin_env_configs
 
 class PluginManager:
@@ -447,7 +447,7 @@ class PluginManager:
         for plg_id, plg in self.installed_plugins.items():
             if not plg or not hasattr(plg, hook): continue
             hook_method = getattr(plg, hook)
-            hook_method(data_value, self.app_ctx)
+            hook_method(data_value)
 
     async def run_async_plugins(self, hook: PyonirHooks, data_value=None):
         """Run async plugin hooks"""
@@ -456,7 +456,7 @@ class PluginManager:
         for plg_id, plg in self.installed_plugins.items():
             if not plg or not hasattr(plg, hook_method_name): continue
             hook_method = getattr(plg, hook_method_name)
-            await hook_method(data_value, self.app_ctx)
+            await hook_method(data_value)
 
 class BaseApp(Base):
     # Default config settings

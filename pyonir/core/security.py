@@ -3,7 +3,6 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Optional, Tuple, Union, Dict, List, Any
 
-from starlette.datastructures import UploadFile
 
 from pyonir.core.server import RouteConfig
 from pyonir import PyonirRequest, BaseApp
@@ -13,6 +12,13 @@ from starlette.requests import Request as StarletteRequest
 
 INVALID_EMAIL_MESSAGE: str = "Invalid email address format"
 INVALID_PASSWORD_MESSAGE: str = "Incorrect password"
+
+class AuthProvider(StrEnum):
+    LOCAL = "local"
+    GOOGLE = "google"
+    MICROSOFT = "microsoft"
+    OKTA = "okta"
+    GITHUB = "github"
 
 class AuthenticationTypes(StrEnum):
     BASIC = "basic"
@@ -137,6 +143,9 @@ class PyonirUser(BaseSchema, table_name='users'):
     uid: str = None
     """Unique identifier for the user"""
 
+    auth_provider: AuthProvider = AuthProvider.LOCAL
+    """Authentication provider type used during account creation"""
+
     auth_token: Optional[str] = None
     """Authentication token used during user sign-in"""
 
@@ -260,7 +269,8 @@ class PyonirSecurity:
 
     @property
     def redirect_to(self):
-        return self.creds.body.get('redirect_to')
+        redirect_url = self._security_configs.get('redirect') or self._security_configs.get('redirect_to')
+        return self.creds.body.get('redirect_to', redirect_url)
 
     @property
     def authenticated_user(self):
@@ -271,8 +281,10 @@ class PyonirSecurity:
 
         if flow in {AuthMethod.BASIC, AuthMethod.BODY}:
             # check creds with datasource
-            _user: PyonirUser = self._get_user_profile(creds.email)
+            _user: PyonirUser = self.get_user_profile(creds.email)
+            requires_sso = _user and _user.auth_provider != AuthProvider.LOCAL
             if not _user: return None
+            if requires_sso: return _user
             requested_passw = self.harden_password(self.pyonir_app.salt, creds.password, _user.auth_token)
             has_valid_creds = check_pass(_user.password, requested_passw)
             return _user if has_valid_creds else None
@@ -281,7 +293,7 @@ class PyonirSecurity:
             # check active session and query user details
             if not self.session:
                 return None
-            _user = self._get_user_profile()
+            _user = self.get_user_profile()
             if not _user:
                 self.end_session()
             return _user
@@ -290,6 +302,42 @@ class PyonirSecurity:
             pass
 
         return None
+
+    def apply_security_configs(self, route_config: RouteConfig):
+        from .utils import get_attr
+        file = self.request.file
+
+        file_data = file.data if file else None
+        # Router configurations
+        route_headers_configs = get_attr(route_config.configs, '@response.headers', {})
+        route_security_configs = get_attr(route_config.configs, '@security', {})
+        route_security_response = get_attr(route_config.configs, '@security.responses', {})
+
+        # File configurations
+        file_headers_configs = get_attr(file_data, '@response.headers', {})
+        file_security_configs = get_attr(file_data, '@security', {})
+        file_security_response = get_attr(file_data, '@security.responses', {})
+
+        # Consolidate configurations (file configs higher priority)
+        security_responses = {**route_security_response, **file_security_response}
+        response_headers = {**route_headers_configs, **file_headers_configs}
+        security_configs = {**route_security_configs, **file_security_configs}
+
+        self._route_config = route_config
+        self._security_configs = security_configs
+        self.request.server_response.set_headers(response_headers)
+        self.request.server_response.responses.add_responses(security_responses)
+
+
+    def verify_request_access(self, request: PyonirRequest = None):
+        req = request or self.request
+        # user = self.authenticated_user
+        # requires_basic_auth = bool(self._security_configs and self._security_configs.get('type') == 'basic')
+        if self.is_denied:
+            self.request.server_response.set_redirect(self.redirect_to or '/')
+        # 1. check route requires authenticated user
+        # 2. check for user access to route
+        # 3. check for proper
 
     def secure_credentials(self, password: str) -> Tuple[str, str]:
         """Generates a new auth token and hashes the password."""
@@ -314,7 +362,7 @@ class PyonirSecurity:
         jwt_token = _encode_jwt(user_jwt, self.pyonir_app.salt)
         return jwt_token
 
-    def _get_user_profile(self, user_email: str = None) -> Optional[PyonirUser]:
+    def get_user_profile(self, user_email: str = None) -> Optional[PyonirUser]:
         """Pyonir queries the file system for user account based on the provided credentials"""
         # access user guid from session or email if available
         has_session = self.creds.session_id
@@ -340,16 +388,6 @@ class PyonirSecurity:
             self._reset_signin_attempts()
         pass
 
-    def get_user_profile(self, user_email: str = None) -> Optional[PyonirUser]:
-        """Pyonir queries the file system for user account based on the provided credentials"""
-        # access user guid from session or email if available
-        has_session = self.creds.session_id
-        uid = has_session if has_session else generate_user_id(from_email=user_email or self.creds.email, salt=self.pyonir_app.salt)
-        # directory path to query a user profile from file system
-        model_file_name = self.user_model._file_name if hasattr(self.user_model, '_file_name') else 'profile.json'
-        user_account_path = os.path.join(self.pyonir_app.datastore_dirpath, self.user_model.__table_name__, uid or '', model_file_name)
-        user_account = self.user_model.from_file(user_account_path, app_ctx=self.request.app_ctx_ref.app_ctx) if os.path.exists(user_account_path) else None
-        return user_account
 
     def create_session(self, user: PyonirUser):
         """Creates a user session for the authenticated user."""

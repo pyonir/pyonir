@@ -594,7 +594,7 @@ class PyonirDatabaseService:
         self.connect()
 
         keys, values = self.schema_params(entity, as_upsert)
-        sql = entity.sql_insert if not as_upsert else entity.sql_upsert
+        sql = entity.sql_upsert if as_upsert else entity.sql_insert
 
         cursor = self.connection.cursor()
         try:

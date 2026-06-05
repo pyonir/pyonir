@@ -28,6 +28,7 @@ class BasePage:
     template: str = 'pages.html'
     url: str = ''
     slug: str = ''
+    order: int = -1
     created_on: datetime = None
     modified_on: datetime = None
     _category: str = ''

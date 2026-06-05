@@ -478,6 +478,7 @@ class PyonirServerResponse:
         return self
 
     def set_data(self, value: Any):
+        if isinstance(value, PyonirServerResponse): return
         if isinstance(value, FileResponse):
             self.media_type = STATIC_RES
         self._data = value
@@ -551,52 +552,50 @@ class PyonirServerResponse:
             args = func_request_mapper(router_func, pyonir_request)
             router_func_response = await router_func(**args) if is_async else router_func(**args)
             res.set_data(router_func_response)
+            if isinstance(router_func_response, PyonirServerResponse):
+                res = router_func_response
             await app_ctx.on_request(request=pyonir_request)
 
         return res
 
     def build(self) -> Response:
         """Builds the Starlette server response object"""
-        from pyonir.core.utils import to_json
         from pyonir.core.schemas import Graphiti
 
         file = self._pyonir_request.file
+        is_static = self._pyonir_request.is_static
         has_form_redirect = self._pyonir_request.security.creds.body.get('redirect')
-        has_data = self._data is not None
+        has_content = self._html is not None or self._json is not None
+        has_file = file and not file.file_exists
+        is_404 = not has_content and not is_static and has_file
+        content = None
 
         if not self._redirect and has_form_redirect:
             self.set_redirect(has_form_redirect)
+        if is_404 or (not is_static and has_file and file.is_virtual_route):
+            self.media_type = JSON_RES if self._pyonir_request.is_api else TEXT_RES
+            self.status_code = 404
+            file = self.error_page()
+        if file and not has_content:
+            self.set_json(file.data) if self._pyonir_request.is_api else self.set_html(file.output_html(self._pyonir_request))
 
         if self.status_code >= 500:
             raise HTTPException(status_code=self.status_code, detail="System error occurred")
         if self._redirect:
             return self._redirect
-
         if self.media_type == STATIC_RES:
             return self._data
         if self.media_type == EVENT_RES:
             return StreamingResponse(content=self._stream, media_type=EVENT_RES)
+        if self.media_type == JSON_RES:
+            graphiti_model = self._pyonir_request.form.get(Graphiti.QUERY_KEY)
+            if graphiti_model:
+                g = Graphiti(graphiti_model, self._json_dict).__as_dict__
+                self.set_json(g)
+            content = self._json
+        elif self.media_type == TEXT_RES:
+            content = self._html
 
-        if isinstance(self._data, PyonirJSONResponse):
-            self.set_json(self._data.to_dict())
-        if isinstance(self._data, PyonirServerResponse):
-            return self._data.build()
-
-        if file or has_data:
-            if not self.status_code: self.status_code = 200
-            if self._pyonir_request.is_api: self.set_json(self._data if has_data else file.data)
-            else: self.set_html(self._data if has_data else file.output_html(self._pyonir_request))
-
-        graphiti_model = self._pyonir_request.form.get(Graphiti.QUERY_KEY)
-        if self.media_type == JSON_RES and graphiti_model:
-            self.set_json(Graphiti(graphiti_model, self._json_dict).__as_dict__)
-
-        content = self._html or self._json
-        is_404 = not content
-        if is_404 and not self._pyonir_request.is_static:
-            self.media_type = JSON_RES if self._pyonir_request.is_api else TEXT_RES
-            _e = self.error_page()
-            content = to_json(_e) if self._pyonir_request.is_api else _e.output_html(self._pyonir_request)
 
         server_res = Response(content=content, media_type=self.media_type, status_code=self.status_code)
 
@@ -884,10 +883,10 @@ class PyonirRequest:
         self.file = None
         return self.server_response.set_redirect(url, code=code)
 
-    def json(self, data: Any = None, status_code: int = 200, message: str = None) -> PyonirServerResponse:
+    def json_response(self, data: Any = None, status_code: int = 200, message: str = None) -> PyonirServerResponse:
         return self.render(JSON_RES, data, status_code, json_message=message)
 
-    def html(self, data: Any = None, status_code: int = 200, template: str = None) -> PyonirServerResponse:
+    def html_response(self, data: Any = None, status_code: int = 200, template: str = None) -> PyonirServerResponse:
         return self.render(TEXT_RES, data, status_code, template)
 
     def render(self,
@@ -1050,7 +1049,7 @@ class PyonirRequest:
             ctx_virtual_file.replay_retry()
             vdata = ctx_virtual_file.data.get(vkey) if vkey else vdata
         ctx_virtual_file.data = {'url': self.url, 'slug': self.slug, **(vdata or {})}
-        ctx_virtual_file.is_virtual_route = bool(vkey)
+        # if vkey is None: ctx_virtual_file.is_virtual_route = bool(vkey)
         if wildcard_vdata:
             merge_dict(wildcard_vdata, vdata or ctx_virtual_file.data)
         ctx_virtual_file.apply_filters()

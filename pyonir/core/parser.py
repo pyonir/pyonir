@@ -94,9 +94,7 @@ class DeserializeFile:
             self.is_home = (
                 is_page and contents_relpath == f"{self._routes_dirname}/index"
             )
-            self.is_virtual_route = self.file_path.endswith(
-                self._virtual_route_filename
-            )
+            self.is_virtual_route = self.file_path.endswith(DeserializeFile._virtual_route_filename)
             # page attributes
             if not self.is_virtual_route:
                 surl = (
@@ -252,10 +250,10 @@ class DeserializeFile:
             return None
         return CollectionQuery.prev_next(self)
 
-    def to_schema(self):
+    def to_schema(self, schema: object = None):
         """Returns a schema representation of the file data"""
         from pyonir.core.mapper import dto_mapper
-        return dto_mapper(self, self.schema) if self.schema and self.data else self.data
+        return dto_mapper(self, schema or self.schema) if schema or self.schema and self.data else self.data
 
     def to_named_tuple(self):
         """Returns a tuple representation of the file data"""

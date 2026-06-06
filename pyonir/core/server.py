@@ -56,7 +56,8 @@ def generate_nginx_conf(app: BaseApp) -> bool:
         site_uploads_route=app.uploads_route,
         site_uploads_dirpath=app.uploads_dirpath,
         site_ssg_dirpath=app.ssg_dirpath,
-        custom_nginx_locations=get_attr(app.server, 'nginx_locations')
+        custom_nginx_locations=get_attr(app.server, 'nginx_locations'),
+        **app.TemplateEnvironment.context,
     )
 
     return create_file(app.nginx_config_filepath, nginx_conf, False)

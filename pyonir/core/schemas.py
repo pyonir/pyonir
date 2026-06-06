@@ -231,8 +231,9 @@ class BaseSchema(BaseModel):
         file_name = getattr(self, self._lookup_table)
         if not file_name:
             raise AttributeError("Lookup table value is not defined")
-        file_name = os.path.basename(self.file_path) if self.file_path else f'{file_name}.json'
-        return f"{LOOKUP_DATA_PREFIX}/{self.table_name}/{file_name}#data.{self._lookup_table}"
+        file_name = os.path.basename(self.file_path) if self.file_path else f'{self.formated_filename(file_name)}.json'
+        with_attr_path = f".{self._lookup_table}" if self._unique_keys else ""
+        return f"{LOOKUP_DATA_PREFIX}/{self.table_name}/{file_name}#data{with_attr_path}"
 
     @property
     def table_name(self):
@@ -284,6 +285,9 @@ class BaseSchema(BaseModel):
         """Dataclass post init callback"""
         self._errors = []
         self.validate_fields()
+
+    def formated_filename(self, filename: str = None):
+        return filename
 
     def remove_file(self):
         if hasattr(self, 'file_path'):
@@ -383,7 +387,6 @@ class BaseSchema(BaseModel):
             return value
 
         res = {key.column_name: process_value(key.base, getattr(self, key.column_name)) for key in self.schema_columns() if not is_ignored(key.column_name) and not obfuscated(key)}
-        # res = {key: process_value(key, getattr(self, key)) for key, ktype, *args in self.__fields__ if not is_ignored(key) and not obfuscated(key)}
         # save primary key value under a special key for lookup when reconstructing from file
         if with_props:
             for prop in with_props:
@@ -411,457 +414,6 @@ class BaseSchema(BaseModel):
     def generate_date(date_value: str = None) -> datetime:
         from pyonir.core.utils import generate_date
         return generate_date(date_value)
-
-
-# class xBaseSchema:
-#     """
-#     Interface for immutable dataclass models with CRUD and session support.
-#     """
-#     __alias__: dict = {}
-#     __frozen__:bool = False
-#     _errors: list[str]
-#     _private_keys: Optional[list[str]]
-#
-#     __table_name__: str
-#     __fields__: List[tuple[str, type]]
-#     __primary_key__: str
-#     __primary_key_value__: int
-#     __foreign_keys__: Set[Any]
-#     __fk_options__: Dict
-#     __table_columns__: List[Any]
-#     _sql_create_table: Optional[str]
-#     _sql_insert: Optional[str]
-#     _sql_upsert: Optional[str]
-#     _foreign_key_names: Set[str]
-#     _mutable_columns: List[str]
-#     """mutable database columns names"""
-#     _unique_keys: List[str]
-#     _nullable_keys: Set[str]
-#     _timestamp_keys: Set[str]
-#     _lookup_table: str
-#
-#     created_by: str = lambda: get_active_user()
-#     created_on: datetime = lambda: BaseSchema.generate_date()
-#     _file_path: str
-#     _file_name: str
-#
-#     def __init_subclass__(cls,
-#                           table_name: Optional[str] = None,
-#                           unique_keys: Optional[List[str]] = None,
-#                           foreign_keys: Optional[List[str]] = None,
-#                           file_name: Optional[str] = None,
-#                           is_singleton: bool = False,
-#                           **kwargs):
-#         from pyonir.core.mapper import collect_type_hints, unwrap_optional
-#         fields = collect_type_hints(cls)
-#         setattr(cls, "__fields__", fields)
-#         if table_name:
-#             setattr(cls, "__table_name__", table_name)
-#             primary_key = kwargs.get("primary_key", '')
-#             alias = kwargs.get("alias_map", {})
-#             frozen = kwargs.get("frozen", False)
-#             foreign_keys = foreign_keys or set()
-#             foreign_key_options = kwargs.get("fk_options", {})
-#             unique_keys = unique_keys or []
-#             timestamps_keys = kwargs.get("timestamp_keys", set())
-#             lookup_table_key = kwargs.get("lookup_table", False)
-#             mutable_columns = kwargs.get("mutable_columns", False)
-#             nullable_keys = set()
-#             foreign_fields = set()
-#             foreign_field_names = set()
-#             model_fields = list()
-#             table_columns = list()
-#             timestamps_keys.add("created_on")
-#             primary_keys = list()
-#             returning_cols = []
-#
-#             def is_fk(name, typ):
-#                 is_baseschema = issubclass(typ, BaseSchema) and hasattr(typ, '__table_name__')
-#                 if is_baseschema or (foreign_keys and typ in foreign_keys):
-#                     foreign_fields.add((name, typ))
-#                     foreign_field_names.add(name)
-#                     return True
-#                 return False
-#
-#             def is_callable_fn(val):
-#                 if callable(val):
-#                     setattr(cls, name, staticmethod(val))
-#
-#             _all_unique = '*' in unique_keys
-#             if _all_unique: unique_keys = list()
-#             has_sys_cols = False
-#             for name, typ in fields:
-#                 if not has_sys_cols:
-#                     has_sys_cols = name in SYSTEM_COLUMNS
-#                 fktyp, *t = unwrap_optional(typ)
-#                 is_nullable = typ != fktyp
-#                 is_pk = primary_key and primary_key == name
-#                 if is_pk:
-#                     primary_keys = (name, typ)
-#                 if is_nullable:
-#                     nullable_keys.add(name)
-#                 is_fk(name, fktyp)
-#                 is_callable_fn(getattr(cls, name, None))
-#                 model_fields.append((name, fktyp))
-#                 table_columns.append(name)
-#                 if _all_unique and name not in SYSTEM_COLUMNS:
-#                     unique_keys.append(name)
-#             if not has_sys_cols:
-#                 model_fields += SYSTEM_COLUMN_TYPES
-#                 table_columns += SYSTEM_COLUMNS
-#             setattr(cls, "__alias__", alias)
-#             setattr(cls, "__frozen__", frozen)
-#             setattr(cls, "_errors", [])
-#             setattr(cls, "_file_path", None)
-#
-#             setattr(cls, "__table_name__", table_name)
-#             setattr(cls, "__fields__", model_fields)
-#             setattr(cls, "__primary_key__", primary_key)
-#             setattr(cls, "__primary_key_value__", None)
-#             setattr(cls, "__foreign_keys__", foreign_fields)
-#             setattr(cls, "__fk_options__", foreign_key_options)
-#             setattr(cls, "__table_columns__", table_columns)
-#             setattr(cls, "_primary_keys", primary_keys)
-#             setattr(cls, "_foreign_key_names", foreign_field_names)
-#             setattr(cls, "_mutable_columns", mutable_columns)
-#             setattr(cls, "_unique_keys", unique_keys)
-#             setattr(cls, "_nullable_keys", nullable_keys)
-#             setattr(cls, "_timestamp_keys", timestamps_keys)
-#             setattr(cls, "_lookup_table", lookup_table_key)
-#             setattr(cls, "_file_name", file_name or cls.__name__.lower())
-#             setattr(cls, "_is_singleton", is_singleton)
-#
-#             sqla_table = cls.generate_sqla_table()
-#             setattr(cls, "_sqla_table", sqla_table)
-#             setattr(cls, "_sql_create_table", generate_sqla(sqla_table, True))
-#             setattr(cls, "_sql_insert", generate_sqla(sqla_table, is_insert=True, returning_cols=returning_cols, update_cols=mutable_columns))
-#             setattr(cls, "_sql_upsert", generate_sqla(sqla_table, returning_cols=returning_cols, update_cols=mutable_columns))
-#
-#
-#     def __init__(self, **data):
-#         from pyonir.core.mapper import coerce_value_to_type, cls_mapper, unwrap_optional
-#         fks = getattr(self, '_foreign_key_names', None) or set()
-#         pkv = data.get('__primary_key_value__', None)
-#         cls = self.__class__
-#         for field_name, field_type in self.__fields__:
-#             value = data.get(field_name)
-#             default_value = getattr(cls, field_name, None) if value is None else value
-#             value = default_value() if callable(default_value) else default_value
-#
-#             if data:
-#                 custom_mapper_fn = getattr(self, f'map_to_{field_name}', None)
-#                 type_factory = getattr(cls, field_name, custom_mapper_fn)
-#                 has_correct_type = isinstance(value, field_type)
-#                 if not has_correct_type:
-#                     if field_name in fks:
-#                         is_nullable = field_name in self._nullable_keys and not value
-#                         value = cls_mapper(value, field_type, type_factory=type_factory, is_fk=True) if not is_nullable else value
-#                     else:
-#                         value = coerce_value_to_type(value, field_type, factory_fn=type_factory) if (value is not None) or type_factory else None
-#             setattr(self, field_name, value)
-#         if pkv:
-#             setattr(self, '__primary_key_value__', int(pkv))
-#         self._errors = []
-#         self.validate_fields()
-#         self._after_init()
-#
-#     @property
-#     def id(self):
-#         return self.__primary_key_value__
-#
-#     @property
-#     def file_dirpath(self):
-#         return os.path.dirname(self._file_path) if self.file_path else None
-#
-#     @property
-#     def file_path(self):
-#         if not hasattr(self, '_file_path'): return None
-#         return self._file_path
-#
-#     @property
-#     def is_lookup_table(self):
-#         if not hasattr(self, '_lookup_table'): return None
-#         return bool(self._lookup_table)
-#
-#     @property
-#     def lookup_table_ref_url(self) -> Optional[str]:
-#         """Creates the lookup table reference path"""
-#         if not self.is_lookup_table: return None
-#         file_name = os.path.basename(self.file_path) if self.file_path else getattr(self, self._lookup_table)+'.json'
-#         return f"{LOOKUP_DATA_PREFIX}/{self.__table_name__}/{file_name}#data.{self._lookup_table}"
-#
-#     @property
-#     def pyonir_app(self):
-#         from pyonir import Site
-#         return Site if Site else None
-#
-#     def set_primary_key(self, value: any):
-#         self.__primary_key_value__ = value
-#
-#     def is_valid(self) -> bool:
-#         """Returns True if there are no validation errors."""
-#         return not self._errors
-#
-#     def validate_fields(self, field_name: str = None):
-#         """
-#         Validates fields by calling `validate_<fieldname>()` if defined.
-#         Clears previous errors on every call.
-#         """
-#         if field_name is not None:
-#             validator_fn = getattr(self, f"validate_{field_name}", None)
-#             if callable(validator_fn):
-#                 validator_fn()
-#             return
-#         for name, typ in self.__fields__:
-#             validator_fn = getattr(self, f"validate_{name}", None)
-#             if callable(validator_fn):
-#                 validator_fn()
-#
-#     def model_post_init(self, __context):
-#         """sqlmodel post init callback"""
-#         object.__setattr__(self, "_errors", [])
-#         self.validate_fields()
-#
-#     def _after_init(self):
-#         """Hook for additional initialization in subclasses."""
-#         pass
-#
-#     def __post_init__(self):
-#         """Dataclass post init callback"""
-#         self._errors = []
-#         self.validate_fields()
-#
-#     def update(self, data: object) -> 'BaseSchema':
-#         """Update mutable fields of the schema instance."""
-#         for key, _ in self.__fields__:
-#             curr_value = getattr(self, key, None)
-#             nxt_value = get_attr(data, key) or None
-#             if nxt_value is not None and curr_value != nxt_value:
-#                 setattr(self, key, nxt_value)
-#         return self
-#
-#     def remove_file(self):
-#         if hasattr(self, 'file_path'):
-#             os.remove(self.file_path)
-#
-#     def save_to_file(self, file_path: str = None, with_props: list = None):
-#         from pyonir.core.utils import create_file
-#         from pyonir.core.parser import LOOKUP_DATA_PREFIX
-#         from pyonir import Site
-#         from pyonir.core.security import PyonirUser, PyonirUserMeta
-#         if not file_path:
-#             file_path = self.file_path if self.file_path else f"{self.__class__.__name__.lower()}.json"
-#         _filename = os.path.basename(file_path).split('.')[0]
-#         file_data = self.to_dict(obfuscate=False, with_props=with_props)
-#         active_user_id = get_attr(Site.server.request, 'security.user.uid') or self.created_by
-#         use_filename_as_pk = active_user_id if isinstance(self, (PyonirUser, PyonirUserMeta)) else _filename
-#         _pk_value = get_attr(self, getattr(self, '__primary_key__')) or use_filename_as_pk
-#         _datastore = Site.datastore_dirpath if Site else os.path.dirname(file_path)
-#
-#         if not self.file_path:
-#             self._file_path = file_path
-#         if not self.created_by:
-#             self.created_by = active_user_id
-#
-#         for k, fk_type in self.__foreign_keys__:
-#             data_path = os.path.join(_datastore, fk_type.__table_name__)
-#             fk_schema_inst: BaseSchema = getattr(self, k, None)
-#             if fk_schema_inst and hasattr(fk_schema_inst, "save_to_file"):
-#                 if fk_schema_inst.is_lookup_table:
-#                     # For lookup tables, we reference static file already generated during startup
-#                     fk_lookup_path = fk_schema_inst.lookup_table_ref_url
-#
-#                 else:
-#                     fk_schema_inst.created_by = active_user_id
-#                     # use main schema pk value as the fk file name to show relationship
-#                     fk_file_name = use_filename_as_pk + '.json'
-#                     fk_file_path = os.path.join(data_path, fk_file_name)
-#                     fk_schema_inst.save_to_file(fk_file_path)
-#                     fk_lookup_path = f"{LOOKUP_DATA_PREFIX}/{fk_type.__table_name__}/{fk_file_name}#data"
-#                 # set relationship path on parent schema
-#                 file_data[k] = fk_lookup_path
-#
-#         return create_file(file_path, file_data)
-#
-#     def to_dict(self, obfuscate: bool = True, with_props: list = None) -> dict:
-#         """Dictionary representing the instance"""
-#         is_property = lambda attr: isinstance(getattr(self.__class__, attr, None), property)
-#         obfuscated = lambda attr: obfuscate and hasattr(self,'_private_keys') and attr in (self._private_keys or [])
-#         is_ignored = lambda attr: attr in ('file_path','file_dirpath') or attr.startswith("_") or is_property(attr) or callable(getattr(self, attr)) or obfuscated(attr)
-#
-#         def process_value(key, value):
-#             if hasattr(value, 'to_dict'):
-#                 return value.to_dict(obfuscate=obfuscate, with_props=with_props)
-#             if isinstance(value, property):
-#                 return getattr(self, key)
-#             if isinstance(value, (tuple, list, set)):
-#                 return [process_value(key, v) for v in value]
-#             if isinstance(value, datetime):
-#                 return value.isoformat()
-#             if isinstance(value, Enum):
-#                 return value.value
-#             return value
-#
-#         res = {key: process_value(key, getattr(self, key)) for key, ktype in self.__fields__ if not is_ignored(key) and not obfuscated(key)}
-#         # save primary key value under a special key for lookup when reconstructing from file
-#         if with_props:
-#             for prop in with_props:
-#                 if not obfuscated(prop):
-#                     res[prop] = process_value(prop, getattr(self, prop))
-#         if hasattr(self, '__primary_key_value__'):
-#             res["__primary_key_value__"] = self.id
-#         return res
-#
-#     def to_json(self, obfuscate = True) -> str:
-#         """Returns a JSON serializable dictionary"""
-#         import json
-#         return json.dumps(self.to_dict(obfuscate))
-#
-#     def to_tuple(self) -> tuple:
-#         """Returns a tuple of the model's column values in order."""
-#         from pyonir.core.mapper import is_optional_type
-#
-#         columns = []
-#         values = []
-#         for name, fkmodel in self.__fields__:
-#             columns.append(name)
-#             v = getattr(self, name)
-#             if (name, fkmodel) in self.__foreign_keys__:
-#                 v = get_attr(v, fkmodel.__primary_key__ or 'id')
-#             is_optional_schema = isinstance(v, BaseSchema) and is_optional_type(fkmodel)
-#             v = json.dumps(v, default=json_serial) if is_optional_schema or isinstance(v,(BaseSchema, dict, list, tuple, set)) else v
-#             values.append(v)
-#         return tuple(columns), tuple(values)
-#
-#     @staticmethod
-#     def dict_to_tuple(data: dict, as_update_keys: bool = False) -> tuple:
-#         """Convert a dictionary to a tuple of values in the model's column order."""
-#         keys = ', '.join(data.keys()) if not as_update_keys else ', '.join(f"{k}=?" for k in data.keys())
-#         values = tuple(json.dumps(v) if isinstance(v,(dict, list, tuple, set)) else v for v in data.values())
-#         return keys, values
-#
-#     @staticmethod
-#     def init_lookup_table(dbc: 'PyonirDatabaseService'):
-#         """Initialize lookup table for this model if it has foreign keys."""
-#         return NotImplementedError("init_lookup_table must be implemented in subclasses with foreign keys to initialize related data.")
-#
-#     @classmethod
-#     def get_active_user(cls) -> str:
-#         return get_active_user()
-#
-#     @classmethod
-#     def sql_after_create(cls, dbc: 'PyonirDatabaseService'):
-#         """Initialize lookup table for this model if it has foreign keys."""
-#         pass
-#
-#     @classmethod
-#     def from_file(cls: Type[T], file_path: str, app_ctx=None) -> T:
-#         """Create an instance from a file path."""
-#         from pyonir.core.parser import DeserializeFile
-#         from pyonir.core.mapper import cls_mapper
-#         prsfile = DeserializeFile(file_path, app_ctx=app_ctx)
-#         return cls_mapper(prsfile, cls)
-#
-#     @classmethod
-#     def generate_sqla_table(cls) -> Optional[Table]:
-#         """Generate the CREATE TABLE SQL string for this model, including foreign keys.
-#         Ensure referenced tables are present in the same MetaData so ForeignKey targets can be resolved.
-#         """
-#         table_name = getattr(cls, '__table_name__', None)
-#         if not table_name: return None
-#         from sqlalchemy import text, UniqueConstraint, Boolean, Float, JSON, Table, Column, Integer, String, MetaData, ForeignKey
-#
-#         metadata = MetaData()
-#         columns = []
-#         columns_names = []
-#         has_pk = False
-#         PY_TO_SQLA = {
-#             int: Integer,
-#             str: String,
-#             float: Float,
-#             bool: Boolean,
-#             dict: JSON,
-#             list: JSON,
-#         }
-#
-#         primary_key = getattr(cls, "__primary_key__", None)
-#         fk_set = getattr(cls, "__foreign_keys__", set())
-#         unq_set = getattr(cls, "_unique_keys", list())
-#         mutable_columns = getattr(cls, "_mutable_columns", list())
-#         is_lookup = getattr(cls, "_lookup_table", False)
-#
-#         for name, typ in cls.__fields__:
-#             # determine SQL column type
-#             col_type = PY_TO_SQLA.get(typ, String)
-#
-#             # determine if this column is a primary key
-#             is_pk = name == 'id' or (primary_key and name == primary_key and not has_pk)
-#             is_fk = (name in cls._foreign_key_names)
-#             is_nullable = (name in cls._nullable_keys) and not is_pk
-#             is_unique = name in unq_set
-#             use_auto_timestamp = name in cls._timestamp_keys and not is_pk and not is_fk
-#             default_value = getattr(cls, name, None)
-#             kwargs = {"primary_key": is_pk, "nullable": is_nullable, "default": default_value}
-#
-#             # collect column positional args (type, optional ForeignKey)
-#             col_args = [] if is_fk else [col_type]
-#
-#             # if this field is registered as a foreign key, add ForeignKey constraint
-#             if is_fk and hasattr(typ, "__table_name__"):
-#                 fk_pks = getattr(typ, "_primary_keys")
-#                 fk_options = cls.__fk_options__.get(name, {})
-#                 fk_table_name = getattr(typ, "__table_name__", None) or typ.__name__.lower()
-#                 fk_pk, fk_pk_type = fk_pks if fk_pks else ('id', PY_TO_SQLA.get(int))
-#                 fk_pk_type = PY_TO_SQLA.get(int)
-#                 col_args.append(ForeignKey(f"{fk_table_name}.{fk_pk}", **fk_options))
-#                 Table(fk_table_name, metadata, Column(fk_pk, fk_pk_type, primary_key=True), extend_existing=True)
-#
-#             if use_auto_timestamp:
-#                 kwargs["server_default"] = text("CURRENT_TIMESTAMP")
-#             columns.append(Column(name, *col_args, **kwargs))
-#             columns_names.append(name)
-#
-#
-#         if not primary_key:
-#             # Ensure at least one primary key
-#             cls.__primary_key__ = 'id'
-#             columns.insert(0, Column("id", Integer, primary_key=True, autoincrement=True))
-#         if unq_set:
-#             constraint_name = f"uq_{table_name}_{'_'.join(unq_set)}"
-#             columns.append(UniqueConstraint(*unq_set, name=constraint_name))
-#         # Create main table with the same metadata so FK resolution works
-#         table = Table(table_name, metadata, *columns)
-#         return table
-#
-    # @staticmethod
-    # def generate_date(date_value: str = None) -> datetime:
-    #     from pyonir.core.utils import deserialize_datestr
-    #     return deserialize_datestr(date_value or datetime.now())
-#
-#     @staticmethod
-#     def generate_id() -> str:
-#         return uuid.uuid4().hex
-#
-#     @staticmethod
-#     def generate_uuid(base_schema: 'BaseSchema' = None, from_unique_keys: bool = False) -> str:
-#         if base_schema and from_unique_keys:
-#             import base64, hashlib
-#             keys = "".join([getattr(base_schema, k, None) for k in base_schema._unique_keys]).encode("utf-8")
-#             hkeys = hashlib.sha256(keys).hexdigest().encode()
-#             return base64.urlsafe_b64encode(hkeys).decode()[:9]
-#         return uuid.uuid4().hex
-#
-#     @property
-#     def foreign_key_names(self):
-#         return self._foreign_key_names
-#
-#     @property
-#     def sql_upsert(self):
-#         return self._sql_upsert
-#
-#     @property
-#     def sql_insert(self):
-#         return self._sql_insert
 
 def generate_sqla_table(cls) -> Optional[Table]:
     """Generate the CREATE TABLE SQL string for this model, including foreign keys.
@@ -938,75 +490,6 @@ def generate_sqla_table(cls) -> Optional[Table]:
     table = Table(table_name, metadata, *columns)
     return table
 
-# def generate_sqla_table(cls) -> Optional[Table]:
-#     """Generate the CREATE TABLE SQL string for this model, including foreign keys.
-#     Ensure referenced tables are present in the same MetaData so ForeignKey targets can be resolved.
-#     """
-#     table_name = getattr(cls, '__table_name__', None)
-#     if not table_name: return None
-#     from sqlalchemy import text, UniqueConstraint, Boolean, Float, JSON, Table, Column, Integer, String, MetaData, ForeignKey
-#
-#     metadata = MetaData()
-#     columns = []
-#     columns_names = []
-#     has_pk = False
-#     PY_TO_SQLA = {
-#         int: Integer,
-#         str: String,
-#         float: Float,
-#         bool: Boolean,
-#         dict: JSON,
-#         list: JSON,
-#     }
-#
-#     primary_key = getattr(cls, "__primary_key__", None)
-#     fk_set = getattr(cls, "__foreign_keys__", set())
-#     unq_set = getattr(cls, "_unique_keys", list())
-#     mutable_columns = getattr(cls, "_mutable_columns", list())
-#     is_lookup = getattr(cls, "_lookup_table", False)
-#
-#     for name, typ, is_optional in cls.__fields__:
-#         # determine SQL column type
-#         col_type = PY_TO_SQLA.get(typ, String)
-#
-#         # determine if this column is a primary key
-#         is_pk = name == 'id' or (primary_key and name == primary_key and not has_pk)
-#         is_fk = (name in cls._foreign_key_names)
-#         is_nullable = (name in cls._nullable_keys) and not is_pk
-#         is_unique = name in unq_set
-#         use_auto_timestamp = name in cls._timestamp_keys and not is_pk and not is_fk
-#         default_value = getattr(cls, name, None)
-#         kwargs = {"primary_key": is_pk, "nullable": is_nullable, "default": default_value}
-#
-#         # collect column positional args (type, optional ForeignKey)
-#         col_args = [] if is_fk else [col_type]
-#
-#         # if this field is registered as a foreign key, add ForeignKey constraint
-#         if is_fk and hasattr(typ, "__table_name__"):
-#             fk_options = cls.__fk_options__.get(name, {})
-#             fk_table_name = getattr(typ, "__table_name__", None) or typ.__name__.lower()
-#             fk_pks = getattr(typ, "_primary_keys", None)
-#             fk_pk, fk_pk_type = fk_pks if fk_pks else ('id', PY_TO_SQLA.get(int))
-#             fk_pk_type = PY_TO_SQLA.get(int)
-#             col_args.append(ForeignKey(f"{fk_table_name}.{fk_pk}", **fk_options))
-#             Table(fk_table_name, metadata, Column(fk_pk, fk_pk_type, primary_key=True), extend_existing=True)
-#
-#         if use_auto_timestamp:
-#             kwargs["server_default"] = text("CURRENT_TIMESTAMP")
-#         columns.append(Column(name, *col_args, **kwargs))
-#         columns_names.append(name)
-#
-#
-#     if not primary_key:
-#         # Ensure at least one primary key
-#         cls.__primary_key__ = 'id'
-#         columns.insert(0, Column("id", Integer, primary_key=True, autoincrement=True))
-#     if unq_set:
-#         constraint_name = f"uq_{table_name}_{'_'.join(unq_set)}"
-#         columns.append(UniqueConstraint(*unq_set, name=constraint_name))
-#     # Create main table with the same metadata so FK resolution works
-#     table = Table(table_name, metadata, *columns)
-#     return table
 
 def generate_sqla(
     table: Table,
@@ -1155,6 +638,7 @@ class Graphiti:
     def __init__(self, query: str = None, from_data: object = None, app_ctx: list = None):
         self.__query__ = Graphiti.parse_query(query) if isinstance(query, str) else query
         self.__as_dict__ = {}
+        self.__as_scalr__ = None
         self.__app_ctx__ = app_ctx or (None, None, None, None, None)
         if query and from_data:
             self._hydrate(from_data)
@@ -1175,7 +659,6 @@ class Graphiti:
                 outer_value = nested.create(v)
                 self._add(alias_key, outer_value)
             else:
-                # v = get_attr(data, rt_ref_key or src_key)
                 lv = lookup_fk(v, data_dir, self.__app_ctx__) if data_dir else v
                 outer_value = get_attr(lv, src_key) if v != lv else v
                 self._add(alias_key, outer_value)
@@ -1192,7 +675,10 @@ class Graphiti:
     @staticmethod
     def parse_query(query_model: str):
         """deserialize query model"""
-        query_model = query_model[1:len(query_model)-1] if query_model.startswith('{') and query_model.endswith('}') else query_model
+        has_obj = query_model.startswith('{') and query_model.endswith('}')
+        if query_model[0] == '#':
+            return [(None, query_model[1:], None, None)]
+        query_model = query_model[1:len(query_model)-1] if has_obj else query_model
         src_keys = re.split(r',\s*(?![^{}]*\})', query_model )
         res = []
         for src_key in src_keys:
@@ -1213,8 +699,11 @@ class Graphiti:
             self.__alias__[src_alias] = src_key
 
     def _add(self, key, value):
+        if not key:
+            self.__as_scalr__ = value
+            return
         self.__as_dict__[key] = value
         setattr(self, key, value)
 
     def to_dict(self, **kwargs):
-        return self.__as_dict__
+        return self.__as_dict__ or self.__as_scalr__

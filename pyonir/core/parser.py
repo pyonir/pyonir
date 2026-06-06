@@ -287,8 +287,6 @@ class DeserializeFile:
         from pyonir.core.page import BasePage
         from pyonir.core.mapper import dto_mapper
 
-        # from pyonir.core.mapper import add_props_to_object
-        # refresh_model = get_attr(req, 'query_params.rmodel')
         page: BasePage = dto_mapper(self, BasePage)
         Site.apply_globals({"prevNext": self.prev_next, "page": page})
         html = Site.TemplateEnvironment.get_template(page.template).render()
@@ -525,6 +523,7 @@ def parse_ref_to_files(filepath, file_name, app_ctx, attr_path: str = None, quer
     # Ref parameters with model will return a generic model to represent the data value
     model = None
     generic_model_properties = query_params.get('model')
+    graphiti_model_properties = query_params.get(Graphiti.QUERY_KEY)
     if generic_model_properties:
         if '.' in generic_model_properties and not generic_model_properties.startswith('{'):
             pkg, mod = os.path.splitext(generic_model_properties)
@@ -532,6 +531,9 @@ def parse_ref_to_files(filepath, file_name, app_ctx, attr_path: str = None, quer
             model = import_module(pkg, callable_name=mod)
         else:
             model = Graphiti(generic_model_properties, app_ctx=app_ctx)
+    if graphiti_model_properties:
+        model = Graphiti(graphiti_model_properties, app_ctx=app_ctx)
+
     if as_dir:
         # use proper app context for path reference outside of scope is always the root level
         include_names = tuple(query_params.get('include_names').split('|')) if query_params.get('include_names') else None
@@ -557,7 +559,7 @@ def parse_lookup_path(value_path: str, base_path: str, rel_base_path: str = None
         return None, None, None, None
     _query_params = value_path.split("?").pop() if "?" in value_path else False
     query_params = parse_url_params(_query_params) if _query_params else {}
-    has_attr_path = value_path.split("#")[-1] if "#" in value_path else ''
+    has_attr_path = value_path.split("#",1)[-1].replace(f"?{_query_params}", "") if "#" in value_path else ''
     is_caller = value_path.strip().startswith(LOOKUP_CALLER_PREFIX)
     value_path = value_path.replace(f"{LOOKUP_DIR_PREFIX}/", "") \
         .replace(f"{LOOKUP_DATA_PREFIX}/", "") \

@@ -112,7 +112,7 @@ def test_parsely_to_custom_mapping():
 
 
 def test_no_hint_mapping():
-    generic_model = Graphiti('title,url,author,date:file_created_on')
+    generic_model = Graphiti('{title,url,author,date:file_created_on}')
     obj = {"title": "hunter", "author": "Alice", "url": "/foo", "date": None}
     genmodel = dto_mapper(obj, generic_model)
     assert genmodel.author == "Alice"

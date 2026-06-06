@@ -404,7 +404,8 @@ def dto_mapper(input_value: Union[Any, DeserializeFile], cls: Union['BaseSchema'
         return unwrapped_type.coerce_value(input_value)
 
     if unwrapped_type.is_graphiti:
-        return unwrapped_type.base.create(input_value.data if is_file else input_value)
+        gres = unwrapped_type.base.create(input_value.data if is_file else input_value)
+        return gres.__as_scalr__ or gres
 
     if unwrapped_type.is_schema or unwrapped_type.is_object:
         # assign primary fields

@@ -29,11 +29,47 @@ class TemplateEnvironment(Environment):
         self.filters.update(**app_filters)
 
         # Include globals
-        self.globals['url_for'] = self.url_for
-        self.globals['request'] = None
-        self.globals['user'] = None
-        self.globals['get_request'] = lambda: app.server.request
-        self.globals["render_component"] = self.render_component
+        # self.globals['url_for'] = self.url_for
+        # self.globals['request'] = None
+        # self.globals['user'] = None
+        # self.globals['get_request'] = lambda: app.server.request
+        # self.globals["render_component"] = self.render_component
+
+    @property
+    def context(self):
+        """General context used for templating engine"""
+        from pyonir.core.server import PyonirRequest
+        req: PyonirRequest = self._app.server.request
+        return {
+        'site': self._app,
+        'configs': self._app.configs,
+        'env': self._app.env,
+        'user': req.user if req else None,
+        'request': req,
+        'url_for': self.url_for,
+        }
+
+    def render_jinja(self, string, context: dict = None) -> str:
+        """Render jinja template fragments"""
+        if not string: return string
+        if not context: context = {}
+        context.update(self.context)
+        try:
+            self.globals.update(context)
+            return self.from_string(string).render()
+        except Exception as e:
+            raise e
+
+    def render_pystring(self, string, context=None) -> str:
+        """Formats python template string"""
+        if not string: return string
+        if not context: context = {}
+        context.update(self.context)
+        try:
+            return string.format(**context)
+        except (KeyError, AttributeError) as e:
+            # print('[pyformatter]', e, string)
+            return string
 
     def url_for(self, route_name: str):
         from pyonir.core.server import RouteConfig

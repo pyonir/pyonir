@@ -522,12 +522,11 @@ class BaseApp(Base):
         """Starlette server instance"""
 
         self.Parsely_Filters = {
-            'jinja': self.parse_jinja,
-            'pyformat': self.pyformatter,
+            'jinja': self.TemplateEnvironment.render_jinja,
+            'pyformat': self.TemplateEnvironment.render_pystring,
             'md': parse_markdown
         }
-        self.apply_globals()
-        # Path(self.uploads_dirpath).mkdir(parents=True, exist_ok=True)
+        # self.apply_globals()
 
     @property
     def active_theme(self):
@@ -679,35 +678,13 @@ class BaseApp(Base):
 
     def apply_globals(self, global_vars: dict = None):
         """Updates the jinja global variables dictionary"""
-        self.TemplateEnvironment.globals['site'] = self
-        self.TemplateEnvironment.globals['configs'] = self.configs
-        self.TemplateEnvironment.globals['env'] = self.env
-        if global_vars:
-            self.TemplateEnvironment.globals.update(global_vars)
-
-    def parse_jinja(self, string, context=None) -> str:
-        """Render jinja template fragments"""
-        if not self.TemplateEnvironment or not string: return string
-        if not context: context = {}
-        try:
-            return self.TemplateEnvironment.from_string(string).render(configs=self.configs, **context)
-        except Exception as e:
-            raise
-
-    def pyformatter(self, string, context=None) -> str:
-        """Formats python template string"""
-        context = {} or dict(context)
-        if self.TemplateEnvironment:
-            context.update(self.TemplateEnvironment.globals)
-        try:
-            return string.format(**context)
-        except (KeyError, AttributeError) as e:
-            # print('[pyformatter]', e, string)
-            return string
+        if not global_vars: global_vars = {}
+        self.TemplateEnvironment.globals.update({**self.TemplateEnvironment.context, **global_vars})
 
     def generate_nginx_config_file(self, template_path: str = None, context: dict = None):
         """Generates Nginx configuration file for the application"""
-        self.server.generate_nginx_conf(self)
+        from pyonir.core.server import generate_nginx_conf
+        generate_nginx_conf(self)
 
     def run(self, uvicorn_options: dict = None):
         """Runs the Uvicorn webserver"""

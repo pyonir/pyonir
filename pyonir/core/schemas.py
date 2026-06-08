@@ -676,7 +676,7 @@ class Graphiti:
     def parse_query(query_model: str):
         """deserialize query model"""
         has_obj = query_model.startswith('{') and query_model.endswith('}')
-        if query_model[0] == '#':
+        if query_model[0] == '.' and not has_obj:
             return [(None, query_model[1:], None, None)]
         query_model = query_model[1:len(query_model)-1] if has_obj else query_model
         src_keys = re.split(r',\s*(?![^{}]*\})', query_model )
@@ -706,4 +706,7 @@ class Graphiti:
         setattr(self, key, value)
 
     def to_dict(self, **kwargs):
+        return self.__as_dict__ or self.__as_scalr__
+
+    def value(self):
         return self.__as_dict__ or self.__as_scalr__

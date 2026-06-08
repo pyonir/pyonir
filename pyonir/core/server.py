@@ -573,6 +573,10 @@ class PyonirServerResponse:
 
         if not self._redirect and has_form_redirect:
             self.set_redirect(has_form_redirect)
+        if self.status_code >= 500:
+            raise HTTPException(status_code=self.status_code, detail="System error occurred")
+        if self._redirect:
+            return self._redirect
         if is_404 or (not is_static and has_file and file.is_virtual_route):
             self.media_type = JSON_RES if self._pyonir_request.is_api else TEXT_RES
             self.status_code = 404
@@ -580,10 +584,6 @@ class PyonirServerResponse:
         if file and not has_content:
             self.set_json(file.data) if self._pyonir_request.is_api else self.set_html(file.output_html(self._pyonir_request))
 
-        if self.status_code >= 500:
-            raise HTTPException(status_code=self.status_code, detail="System error occurred")
-        if self._redirect:
-            return self._redirect
         if self.media_type == STATIC_RES:
             return self._data
         if self.media_type == EVENT_RES:
@@ -591,7 +591,7 @@ class PyonirServerResponse:
         if self.media_type == JSON_RES:
             graphiti_model = self._pyonir_request.form.get(Graphiti.QUERY_KEY)
             if graphiti_model:
-                g = Graphiti(graphiti_model, self._json_dict).__as_dict__
+                g = Graphiti(graphiti_model, self._json_dict).value()
                 self.set_json(g)
             content = self._json
         elif self.media_type == TEXT_RES:

@@ -582,8 +582,9 @@ def parse_ref_to_files(filepath, file_name, app_ctx, attr_path: str = None, quer
     res = get_attr(_data, attr_path) or _data
     return res
 
-def parse_lookup_path(value_path: str, base_path: str, rel_base_path: str = None):
+def parse_lookup_path(value_path: str, base_path: str, file_ctx: object = None):
     from pyonir.core.utils import parse_url_params
+    rel_base_path = file_ctx and file_ctx.file_dirpath
     has_lookup = isinstance(value_path, str) and value_path.strip().startswith((LOOKUP_CALLER_PREFIX, LOOKUP_DATA_PREFIX, LOOKUP_DIR_PREFIX))
     if not has_lookup:
         return None, None, None, None
@@ -596,6 +597,8 @@ def parse_lookup_path(value_path: str, base_path: str, rel_base_path: str = None
         .replace(f"{LOOKUP_CALLER_PREFIX}/", "") \
         .replace(f"?{_query_params}", "") \
         .replace(f'#{has_attr_path}', '')
+    if '{' in value_path:
+        value_path = file_ctx.process_site_filter('pyformat', value_path, file_ctx.__dict__)
     if is_caller:
         value_path = value_path.strip().replace(f"{LOOKUP_CALLER_PREFIX}/", "")
     else:
@@ -617,7 +620,7 @@ def process_lookups(value_str: str, file_ctx: DeserializeFile = None) -> Optiona
     if has_lookup:
         from pyonir.core.utils import parse_url_params
         base_path = app_ctx[-1:][0] if value_str.startswith(LOOKUP_DATA_PREFIX) else file_contents_dirpath
-        lookup_fpath, query_params, has_attr_path, is_caller = parse_lookup_path(value_str, base_path=base_path, rel_base_path=file_ctx.file_dirpath)
+        lookup_fpath, query_params, has_attr_path, is_caller = parse_lookup_path(value_str, base_path=base_path, file_ctx=file_ctx)
 
         if is_caller:
             from pyonir import Site
@@ -667,10 +670,10 @@ def deserialize_line(line_value: str, container_type: Any = None, file_ctx: Dese
     elif isinstance(container_type, list):
         return [deserialize_line(v, file_ctx=file_ctx)  for v in line_value.split(', ')]
     elif line_value.startswith((LOOKUP_DIR_PREFIX, LOOKUP_DATA_PREFIX, LOOKUP_CALLER_PREFIX)):
-        if '{' in line_value:
-            line_value = file_ctx.process_site_filter('pyformat', line_value, file_ctx.__dict__)
+        # if '{' in line_value:
+        #     line_value = file_ctx.process_site_filter('pyformat', line_value, file_ctx.__dict__)
         return process_lookups(line_value, file_ctx=file_ctx)
-    elif line_value.startswith('$'):
+    if line_value.startswith('$'):
         line_value = file_ctx.process_site_filter("pyformat", line_value[1:], file_ctx.__dict__)
     return line_value.lstrip('$')
 

@@ -9,6 +9,7 @@ from pyonir.core.app import BaseApp, BasePlugin
 from pyonir.core.database import CollectionQuery
 from pyonir.core.schemas import BaseSchema
 from pyonir.core.server import PyonirServer, PyonirServerResponse, PyonirRequest
+from importlib.metadata import metadata
 
 # Pyonir settings
 PYONIR_DIRPATH = os.path.abspath(os.path.dirname(__file__))
@@ -20,6 +21,10 @@ PYONIR_JINJA_DIRPATH = os.path.join(PYONIR_LIBS_DIRPATH, 'jinja')
 PYONIR_JINJA_TEMPLATES_DIRPATH = os.path.join(PYONIR_JINJA_DIRPATH, "templates")
 PYONIR_JINJA_EXTS_DIRPATH = os.path.join(PYONIR_JINJA_DIRPATH, "extensions")
 PYONIR_JINJA_FILTERS_DIRPATH = os.path.join(PYONIR_JINJA_DIRPATH, "filters")
+
+meta = metadata("pyonir")
+__version__ = meta["Version"]
+
 
 Site: Optional[BaseApp] = None
 

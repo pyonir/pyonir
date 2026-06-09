@@ -21,7 +21,6 @@ PYONIR_JINJA_TEMPLATES_DIRPATH = os.path.join(PYONIR_JINJA_DIRPATH, "templates")
 PYONIR_JINJA_EXTS_DIRPATH = os.path.join(PYONIR_JINJA_DIRPATH, "extensions")
 PYONIR_JINJA_FILTERS_DIRPATH = os.path.join(PYONIR_JINJA_DIRPATH, "filters")
 
-__version__: str = "0.0.53"
 Site: Optional[BaseApp] = None
 
 class PyonirFile(DeserializeFile): pass

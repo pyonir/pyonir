@@ -7,7 +7,7 @@ from typing import Optional, Generator, List, Callable
 from pyonir.core.parser import DeserializeFile
 
 from pyonir.core.loaders import import_module
-from pyonir.core.utils import get_attr, load_env, merge_dict
+from pyonir.core.utils import get_attr, load_env, merge_dict, load_pyproject
 
 from pyonir.pyonir_types import PyonirThemes, EnvConfig, PyonirHooks, PyonirRoute, PyonirRouters, \
     VIRTUAL_ROUTES_FILENAME, AbstractFSQuery
@@ -496,9 +496,10 @@ class BaseApp(Base):
         """
         from pyonir.core.templating import TemplateEnvironment
         from pyonir.core.parser import parse_markdown, DeserializeFile
-        from pyonir import __version__, PyonirServer
+        from pyonir import PyonirServer
         DeserializeFile._routes_dirname = self.PAGES_DIRNAME
-        self.VERSION = __version__
+        tomls = load_pyproject()
+        self.VERSION = get_attr(tomls, 'project.version')
         # self.SECRET_SAUCE = generate_id()
         # self.SESSION_KEY = f"{self.name}_session"
 

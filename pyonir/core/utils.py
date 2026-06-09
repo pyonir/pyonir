@@ -7,6 +7,21 @@ import re
 import unicodedata
 DEFAULT_DATE_FORMAT = "%Y-%m-%d %I:%M:%S"
 
+
+def load_pyproject(path: str = "pyproject.toml") -> dict:
+    """
+    Load pyproject.toml and return its contents as a dictionary.
+    """
+    from pathlib import Path
+    import tomllib
+    path = Path(path)
+
+    if not path.exists():
+        raise FileNotFoundError(f"pyproject.toml not found: {path}")
+
+    with path.open("rb") as f:
+        return tomllib.load(f)
+
 def generate_uuid(from_string: str = None) -> str:
     import uuid, base64, hashlib
     if from_string:

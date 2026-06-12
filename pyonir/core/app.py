@@ -660,6 +660,10 @@ class BaseApp(Base):
     def add_static_path(self, url: str, directory_path: str):
         self._static_paths.add((url, directory_path))
 
+    def load_env(self, env_path: str):
+        from pyonir.core.utils import load_env
+        self._env = load_env(env_path)
+
     def load_function_from_path(self, module_path: str) -> Optional[Callable]:
         """Loads a function resolver from a module path"""
         app_ctx = list(filter(lambda p: p.name == module_path.split('.')[0], self.activated_plugins))

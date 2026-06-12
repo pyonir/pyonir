@@ -285,6 +285,7 @@ def expand_dotted_keys(flat_data: dict, return_as_dict: bool = False):
         return_as_dict (bool): If True, return a nested dict.
                                If False, return nested dynamic objects.
     """
+    from pyonir.core.schemas import sanitize
 
     def make_object(name="Generic"):
         return type(name, (object,), {"__name__": "generic"})()
@@ -294,6 +295,7 @@ def expand_dotted_keys(flat_data: dict, return_as_dict: bool = False):
     for dotted_key, value in flat_data.items():
         parts = dotted_key.split(".")
         current = root
+        value = sanitize(value)
 
         for i, part in enumerate(parts):
             # Last part -> assign value

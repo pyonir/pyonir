@@ -195,7 +195,7 @@ class PyonirServer(Starlette):
         })
 
         if is_static_path:
-            self.static_map[_path] =new_route
+            self.static_map[_path] = new_route
             return new_route
         # Add route path into categories
         self.endpoints.add(f"{base_endpoint}{_path}")
@@ -577,6 +577,11 @@ class PyonirServerResponse:
             raise HTTPException(status_code=self.status_code, detail="System error occurred")
         if self._redirect:
             return self._redirect
+        if self.media_type == STATIC_RES:
+            return self._data
+        if self.media_type == EVENT_RES:
+            return StreamingResponse(content=self._stream, media_type=EVENT_RES)
+
         if is_404 or (not is_static and has_file and file.is_virtual_route):
             self.media_type = JSON_RES if self._pyonir_request.is_api else TEXT_RES
             self.status_code = 404
@@ -584,10 +589,6 @@ class PyonirServerResponse:
         if file and not has_content:
             self.set_json(file.data) if self._pyonir_request.is_api else self.set_html(file.output_html(self._pyonir_request))
 
-        if self.media_type == STATIC_RES:
-            return self._data
-        if self.media_type == EVENT_RES:
-            return StreamingResponse(content=self._stream, media_type=EVENT_RES)
         if self.media_type == JSON_RES:
             graphiti_model = self._pyonir_request.form.get(Graphiti.QUERY_KEY)
             if graphiti_model:

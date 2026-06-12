@@ -14,6 +14,21 @@ T = TypeVar("T")
 SYSTEM_COLUMNS = ('created_on', 'created_by')
 SYSTEM_COLUMN_TYPES = (('created_on', datetime), ('created_by', str))
 
+def sanitize(value: str) -> str:
+    import unicodedata
+
+    if not value:
+        return ""
+
+    value = unicodedata.normalize("NFKC", str(value))
+    value = value.replace("\x00", "")
+    value = re.sub(
+        r"[\x01-\x08\x0B\x0C\x0E-\x1F\x7F]",
+        "",
+        value
+    )
+    return value.strip()
+
 def get_active_user() -> str:
     from pyonir import Site
     active_uid = Site.name if Site else "pyonir_system"
@@ -122,29 +137,6 @@ class BaseModel:
     __params__: list[T] = None
     _errors: list[str] = []
 
-    # def __init_subclass__(cls, **kwargs):
-    #     process_schema(cls, **kwargs)
-
-    def is_valid(self) -> bool:
-        """Returns True if there are no validation errors."""
-        return not self._errors
-
-    def validate_fields(self, field_name: str = None):
-        """
-        Validates fields by calling `validate_<fieldname>()` if defined.
-        Clears previous errors on every call.
-        """
-        if field_name is not None:
-            validator_fn = getattr(self, f"validate_{field_name}", None)
-            if callable(validator_fn):
-                validator_fn()
-            return
-        for typ in self.schema_columns():
-            name = typ.column_name
-            validator_fn = getattr(self, f"validate_{name}", None)
-            if callable(validator_fn):
-                validator_fn()
-
 class BaseSchema(BaseModel):
     """
     Interface for immutable dataclass models with CRUD and session support.
@@ -180,12 +172,19 @@ class BaseSchema(BaseModel):
         if pkv:
             self.set_primary_key(pkv)
 
-        self._errors = []
-        self.validate_fields()
         self._after_init()
 
     def set_primary_key(self, value: any):
         self.__primary_key_value__ = value
+
+    def add_error(self, column_name: str, error_msg: str):
+        self._errors.append(error_msg)
+
+    def clean(self) -> None:
+        """Sanitize column values"""
+        for field in self.schema_columns():
+            sanitized_value = sanitize(getattr(self, field.column_name))
+            setattr(self, field.column_name, sanitized_value)
 
     @classmethod
     def from_file(cls: Type[T], file_path: str, app_ctx=None) -> T:
@@ -275,16 +274,15 @@ class BaseSchema(BaseModel):
     def model_post_init(self, __context):
         """sqlmodel post init callback"""
         object.__setattr__(self, "_errors", [])
-        self.validate_fields()
+        self.validate()
 
     def _after_init(self):
         """Hook for additional initialization in subclasses."""
-        pass
+        self.validate()
 
     def __post_init__(self):
         """Dataclass post init callback"""
-        self._errors = []
-        self.validate_fields()
+        self.validate()
 
     def formated_filename(self, filename: str = None):
         return filename
@@ -341,19 +339,12 @@ class BaseSchema(BaseModel):
         """Returns True if there are no validation errors."""
         return not self._errors
 
-    def validate_fields(self, field_name: str = None):
-        """
-        Validates fields by calling `validate_<fieldname>()` if defined.
-        Clears previous errors on every call.
-        """
-        if field_name is not None:
+    def validate(self, field_names: list[str] = None):
+        self._errors = []
+        target_fields = [col for col in self.schema_columns() if col.column_name in field_names] if field_names else self.schema_columns()
+        for typ in target_fields:
+            field_name = typ.column_name
             validator_fn = getattr(self, f"validate_{field_name}", None)
-            if callable(validator_fn):
-                validator_fn()
-            return
-        for typ in self.schema_columns():
-            name = typ.column_name
-            validator_fn = getattr(self, f"validate_{name}", None)
             if callable(validator_fn):
                 validator_fn()
 

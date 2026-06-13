@@ -670,10 +670,8 @@ def deserialize_line(line_value: str, container_type: Any = None, file_ctx: Dese
     elif isinstance(container_type, list):
         return [deserialize_line(v, file_ctx=file_ctx)  for v in line_value.split(', ')]
     elif line_value.startswith((LOOKUP_DIR_PREFIX, LOOKUP_DATA_PREFIX, LOOKUP_CALLER_PREFIX)):
-        # if '{' in line_value:
-        #     line_value = file_ctx.process_site_filter('pyformat', line_value, file_ctx.__dict__)
         return process_lookups(line_value, file_ctx=file_ctx)
-    if line_value.startswith('$'):
+    if line_value.startswith('$'): # Line has python template string
         line_value = file_ctx.process_site_filter("pyformat", line_value[1:], file_ctx.__dict__)
     return line_value.lstrip('$')
 

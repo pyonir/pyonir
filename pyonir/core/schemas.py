@@ -14,20 +14,38 @@ T = TypeVar("T")
 SYSTEM_COLUMNS = ('created_on', 'created_by')
 SYSTEM_COLUMN_TYPES = (('created_on', datetime), ('created_by', str))
 
-def sanitize(value: str) -> str:
+def sanitize(value: Any) -> Any:
+    """
+    Recursively sanitize incoming request data.
+    """
     import unicodedata
 
-    if not value:
-        return ""
+    if value is None:
+        return None
 
-    value = unicodedata.normalize("NFKC", str(value))
-    value = value.replace("\x00", "")
-    value = re.sub(
-        r"[\x01-\x08\x0B\x0C\x0E-\x1F\x7F]",
-        "",
-        value
-    )
-    return value.strip()
+    if isinstance(value, str):
+        value = unicodedata.normalize("NFKC", value)
+        value = value.replace("\x00", "")
+        value = re.sub(
+            r"[\x01-\x08\x0B\x0C\x0E-\x1F\x7F]",
+            "",
+            value
+        )
+        return value.strip()
+
+    if isinstance(value, dict):
+        return {
+            sanitize(key): sanitize(val)
+            for key, val in value.items()
+        }
+
+    if isinstance(value, list):
+        return [sanitize(item) for item in value]
+
+    if isinstance(value, tuple):
+        return tuple(sanitize(item) for item in value)
+
+    return value
 
 def get_active_user() -> str:
     from pyonir import Site

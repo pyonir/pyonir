@@ -1,10 +1,10 @@
 import os
 import sqlite3
-from abc import abstractmethod
+from abc import abstractmethod, ABC
 from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, Dict, Optional, Type, Union, Iterator, Generator, List, Callable, Tuple, Iterable
+from typing import Any, Dict, Optional, Type, Union, Iterator, Generator, List, Callable, Tuple, Iterable, T
 from urllib.parse import quote_plus
 
 from sortedcontainers import SortedList
@@ -108,6 +108,8 @@ class DatabaseConfig(BaseSchema):
 
 
 class PyonirDBQuery:
+    """Builds SQL string"""
+
     def __init__(self, db_service: 'PyonirDatabaseService'):
         self.db_service = db_service
         self.sql: str = ""
@@ -262,7 +264,7 @@ class PyonirDatabaseService:
         dc = dto_mapper(db_env_configs, DatabaseConfig)
         self.connection: Optional[sqlite3.Connection] = None
         self.pyonir_app = app
-        self._query: PyonirDBQuery = None
+        self._query: Optional[PyonirDBQuery] = None
         self._datastore_dirpath: str = ""
         self._dbconfig: DatabaseConfig = dc
         self._schemas = set()
@@ -616,7 +618,6 @@ class PyonirDatabaseService:
             self.connection.commit()
         return entity.__primary_key_value__
 
-
     @abstractmethod
     def find(self, entity: Type[BaseSchema], options: dict = None) -> Any:
         """Find entity rows using entity's table name and options."""
@@ -662,7 +663,263 @@ class PyonirDatabaseService:
             return cursor.rowcount > 0
         return False
 
+class PyonirDBManager:
+    """Database service with env-based config."""
+    _drivers = Driver
+    def __init__(self, app: BaseApp) -> None:
+        from pyonir.core.utils import get_attr
+        db_env_configs = get_attr(app.env, 'database') or {}
+        db_config: DatabaseConfig = dto_mapper(db_env_configs, DatabaseConfig)
+        self.connection: Optional[sqlite3.Connection] = None
+        self.pyonir_app = app
+        self._query: Optional[PyonirDBQuery] = None
+        self._datastore_dirpath: str = ""
+        self._dbconfig: DatabaseConfig = db_config
+        self._schemas = set()
+        self._parent_db: Optional['PyonirDBManager'] = None
 
+    @property
+    def datastore_path(self):
+        """Path to the app datastore directory"""
+        return self._datastore_dirpath or self.pyonir_app.datastore_dirpath
+
+    @property
+    def db_name(self) -> str:
+        return self._dbconfig.name or self.pyonir_app.name
+
+    @property
+    def driver(self) -> str:
+        return self._dbconfig.driver or Driver.SQLITE.value
+
+    @property
+    def host(self) -> str:
+        return self._dbconfig.host
+
+    @property
+    def port(self) -> Optional[int]:
+        return self._dbconfig.port
+
+    @property
+    def username(self) -> Optional[str]:
+        return self._dbconfig.username
+
+    @property
+    def password(self) -> Optional[str]:
+        return self._dbconfig.password
+
+    @property
+    def url(self) -> str:
+        """Return the SQLAlchemy database URL string"""
+        if self.driver == Driver.SQLITE:
+            # File-based or in-memory SQLite
+            if self.db_name == ":memory:":
+                return "sqlite:///:memory:"
+            database_dirpath = os.path.join(self.datastore_path, self.db_name)
+            return f"{database_dirpath}.db"
+
+        elif self.driver == Driver.FILE_SYSTEM:
+            return self.datastore_path
+
+        # Networked databases
+        auth_creds = ""
+        if self.username:
+            pwd = quote_plus(self.password or "")
+            auth_creds = f"{self.username}:{pwd}@"
+
+        host = self.host or "localhost"
+        port = f":{self.port}" if self.port else ""
+
+        return f"{self.driver}://{auth_creds}{host}{port}/{self.db_name}"
+
+    def set_driver(self, driver: str) -> "PyonirDatabaseService":
+        self._dbconfig.driver = Driver(driver)
+        return self
+
+    def set_dbname(self, name: str) -> "PyonirDatabaseService":
+        self._dbconfig.name = name
+        return self
+
+    def set_datastore_path(self, path: str) -> "PyonirDatabaseService":
+        self._datastore_dirpath = path
+        return self
+
+    # --- Database operations ---
+    def exists(self) -> bool:
+        """Check if the database exists."""
+        if self.driver == Driver.SQLITE or self.driver == Driver.FILE_SYSTEM:
+            return os.path.exists(self.url)
+        else:
+            raise NotImplementedError("Existence check is only implemented for SQLite and File System in this stub.")
+
+
+class PyonirQueryManager:
+    """Querys datastore"""
+
+    def __init__(self, entity, pyonir_data_service: 'PyonirDataService'):
+        self._data_service: PyonirDataService = pyonir_data_service
+        self.entity = entity
+        self.where_filters = []
+        self.max_count: int = 0
+        self.curr_page: int = 1
+        self.page_nums: list[int] = []
+        self._order_dir: str = "asc" # asc | desc
+        self._sort_by: str = 'file_created_on'
+        self._limit: int = 5
+        self._data = None
+
+    def use(self, db_url: str):
+        """Specify data source location"""
+        """Creates New database service instance using the given database URL."""
+        db_type, database, host, port, username, password = parse_db_url(db_url)
+
+        dbc = PyonirDBManager(self.pyonir_app)
+        dbc.set_driver(db_type)
+        dbc.set_dbname(os.path.basename(database))
+        dbc.set_datastore_path(os.path.dirname(database))
+        self._data_service.db_manager = dbc
+
+    def sort_by(self, field):
+        self._sort_by = field
+        return self
+
+    def limit(self, limit: int):
+        self._limit = limit
+        return self
+
+    def order_dir(self, direction: str):
+        self._order_dir = direction
+
+    def where(self, conditions):
+        nw = [normalize_where_expression(ex) if isinstance(ex, str) else ex for ex in conditions]
+        self.where_filters.extend(nw)
+        return self
+
+    def paginated(self, reverse=True) -> 'PyonirQueryManager':
+        """Paginates a list into smaller segments based on curr_pg and display limit"""
+        from sortedcontainers import SortedList
+        if not self._data:
+            self.execute()
+        self._order_dir = 'desc' if reverse else 'asc'
+        if self._sort_by:
+            self._data = SortedList(self._data, self._sorting_fn)
+        if self.where_filters:
+            self._data = SortedList(self._data, self._where_fn)
+
+        force_all = not self._limit
+
+        self.max_count = len(self._data)
+        page_num = 0 if force_all else self.curr_page
+        start = (page_num * self._limit) - self._limit
+        end = (self._limit * page_num)
+        pg = (self.max_count // self._limit) + (self.max_count % self._limit > 0) if self._limit > 0 else 0
+        self.page_nums = [n for n in range(1, pg + 1)] if pg else []
+        self._data = self._paginate(start=start, end=end, reverse=reverse) if not force_all else self._data
+        return self
+
+    def execute(self):
+        if self.db.driver == Driver.FILE_SYSTEM:
+            data_schema_dir = self.entity.__table_name__ if self.entity else ''
+            schema_dirpath = os.path.join(self.db.url, data_schema_dir)
+            self._data = query_fs(schema_dirpath,
+                                   app_ctx=self.pyonir_app.app_ctx,
+                                   model=self.entity,
+                                   force_all=not bool(self.limit)
+                                   )
+        else:
+            pass
+        return self
+
+    def _sorting_fn(self, x: any):
+        if self._order_dir not in ("asc", "desc"):
+            raise ValueError("order_dir must be 'asc' or 'desc'")
+
+        def _invert(val):
+            # For numbers and timestamps
+            if isinstance(val, (int, float)):
+                return -val
+            # For strings: reverse lexicographic order
+            if isinstance(val, str):
+                return "".join(chr(255 - ord(c)) for c in val)
+            # Fallback
+            return val
+
+        value = get_attr(x, self._sort_by)
+
+        # If sorting by datetime-like values
+        if isinstance(value, datetime):
+            value = value.timestamp()
+
+        # If value is None, push it to the end consistently
+        if value is None:
+            return float("inf") if self._order_dir == "asc" else float("-inf")
+
+        return value if self._order_dir == "asc" else _invert(value)
+
+    def _where_fn(self, src: any):
+
+        def match(condition):
+            attr: str | Callable = condition['attr']
+            if not hasattr(src, attr):
+                return False
+            if callable(attr):
+                return attr(src, condition)
+            op = condition['op']
+            expected = condition['value']
+            actual = get_attr(src, attr)
+
+            if actual and not expected:
+                return True # checking only if item has an attribute
+            elif op == "=":
+                return actual == expected
+            elif op == "in" or op == "contains":
+                return actual in expected if actual is not None else False
+            elif op == ">":
+                return actual > expected
+            elif op == "<":
+                return actual < expected
+            elif op == ">=":
+                return actual >= expected
+            elif op == "<=":
+                return actual <= expected
+            elif op == "!=":
+                return actual != expected
+            return False
+
+        is_true = False
+        for condition in self.where_filters:
+            is_true = match(condition)
+        return src if is_true else False
+
+    def _paginate(self, start: int, end: int, reverse: bool = False):
+        """Returns a slice of the items list"""
+        sl = self._data.islice(start, end, reverse=reverse) if end else self._data
+        return sl
+
+    def from_fs(self):
+        self.db.set_driver('fs')
+        return self
+
+    @property
+    def items(self):
+        return self._data
+
+    @property
+    def db(self): return self._data_service.db_manager
+
+    @property
+    def pyonir_app(self): return self._data_service.pyonir_app
+
+class PyonirDataService:
+
+    def __init__(self, pyonir_app: BaseApp):
+        self._pyonir_app = pyonir_app
+        self.db_manager: PyonirDBManager = PyonirDBManager(pyonir_app)
+
+    @property
+    def pyonir_app(self) -> BaseApp: return self._pyonir_app
+
+    def query(self, entity: Type[BaseSchema]) -> PyonirQueryManager:
+        return PyonirQueryManager(entity, self)
 
 class CollectionQuery(AbstractFSQuery):
     """Base class for querying files and directories"""
@@ -721,6 +978,51 @@ class CollectionQuery(AbstractFSQuery):
         return super().where(attr, op, value)
 
 
+def normalize_where_expression(param: str) -> dict:
+    k, _, v = param.partition(' ')
+    op = '='
+    is_eq = lambda x: x[1]=='='
+    if v.startswith('>'):
+        eqs = is_eq(v)
+        op = '>=' if eqs else '>'
+        v = v[1:] if not eqs else v[2:]
+    elif v.startswith('<'):
+        eqs = is_eq(v)
+        op = '<=' if eqs else '<'
+        v = v[1:] if not eqs else v[2:]
+        pass
+    elif v[0]=='=':
+        v = v[1:]
+    else:
+        pass
+    return {"attr": k.strip(), "op":op, "value": AbstractFSQuery.coerce_bool(v)}
+
+def parse_db_url(db_url: str) -> tuple[str, str, str | None, int | None, str | None, str | None]:
+    """
+    Parse a database URL into its components.
+    """
+    from urllib.parse import urlparse, unquote
+    parsed = urlparse(db_url)
+
+    db_type = parsed.scheme
+
+    # SQLite special cases
+    if db_type == Driver.SQLITE:
+        if parsed.path == "/:memory:":
+            database = Driver.MEMORY
+        else:
+            # Remove leading slash for relative paths
+            database, ext = os.path.splitext(parsed.path)
+        return db_type, database, None, None, None, None
+
+    username = unquote(parsed.username) if parsed.username else None
+    password = unquote(parsed.password) if parsed.password else None
+    host = parsed.hostname
+    port = parsed.port
+    database = parsed.path.lstrip("/") if parsed.path else None
+
+    return db_type, database, host, port, username, password
+
 
 def query_fs(abs_dirpath: str,
                 app_ctx: AppCtx = None,
@@ -733,7 +1035,7 @@ def query_fs(abs_dirpath: str,
     """Returns a generator of files from a directory path"""
     from pathlib import Path
     from pyonir.core.page import BasePage
-    from pyonir.core.parser import DeserializeFile, FileCache
+    from pyonir.core.parser import DeserializeFile
     from pyonir.core.media import BaseMedia
 
     # results = []

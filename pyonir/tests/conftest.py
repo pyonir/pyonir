@@ -171,9 +171,9 @@ async def mock_request(
         "query_string": urlencode(query or {}).encode(),
         "session": session or {},
     }
-
-    req = PyonirRequest(StarletteRequest(scope, receive), test_app)
-    await req.set_request_input()
+    star_req = StarletteRequest(scope, receive)
+    req = PyonirRequest(star_req)
+    await req.set_request_input(star_req)
     return req
 
 @pytest.fixture(scope="module")

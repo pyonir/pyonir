@@ -10,7 +10,7 @@ from pyonir.core.schemas import BaseSchema, Graphiti
 from pyonir.core.mapper import dto_mapper, dict_to_class
 from pyonir.core.parser import DeserializeFile
 from pyonir.libs.plugins.navigation import Menu
-from pyonir.tests.conftest import app_setup_path, PyonirMocks, PyonirMockUser
+from pyonir.tests.conftest import app_setup_path, PyonirMocks, PyonirMockUser, mock_request
 
 
 # ==== Sample classes to map into ====
@@ -64,7 +64,7 @@ def test_generic():
     # assert genmodel.field1 == "value1"
     # assert genmodel.field2 == 123
 
-def test_request_mapper(test_app: PyonirMocks.App, mock_data: PyonirMocks.user_data):
+async def test_request_mapper(test_app: PyonirMocks.App, mock_data: PyonirMocks.user_data):
 
     from pyonir.core.mapper import func_request_mapper
 
@@ -76,8 +76,8 @@ def test_request_mapper(test_app: PyonirMocks.App, mock_data: PyonirMocks.user_d
         "items": "foo",
         "meta": {"bar": 22}
     }
-    pyonir_request = PyonirRequest(None, test_app)
-    pyonir_request.request_input.body = request_input
+    pyonir_request = await mock_request(test_app,'POST', '/mock-route', body=request_input)
+    # pyonir_request.request_input.body = request_input
     args = func_request_mapper(demo_route, pyonir_request, enforce_type_checker=0)
     assert args['user_id'] == 42
     assert args['request'] == pyonir_request

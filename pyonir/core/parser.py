@@ -2,6 +2,7 @@ import os, re, json
 from typing import Tuple, Dict, List, Any, Optional, Union
 
 from pyonir.core.utils import get_file_created, open_file, get_attr
+from pathlib import Path
 
 # Pre-compile regular expressions for better performance
 _RE_LEADING_SPACES = re.compile(r'^\s+')
@@ -25,9 +26,36 @@ FILTER_KEY = '@filter'
 VIRTUAL_ROUTES_FILENAME: str = '.virtual_routes'
 
 # Global cache
-FileCache: Dict[str, Any] = {}
 NS: List[str] = []
 RETRY_MAP: Dict = {}
+
+class FileCache:
+    cache = {}
+
+    @classmethod
+    def read(cls, path: str):
+
+        fp = Path(path)
+        if not fp.exists():
+            return None
+        mtime = fp.stat().st_mtime
+        cached = cls.cache.get(path)
+        if cached and cached["mtime"] == mtime:
+            return cached["content"]
+        return None
+
+    def add(file: 'DeserializeFile'):
+
+        fp = Path(file.file_path)
+        if not fp.exists():
+            return None
+        mtime = fp.stat().st_mtime
+
+        FileCache.cache[file.file_path] = {
+            "mtime": mtime,
+            "content": file
+        }
+
 
 class FileStatuses(str):
     UNKNOWN = "unknown"
@@ -52,19 +80,22 @@ class DeserializeFile:
     """Flag to invalidate file cache on next access"""
     _private_prefixes: list = ['@']
 
-    def __new__(cls, *args, **kwargs):
-        file_path = args[0] if args else kwargs.get('file_path')
-        if file_path and FileCache.get(file_path):
-            return FileCache.get(file_path)
-        return super().__new__(cls)
+    # def __new__(cls, *args, **kwargs):
+    #     file_path = args[0] if args else kwargs.get('file_path')
+    #     cached = FileCache.read(file_path)
+    #     if cached:
+    #         return cached
+    #     file_ins = super().__new__(cls)
+    #     return file_ins
 
     def __init__(self,
                 file_path: str,
                 app_ctx: "AppCtx" = None,
                 model: object = None,
                 text_string: str = None):
-        # print(f"__init__ skipped for file_path: {file_path} (already initialized)")
-        # if FileCache.get(file_path): return
+        # if getattr(self, "_initialized", False):
+        #     return
+        # self._initialized = True
         name, ext = os.path.splitext(os.path.basename(file_path))
         self.app_ctx = app_ctx
         self._blob_keys = []
@@ -81,6 +112,7 @@ class DeserializeFile:
         self.file_line_count = None
         self.data: Dict = {}
         self.is_virtual_route = None
+        self.is_virtual_catchall_route = False
         self.is_page = None
         # Page specific attributes
         if not self.text_string:
@@ -120,7 +152,7 @@ class DeserializeFile:
         self.extend_data()
         # if self.file_exists and self.is_page:
         #     # Cache object
-        #     FileCache[self.file_path] = self
+        #     FileCache.add.add(self)
 
     @property
     def file_path(self):
@@ -131,16 +163,16 @@ class DeserializeFile:
         return self._file_dirpath
 
     def replay_retry(self):
-        """Replays deserializing line"""
-        fd = self.__dict__
+        """Replays deserializing line with new values"""
         retries = RETRY_MAP.get(self.file_path)
         if not retries:
             return
+        fd = self.__dict__
         for key, value in retries:
             lookup_fpath, file_name, app_ctx, has_attr_path, query_params = value
             lookup_fpath = self.process_site_filter('pyformat', lookup_fpath, fd) if '{' in lookup_fpath else lookup_fpath
             v = parse_ref_to_files(lookup_fpath, file_name, app_ctx, attr_path=has_attr_path, query_params=query_params)
-            update_nested(key, self.data, data_update=v)
+            update_nested(key.split('.')[1:], self.data, data_update=v)
             pass
 
         RETRY_MAP.clear()
@@ -151,7 +183,7 @@ class DeserializeFile:
         if not ext: return
         self.data = {**ext, **self.data}
 
-    def apply_filters(self):
+    def apply_filters(self, purge: bool = False):
         """Applies filter methods to data attributes"""
         from pyonir import Site
 
@@ -166,7 +198,8 @@ class DeserializeFile:
                     filtr, get_attr(self.data, key), {"page": self.data}
                 )
                 update_nested(key, self.data, data_update=mod_val)
-        # del self.data[FILTER_KEY]
+        if purge:
+            del self.data[FILTER_KEY]
 
     def deserializer(self):
         """Deserialize file line strings into map object"""
@@ -410,7 +443,7 @@ def update_nested(attr_path, data_src: dict, data_merge=None, data_update=None, 
     Returns:
         tuple[bool, Any]: (completed, updated data or found value)
     """
-
+    from .utils import merge_dict
     def update_value(target, val):
         """Mutates target with val depending on type compatibility."""
         if isinstance(target, list):
@@ -419,7 +452,8 @@ def update_nested(attr_path, data_src: dict, data_merge=None, data_update=None, 
             else:
                 target.append(val)
         elif isinstance(target, dict) and isinstance(val, dict):
-            target.update(val)
+            if data_merge: merge_dict(val, target)
+            if not data_merge: target.update(val)
         elif isinstance(target, str) and isinstance(val, str):
             return val
         return target
@@ -658,8 +692,6 @@ def deserialize_line(line_value: str, container_type: Any = None, file_ctx: Dese
         v = parse_line(line_value)
         return group_tuples_to_objects([v], parent_container=dict())
 
-    if FileCache.get(line_value):
-        return FileCache.get(line_value)
     is_num = is_num(line_value)
     if is_num != 'NAN':
         return is_num
@@ -856,7 +888,4 @@ def process_lines(file_lines: list[str], cursor: int = 0, data_container: Dict[s
         if not line_tabs:
             update_nested(line_key, data_container, data_merge=line_value)
 
-        # Cache the $ check
-        if line_key and line_key[0] == '$':
-            FileCache[line_key] = line_value
     return data_container

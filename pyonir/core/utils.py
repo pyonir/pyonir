@@ -449,7 +449,7 @@ def merge_dict(derived: Dict, src: Dict) -> None:
 
         # If both values are same type, perform nested merge
         if isinstance(src_value, (dict, list)) and isinstance(src_value, type(value)):
-            update_nested([], src[key], data_merge=value)
+            update_nested([], src_value, data_merge=value)
         # If types mismatch, keep existing src value
 
 def coerce_bool(value: str) -> any:

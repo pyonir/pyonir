@@ -23,7 +23,7 @@ LOOKUP_DIR_PREFIX = '$dir'
 LOOKUP_DATA_PREFIX = '$data'
 LOOKUP_CALLER_PREFIX = '$call'
 FILTER_KEY = '@filter'
-FILTER_PREFIX = ' $'
+DIRECTIVE_PREFIX = '$'
 VIRTUAL_ROUTES_FILENAME: str = '.virtual_routes'
 
 # Global cache
@@ -758,8 +758,8 @@ def parse_line(line: str, from_block_str: bool = False, file_ctx: Any = None) ->
         is_str_block = is_parent and isinstance(line_type, str)
         if start_fence_block:
             line = line.replace(BLOCK_CODE_FENCE, '').replace(BLOCK_PREFIX_STR, '')
-            fence_key, *alias_key = line.split(' ', 1)
-            key = alias_key[0] if alias_key else fence_key or 'content'
+            key = parse_directive(line, file_ctx)
+            key = key or 'content'
             value = None
             is_str_block = True
             is_parent = True
@@ -888,17 +888,31 @@ def process_lines(file_lines: list[str], cursor: int = 0, data_container: Dict[s
             cursor = (_cursor + cursor) + 1
         else:
             cursor += 1
-        line_key = parse_filters(line_key, file_ctx)
+
         if not line_tabs:
             update_nested(line_key, data_container, data_merge=line_value)
 
     return data_container
 
-def parse_filters(line_key: str, file_ctx: DeserializeFile):
-    line_key, has_filter_key, filterkey = line_key.partition(FILTER_PREFIX)
-    if has_filter_key:
-        file_ctx.insert_filter(filterkey, line_key)
-    return line_key
+def parse_directive(value: str, file_ctx: DeserializeFile):
+    key = None
+    alias = None
+    filters = []
+
+    for token in value.split():
+        if token.startswith(DIRECTIVE_PREFIX):
+            filters.append(token[1:])
+        elif key is None:
+            key = token
+        elif alias is None:
+            alias = token
+        else:
+            raise ValueError(f"Unexpected token: {token}")
+
+    for f in filters:
+        file_ctx.insert_filter(f, alias or key)
+
+    return alias or key
 
 def merge_dict_lists_unique(*datasets):
     from collections import defaultdict

@@ -116,8 +116,6 @@ class PyonirDebugRequestMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, star_request: Request, call_next):
         # before request
-        ip = star_request.headers.get("x-real-ip")
-        print(f'[DEBUG]: CLIENT REALIP={ip}')
         pyonir_request = PyonirRequest(star_request)
         await pyonir_request.before_request()
 
@@ -834,7 +832,6 @@ class PyonirRequest:
 
     async def after_request(self, server_res: Response):
         # apply file headers
-        print(self.request_input.headers)
         if self.request_input.headers and server_res.headers:
             for key, value in self.request_input.headers.items():
                 server_res.headers[key] = str(value)

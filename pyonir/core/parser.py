@@ -18,11 +18,12 @@ BLOCK_PREFIX_STR = "==="
 BLOCK_CODE_FENCE = "````"
 SINGLE_LN_COMMENT = '#'
 MULTI_LN_COMMENT = '#|'
-LOOKUP_EMBED_PREFIX = '$'
+# LOOKUP_EMBED_PREFIX = '$'
 LOOKUP_DIR_PREFIX = '$dir'
 LOOKUP_DATA_PREFIX = '$data'
 LOOKUP_CALLER_PREFIX = '$call'
 FILTER_KEY = '@filter'
+FILTER_PREFIX = ' $'
 VIRTUAL_ROUTES_FILENAME: str = '.virtual_routes'
 
 # Global cache
@@ -99,6 +100,7 @@ class DeserializeFile:
         name, ext = os.path.splitext(os.path.basename(file_path))
         self.app_ctx = app_ctx
         self._blob_keys = []
+        self._filters = {}
         self.schema = model
         self.file_ext = ext
         self.file_name = name
@@ -185,14 +187,11 @@ class DeserializeFile:
 
     def apply_filters(self, purge: bool = False):
         """Applies filter methods to data attributes"""
-        from pyonir import Site
-
-        if not bool(self.data):
-            return
-        filters = self.data.get(FILTER_KEY)
-        if not filters or not Site:
-            return
-        for filtr, datakeys in filters.items():
+        if not bool(self.data): return
+        if self.data.get(FILTER_KEY):
+            self._filters = merge_dict_lists_unique(self.data.get(FILTER_KEY), self._filters)
+        if not self._filters: return
+        for filtr, datakeys in self._filters.items():
             for key in datakeys:
                 mod_val = self.process_site_filter(
                     filtr, get_attr(self.data, key), {"page": self.data}
@@ -283,6 +282,11 @@ class DeserializeFile:
         if self.file_dirname != "pages" or self.is_home:
             return None
         return CollectionQuery.prev_next(self)
+
+    def insert_filter(self, filter_key: str, data_key: str):
+        """Adds post processing filters to apply to data value"""
+        if not filter_key in self._filters: self._filters[filter_key] = []
+        self._filters[filter_key].append(data_key)
 
     def to_schema(self, schema: object = None):
         """Returns a schema representation of the file data"""
@@ -884,8 +888,27 @@ def process_lines(file_lines: list[str], cursor: int = 0, data_container: Dict[s
             cursor = (_cursor + cursor) + 1
         else:
             cursor += 1
-
+        line_key = parse_filters(line_key, file_ctx)
         if not line_tabs:
             update_nested(line_key, data_container, data_merge=line_value)
 
     return data_container
+
+def parse_filters(line_key: str, file_ctx: DeserializeFile):
+    line_key, has_filter_key, filterkey = line_key.partition(FILTER_PREFIX)
+    if has_filter_key:
+        file_ctx.insert_filter(filterkey, line_key)
+    return line_key
+
+def merge_dict_lists_unique(*datasets):
+    from collections import defaultdict
+    result = defaultdict(list)
+
+    for dataset in datasets:
+        if not dataset: continue
+        for key, values in dataset.items():
+            for value in values:
+                if value not in result[key]:
+                    result[key].append(value)
+
+    return dict(result)

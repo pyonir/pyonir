@@ -190,11 +190,10 @@ class PyonirThemes:
     def query_themes(self) -> Optional[Dict[str, Theme]]:
         """Returns a collection of available themes within the frontend/themes directory"""
         from pyonir import Site
-        from pyonir.core.app import BaseApp
 
         themes_map = {}
         for theme_dir in os.listdir(self.themes_dirpath):
-            if theme_dir.startswith(BaseApp.IGNORE_WITH_PREFIXES): continue
+            if theme_dir.startswith(Site.IGNORE_WITH_PREFIXES): continue
             theme = Theme(name=theme_dir, theme_dirname=theme_dir,
                           theme_dirpath=os.path.join(self.themes_dirpath, theme_dir))
             theme._templates_dirname = Site.TEMPLATES_DIRNAME

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
-import os, re, base64
-from io import BytesIO
-from PIL import Image
+import base64
+import os
+import re
 from dataclasses import dataclass
-from typing import Optional, Union, Generator, Tuple
+from io import BytesIO
+from typing import Generator, Optional, Tuple, Union
 
+from PIL import Image
 from PIL.ImageFile import ImageFile
 from starlette.datastructures import UploadFile
 
@@ -16,32 +18,57 @@ from pyonir.pyonir_types import BaseEnum
 ALLOWED_FORMATS = {"PNG", "JPEG", "WEBP"}
 MAX_BYTES = 5 * 1024 * 1024  # 5 MB limit
 
+class DocumentType(BaseEnum):
+    PDF = "pdf"
+    TEXT = "txt"
+    RICH_TEXT = "rtf"
+    MARKDOWN = "md"
+    WORD = "doc"
+    WORD_OPENXML = "docx"
+    EXCEL = "xls"
+    EXCEL_OPENXML = "xlsx"
+    OPEN_DOCUMENT_SPREADSHEET = "ods"
+    POWERPOINT = "ppt"
+    POWERPOINT_OPENXML = "pptx"
+    OPEN_DOCUMENT_PRESENTATION = "odp"
+    OPEN_DOCUMENT_TEXT = "odt"
+    CSV = "csv"
+    TSV = "tsv"
+    JSON = "json"
+    XML = "xml"
+    YAML = "yaml"
+    TOML = "toml"
+    HTML = "html"
+    CSS = "css"
+    JAVASCRIPT = "js"
+    PYTHON = "py"
+    ZIP = "zip"
 
 class AudioFormat(BaseEnum):
-    MP3  = "mp3"
-    WAV  = "wav"
+    MP3 = "mp3"
+    WAV = "wav"
     FLAC = "flac"
-    AAC  = "aac"
-    OGG  = "ogg"
-    M4A  = "m4a"
+    AAC = "aac"
+    OGG = "ogg"
+    M4A = "m4a"
 
 class VideoFormat(BaseEnum):
-    MP4  = "mp4"
-    MKV  = "mkv"
-    AVI  = "avi"
-    MOV  = "mov"
+    MP4 = "mp4"
+    MKV = "mkv"
+    AVI = "avi"
+    MOV = "mov"
     WEBM = "webm"
-    FLV  = "flv"
+    FLV = "flv"
+    GIF = "gif"
 
 class ImageFormat(BaseEnum):
-    JPG   = "jpg"
-    JPEG  = "jpeg"
-    PNG   = "png"
-    GIF   = "gif"
-    BMP   = "bmp"
-    TIFF  = "tiff"
-    WEBP  = "webp"
-    SVG   = "svg"
+    JPG = "jpg"
+    JPEG = "jpeg"
+    PNG = "png"
+    BMP = "bmp"
+    TIFF = "tiff"
+    WEBP = "webp"
+    SVG = "svg"
 
 
 def sanitize_filename(filename: str) -> str:
@@ -68,8 +95,10 @@ def sanitize_filename(filename: str) -> str:
 
     return f"{name}{ext}"
 
+
 def rotate_image_from_exif(image):
     from PIL import ExifTags
+
     try:
         # image = Image.open(image_path)
         # Get EXIF data
@@ -78,7 +107,7 @@ def rotate_image_from_exif(image):
         # Find the Orientation tag
         orientation_tag = None
         for tag_id, tag_name in ExifTags.TAGS.items():
-            if tag_name == 'Orientation':
+            if tag_name == "Orientation":
                 orientation_tag = tag_id
                 break
 
@@ -96,7 +125,7 @@ def rotate_image_from_exif(image):
             if orientation_tag in image.info:
                 del image.info[orientation_tag]
             if "exif" in image.info:
-                image.info["exif"] = None # Clear EXIF data related to orientation
+                image.info["exif"] = None  # Clear EXIF data related to orientation
 
         return image
 
@@ -108,7 +137,7 @@ def rotate_image_from_exif(image):
 class BaseMedia:
     """Represents an image file and its details."""
 
-    def __init__(self, path: str = None, app_ctx: 'AppCtx' = None):
+    def __init__(self, path: str = None, app_ctx: "AppCtx" = None):
         self._app_ctx = app_ctx
         self._thumbnails = {}
         self.file_path = path
@@ -156,23 +185,25 @@ class BaseMedia:
         if not self._thumbnails:
             thumbs = self._get_all_thumbnails()
             for thumb in thumbs or []:
-                width = thumb.data.get('width')
-                height = thumb.data.get('height')
+                width = thumb.data.get("width")
+                height = thumb.data.get("height")
                 self._thumbnails[f"{width}x{height}"] = thumb.url
         return self._thumbnails
 
     def resized_to(self, width, height) -> str:
         """Generates an image accordion to width and height parameters and returns url to the new resized image"""
-        if not self._thumbnails.get(f'{width}x{height}'):
+        if not self._thumbnails.get(f"{width}x{height}"):
             thumbs = self.resize([(width, height)])
             self._thumbnails.update(thumbs)
-        return self._thumbnails.get(f'{width}x{height}')
+        return self._thumbnails.get(f"{width}x{height}")
 
     def _get_all_thumbnails(self) -> Optional[Generator]:
         """Collects thumbnails for the image"""
-        if self.is_thumb: return None
+        if self.is_thumb:
+            return None
         from pyonir import Site
         from pyonir.core.database import query_fs
+
         app_ctx = Site.app_ctx if Site else self._app_ctx
         thumbs_dir = os.path.join(self.file_dirpath, self.file_name)
         files = query_fs(str(thumbs_dir), model=BaseMedia, app_ctx=app_ctx)
@@ -184,11 +215,20 @@ class BaseMedia:
 
     def rename_media_file(self, file_name: str = None) -> None:
         """Renames media file as b64 encoded value"""
-        encoded_filename = self.encode_filename(self.file_path, self.data) if not self.has_encoded_filename else None
-        if not (file_name or encoded_filename): return
-        new_filepath = self.file_path.replace(self.file_name+self.file_ext, file_name or encoded_filename)
+        encoded_filename = (
+            self.encode_filename(self.file_path, self.data)
+            if not self.has_encoded_filename
+            else None
+        )
+        if not (file_name or encoded_filename):
+            return
+        new_filepath = self.file_path.replace(
+            self.file_name + self.file_ext, file_name or encoded_filename
+        )
         os.rename(self.file_path, new_filepath)
-        self.has_encoded_filename = new_filepath.endswith(os.path.basename(self.file_path))
+        self.has_encoded_filename = new_filepath.endswith(
+            os.path.basename(self.file_path)
+        )
         self.file_path = new_filepath
 
     def resize(self, sizes: list[tuple] = None) -> dict:
@@ -197,9 +237,11 @@ class BaseMedia:
         This happens after full size images are saved to the filesystem
         :param sizes: list of (width, height) tuples
         """
-        from PIL import Image
-        from pyonir import Site
         from pathlib import Path
+
+        from PIL import Image
+
+        from pyonir import Site
 
         raw_img = Image.open(self.file_path)
         thumb_dirname = Site.UPLOADS_THUMBNAIL_DIRNAME if Site else self.file_name
@@ -213,22 +255,23 @@ class BaseMedia:
                 width, height = dimensions
                 # self._sizes.append(dimensions)
                 img = raw_img.resize((width, height), Image.Resampling.BICUBIC)
-                file_name = f'{self.file_name}--{width}x{height}'
+                file_name = f"{self.file_name}--{width}x{height}"
                 img_dirpath = os.path.join(base_dirpath, thumb_dirname)
                 Path(img_dirpath).mkdir(parents=True, exist_ok=True)
                 filepath = os.path.join(img_dirpath, file_name + self.file_ext)
                 if not os.path.exists(filepath):
                     img.save(filepath)
-                    resized[f'{width}x{height}'] = BaseMedia(filepath)
+                    resized[f"{width}x{height}"] = BaseMedia(filepath)
             return resized
         except Exception as e:
             raise
 
     @staticmethod
     def decode_filename(encoded_filename: str) -> Optional[dict]:
-        """ Reverse of encode_filename. """
-        from pyonir.core.utils import parse_url_params
+        """Reverse of encode_filename."""
         import base64
+
+        from pyonir.core.utils import parse_url_params
 
         try:
             # restore padding
@@ -245,20 +288,25 @@ class BaseMedia:
         """
         Build filename as url encoded string, then Base64 encode (URL-safe, no '.' in output).
         """
-        from urllib.parse import urlencode
-        from datetime import datetime
         import base64
+        from datetime import datetime
+        from urllib.parse import urlencode
 
         file_name, file_ext = os.path.splitext(os.path.basename(file_path))
         created_date = int(datetime.now().timestamp())
-        raw = urlencode(meta_data) if meta_data else f'name={file_name}&ext={file_ext}&created_on={created_date}'
+        raw = (
+            urlencode(meta_data)
+            if meta_data
+            else f"name={file_name}&ext={file_ext}&created_on={created_date}"
+        )
         # URL-safe base64 (no + or /), strip padding '='
         b64 = base64.urlsafe_b64encode(raw.encode()).decode().rstrip("=")
-        return b64+file_ext
+        return b64 + file_ext
 
     @staticmethod
     def get_media_data(media_file_path: str):
         from pymediainfo import MediaInfo
+
         media_info = MediaInfo.parse(media_file_path)
         media_track_file = media_info.tracks.pop(0)
         created_on = media_track_file.file_creation_date
@@ -272,7 +320,7 @@ class BaseMedia:
                     "size": media_track_file.file_size,
                 }
             if track.track_type == "Audio":
-                dur = track.duration / 1000 if track.duration else None # ms → seconds
+                dur = track.duration / 1000 if track.duration else None  # ms → seconds
                 return {
                     "codec": track.codec,
                     "duration": dur,
@@ -284,7 +332,9 @@ class BaseMedia:
             if track.track_type == "Video":
                 return {
                     "codec": track.codec,
-                    "duration": track.duration / 1000 if track.duration else None,  # ms → seconds
+                    "duration": track.duration / 1000
+                    if track.duration
+                    else None,  # ms → seconds
                     "width": track.width,
                     "height": track.height,
                     "frame_rate": track.frame_rate,
@@ -299,6 +349,7 @@ class BaseMedia:
         """
 
         from PIL import Image
+
         media_type = BaseMedia.media_type(os.path.splitext(input_path)[1])
         if media_type != "image":
             return
@@ -322,12 +373,12 @@ class BaseMedia:
             # Default fallback → save in original format
             img.save(output_path, format=fmt)
 
-        print(f"Compressed {input_path} ({fmt}) → {output_path}")
+        # print(f"Compressed {input_path} ({fmt}) → {output_path}")
 
     @staticmethod
     def media_type(ext: str) -> str:
         """Return the media type based on file extension."""
-        ext = ext.lstrip('.').lower()
+        ext = ext.lstrip(".").lower()
 
         if ext in (f.value for f in AudioFormat):
             return "audio"
@@ -337,14 +388,16 @@ class BaseMedia:
             return "image"
         return "document"
 
+
 @dataclass
 class UploadOptions:
     """Options for uploading media files."""
-    directory_path: str = ''
+
+    directory_path: str = ""
     """Directory path to save uploads"""
-    directory_name: str = ''
+    directory_name: str = ""
     """Directory name to save the uploaded file."""
-    file_name: str = ''
+    file_name: str = ""
     """Strict file name for the uploaded file."""
     limit: int = 0
     """Maximum number of files to upload."""
@@ -360,23 +413,34 @@ class UploadOptions:
 
 class MediaManager:
     """Manage audio, video, and image documents."""
-    default_media_dirname = 'media' # general directory name for all media types
 
-    def __init__(self, app: 'BaseApp'):
+    default_media_dirname = "media"  # general directory name for all media types
+
+    def __init__(self, app: "BaseApp"):
         self.app = app
-        self.supported_formats = {ImageFormat.JPG, ImageFormat.PNG, VideoFormat.MP4, AudioFormat.MP3}
-        self._storage_dirpath: str = os.path.join(app.contents_dirpath, self.default_media_dirname)
+        self.supported_formats = {
+            ImageFormat.JPG,
+            ImageFormat.PNG,
+            VideoFormat.MP4,
+            AudioFormat.MP3,
+        }
+        self._storage_dirpath: str = os.path.join(
+            app.contents_dirpath, self.default_media_dirname
+        )
         """Location on fs to save file uploads"""
 
     @property
-    def storage_dirpath(self) -> str: return self._storage_dirpath
+    def storage_dirpath(self) -> str:
+        return self._storage_dirpath
 
     def is_supported(self, ext: str) -> bool:
         """Check if the media file has a supported format."""
-        ext = ext.lstrip('.').lower()
+        ext = ext.lstrip(".").lower()
         return ext in {fmt.value for fmt in self.supported_formats}
 
-    def add_supported_format(self, fmt: Union[ImageFormat, AudioFormat, VideoFormat, None]):
+    def add_supported_format(
+        self, fmt: Union[ImageFormat, AudioFormat, VideoFormat, None]
+    ):
         """Add a supported media format."""
         self.supported_formats.add(fmt)
 
@@ -386,7 +450,9 @@ class MediaManager:
 
     def close(self):
         """Closes any open connections by resetting storage path"""
-        self._storage_dirpath = os.path.join(self.app.contents_dirpath, self.default_media_dirname)
+        self._storage_dirpath = os.path.join(
+            self.app.contents_dirpath, self.default_media_dirname
+        )
 
     def get_media(self, file_id: str) -> BaseMedia:
         """Retrieves user paginated media files"""
@@ -402,8 +468,10 @@ class MediaManager:
     def delete_media_dir(self, dir_name: str) -> bool:
         """Delete all files in a directory. Returns True if deleted."""
         from pathlib import Path
+
         dir_path = os.path.join(self.storage_dirpath, dir_name)
-        if not Path(dir_path).exists(): return False
+        if not Path(dir_path).exists():
+            return False
         for file in Path(dir_path).glob("*"):
             if file.is_file():
                 file.unlink()
@@ -413,13 +481,17 @@ class MediaManager:
     def delete_media(self, media_id: str) -> bool:
         """Delete file by ID. Returns True if deleted."""
         from pathlib import Path
+
         path = os.path.join(self.storage_dirpath, media_id)
-        if not Path(path).exists(): return False
+        if not Path(path).exists():
+            return False
         Path(path).unlink()
         return True
 
     # --- General Uploading ---
-    async def upload(self, request: PyonirRequest, upload_options: UploadOptions = None) -> list[BaseMedia]:
+    async def upload(
+        self, request: PyonirRequest, upload_options: UploadOptions = None
+    ) -> list[BaseMedia]:
         """Uploads a resource into specified directory
         :param upload_options: upload config options
         :param request: PyonirRequest instance
@@ -431,12 +503,18 @@ class MediaManager:
         as_series = upload_options.as_series if upload_options else False
         compress_quality = upload_options.compress_quality if upload_options else None
         for file in request.files:
-            if not file.size: continue
+            if not file.size:
+                continue
             series_index = len(resource_files) + 1
-            if limit and series_index > limit: break
+            if limit and series_index > limit:
+                break
             if file_name:
-                file.filename = f"{file_name}_{series_index}" if as_series else file_name
-            media_file: str = await self._upload_bytes(file, directory_name=directory_name)
+                file.filename = (
+                    f"{file_name}_{series_index}" if as_series else file_name
+                )
+            media_file: str = await self._upload_bytes(
+                file, directory_name=directory_name
+            )
             if media_file:
                 file_media = BaseMedia(path=media_file)
                 file_media.compress(quality=compress_quality)
@@ -456,7 +534,8 @@ class MediaManager:
 
         for name, base64img in base64imgs:
             series_index = len(uploaded_files) + 1
-            if limit and series_index > limit: break
+            if limit and series_index > limit:
+                break
             if series_name:
                 name = f"{series_name}_{series_index}" if as_series else name
             path = os.path.join(self.storage_dirpath, directory_name, name)
@@ -467,20 +546,24 @@ class MediaManager:
             uploaded_files.append(file_media)
         return uploaded_files
 
-    async def _upload_bytes(self, file: UploadFile, directory_name: str = None) -> Optional[str]:
+    async def _upload_bytes(
+        self, file: UploadFile, directory_name: str = None
+    ) -> Optional[str]:
         """
         Save an uploaded video file to disk and return its filename.
-        or upload a video to Cloudflare R2 and return the object key.
         """
         from pathlib import Path
+        import aiofiles
+
         filename = sanitize_filename(file.filename)
-        if not filename: return None
+        if not filename:
+            return None
         resource_id = [directory_name, filename] if directory_name else [filename]
         path = os.path.join(self.storage_dirpath, *resource_id)
         Path(os.path.dirname(path)).mkdir(parents=True, exist_ok=True)
-        with open(path, "wb") as buffer:
+        async with aiofiles.open(path, "wb") as buffer:
             while chunk := await file.read(1024 * 1024):  # 1MB chunks
-                buffer.write(chunk)
+                await buffer.write(chunk)
         return path
 
     @staticmethod
@@ -516,14 +599,14 @@ class MediaManager:
     @staticmethod
     def _save_base64(data_url: str, path: str) -> str:
         img = MediaManager._normalize_base64_string(data_url)
-        path = f'{path}.{img.format.lower()}'
+        path = f"{path}.{img.format.lower()}"
         img.save(path)
         return path
 
     @staticmethod
     def media_type(ext: str) -> Optional[str]:
         """Return the media type based on file extension."""
-        ext = ext.lstrip('.').lower()
+        ext = ext.lstrip(".").lower()
 
         if ext in (f.value for f in AudioFormat):
             return "audio"
@@ -532,5 +615,3 @@ class MediaManager:
         elif ext in (f.value for f in ImageFormat):
             return "image"
         return None
-
-

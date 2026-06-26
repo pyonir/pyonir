@@ -13,6 +13,7 @@ authors = [
   { name = "Derry Spann", email = "pyonir@derryspann.com" }
 ]
 dependencies = [
+  "aiofiles",
   "starlette",
   "uvicorn",
   "starlette_session",

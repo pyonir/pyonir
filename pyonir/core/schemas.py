@@ -358,14 +358,16 @@ class BaseSchema(BaseModel):
         """Returns True if there are no validation errors."""
         return not self._errors
 
-    def validate(self, field_names: list[str] = None):
+    def validate(self, field_names: list[str] = None, skip_field_names: list[str] = None):
         self._errors = []
         target_fields = [col for col in self.schema_columns() if col.column_name in field_names] if field_names else self.schema_columns()
         for typ in target_fields:
             field_name = typ.column_name
+            if skip_field_names and field_name in skip_field_names: continue
             validator_fn = getattr(self, f"validate_{field_name}", None)
             if callable(validator_fn):
                 validator_fn()
+        return self
 
     def update(self, data: object) -> 'BaseSchema':
         """Update mutable fields of the schema instance."""
@@ -424,6 +426,11 @@ class BaseSchema(BaseModel):
     def generate_date(date_value: str = None) -> datetime:
         from pyonir.core.utils import generate_date
         return generate_date(date_value)
+
+    @property
+    def errors(self):
+        return self._errors
+
 
 def generate_sqla_table(cls) -> Optional[Table]:
     """Generate the CREATE TABLE SQL string for this model, including foreign keys.

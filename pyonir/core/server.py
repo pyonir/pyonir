@@ -1091,6 +1091,11 @@ class PyonirRequest:
         if resolver_path:
             resolver = self.ctx_app.reload_resolver(resolver_path)
         self.file_resolver = resolver
+        # extract response data
+        rks = [k for k in resolver_action.keys() if not k.startswith('@')]
+        for k in rks:
+            self.file.data[k] = resolver_action.pop(k)
+        # assign annotated input data
         self.request_input.body.update(resolver_action)
 
     def set_file_headers(self):
@@ -1138,6 +1143,7 @@ class PyonirRequest:
             return None
 
         for root_path in ctx_paths:
+            if file_res: break
             if not is_api and root_path.endswith(self.ctx_app.API_DIRNAME):
                 continue
             category_index = os.path.join(root_path, *request_segments, "index.md")

@@ -73,15 +73,9 @@ def generate_nginx_conf(app: BaseApp) -> bool:
 
 async def route_handler(pyonir_request, route_config: RouteConfig = None):
     # Normalize file data and values from request
-    pyonir_request.request_input.collect_params_from_request(
-        star_request=pyonir_request.server_request
-    )
-    if pyonir_request.file:
-        pyonir_request.file.apply_filters()
-        pyonir_request.file.replay_retry()
+    pyonir_request.refresh_route_params(route_config=route_config)
 
     # Security check
-    pyonir_request.security.apply_security_configs(route_config=route_config)
     pyonir_request.security.verify_request_access()
 
     # Execute route
@@ -137,16 +131,14 @@ class PyonirDebugRequestMiddleware(BaseHTTPMiddleware):
         response = await call_next(star_request)
 
         # call pyonir route/file resolver
-        if not pyonir_request.has_server_response and not pyonir_request.is_static:
+        has_router = pyonir_request.security._route_config
+        # if has_router:
+        #     print(f'{response.status_code}:This is a router request! {pyonir_request.path}:{pyonir_request.security._route_config.name}')
+        if not has_router and not pyonir_request.is_static:
             await route_handler(pyonir_request)
             _response = pyonir_request.build_response()
             if _response:
                 response = _response
-            else:
-                print(
-                    f"[DEBUG]: {pyonir_request.path} failed to build response in middleware."
-                )
-                pass
 
         # after request
         await pyonir_request.after_request(response)
@@ -832,13 +824,6 @@ class PyonirRequestInput:
             return flashes
         return {}
 
-    def collect_params_from_request(self, star_request: StarletteRequest):
-        path_params = dict(star_request.path_params) or {}
-        query_params = dict(star_request.query_params) or {}
-        if path_params or query_params:
-            self.body.update(path_params)
-            self.body.update(query_params)
-
     @classmethod
     async def from_starlette_request(
         cls, star_request: StarletteRequest
@@ -986,21 +971,26 @@ class PyonirRequest:
 
     async def before_request(self):
         # Aggregate all ingress data and form messages
-        self.pyonir_app.server.request = (
-            self  # refresh request context used in template env
-        )
+        self.pyonir_app.server.request = self  # refresh request context used in template env
         await self.set_request_input(self.server_request)
         self.set_route_file()  # resolves request to file on disk if applicable
         self.set_file_resolver()
         self.set_file_headers()
         await self.ctx_app.on_request(self)
 
-    def refresh_route_params(self):
+    def refresh_route_params(self, route_config: RouteConfig = None):
         # Normalize file data and values from request
-        self.request_input.collect_params_from_request(star_request=self.server_request)
+        star_request = self.server_request
+        path_params = dict(star_request.path_params) or {}
+        query_params = dict(star_request.query_params) or {}
+        if path_params or query_params:
+            self.request_input.body.update(path_params)
+            self.request_input.body.update(query_params)
         if self.file:
             self.file.apply_filters()
             self.file.replay_retry()
+        self.security.apply_security_configs(route_config=route_config)
+
 
     def build_response(self):
         """Builds starlette Response from pyonir request"""
@@ -1021,11 +1011,7 @@ class PyonirRequest:
         is_json_res = isinstance(self.route_response, PyonirJSONResponse)
 
         # Normalize response type
-        res = (
-            self.route_response
-            if self.has_server_response
-            else PyonirServerResponse(status_code=status_code)
-        )
+        res = self.route_response if self.has_server_response else PyonirServerResponse(status_code=status_code)
         if not self.has_server_response:
             if has_form_redirect:
                 res.set_redirect(url=has_form_redirect)
@@ -1046,6 +1032,7 @@ class PyonirRequest:
                 )
             else:
                 # 404 page
+                res.status_code = 404
                 res.set_html(file.output_html(self))
 
         # Finalize server response type
@@ -1067,17 +1054,11 @@ class PyonirRequest:
         router_func = self.file_resolver if not route_config else route_config.func
         if not router_func or self.security.is_denied:
             return
-        is_async = inspect.iscoroutinefunction(
-            router_func
-        )  # verify dynamic and static async route funcs
-        if (
-            callable(self.file_resolver) and self.pyonir_app.is_dev
-        ):  # auto reload resolvers
+        is_async = inspect.iscoroutinefunction(router_func)
+        if callable(self.file_resolver) and self.pyonir_app.is_dev:
             router_func = self.ctx_app.reload_module(router_func, reload=True)
         args = func_request_mapper(router_func, self)
-        router_func_response = (
-            await router_func(**args) if is_async else router_func(**args)
-        )
+        router_func_response = await router_func(**args) if is_async else router_func(**args)
         self.route_response = router_func_response
 
     async def set_request_input(self, star_request: StarletteRequest):
@@ -1098,33 +1079,19 @@ class PyonirRequest:
                 break
 
     def set_file_resolver(self):
-        from pyonir.core.utils import get_attr
 
         resolver_obj = self.file.data.get("@resolvers", {}) if self.file else {}
         resolver_action = resolver_obj.get(self.method)
-        if not resolver_obj:
+        if not resolver_obj or not resolver_action:
             return
-        if resolver_obj and not resolver_action:
-            return
-        resolver_action_security = resolver_action.get("@security")
         resolver_path = resolver_action.pop("call", False)
         self.file.data.pop("@resolvers")
         resolver = None
 
         if resolver_path:
             resolver = self.ctx_app.reload_resolver(resolver_path)
-
-        # Set custom headers from file spec into response values
-        custom_response_headers = get_attr(resolver_action, "headers", {})
-        if custom_response_headers:
-            self.request_input.set_headers(custom_response_headers)
-            resolver_action.pop("headers")
-        if resolver_action_security:
-            self.request_input.set_security_params(resolver_action_security)
-            resolver_action.pop("@security")
-
-        self.request_input.body.update(resolver_action)
         self.file_resolver = resolver
+        self.request_input.body.update(resolver_action)
 
     def set_file_headers(self):
         from .utils import get_attr

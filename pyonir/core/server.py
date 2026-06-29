@@ -130,11 +130,7 @@ class PyonirDebugRequestMiddleware(BaseHTTPMiddleware):
         # call starlette routes
         response = await call_next(star_request)
 
-        # call pyonir route/file resolver
-        has_router = pyonir_request.security._route_config
-        # if has_router:
-        #     print(f'{response.status_code}:This is a router request! {pyonir_request.path}:{pyonir_request.security._route_config.name}')
-        if not has_router and not pyonir_request.is_static:
+        if not pyonir_request.has_router_config and not pyonir_request.is_static:
             await route_handler(pyonir_request)
             _response = pyonir_request.build_response()
             if _response:
@@ -365,10 +361,10 @@ class PyonirServer(Starlette):
             else methods
         )
         params = {} if not params else params
-        configs = dict(params)
-        is_secure = params.pop("@security", False)
-        is_sse = params.pop("@sse", False)
-        is_ws = params.pop("@ws", False)
+        configs = {}
+        is_secure = "@security" in params
+        is_sse = "@sse" in params
+        is_ws = "@ws" in params
         is_static_path = (
             os.path.exists(route_func) if isinstance(route_func, str) else False
         )
@@ -379,6 +375,11 @@ class PyonirServer(Starlette):
         if endpoint_path:
             endpoint_path = endpoint_path.split("/{")[0]
         _path = "/" if is_index_path else f"/{base_endpoint}/{endpoint_path}"
+
+        for p in ["@security","@sse","@ws"]:
+            v = params.pop(p, False)
+            if not v: continue
+            configs[p] = v
 
         new_route = RouteConfig(
             **{
@@ -881,6 +882,8 @@ class PyonirRequest:
         self.is_api = self.parts and self.parts[0] == self.ctx_app.API_DIRNAME
         self._query_params = None
         self._path_params = None
+        self._file_security_params = {}
+        self._file_response_params = {}
 
     @property
     def path(self):
@@ -953,6 +956,10 @@ class PyonirRequest:
         return self._query_params if self.server_request else None
 
     @property
+    def has_router_config(self):
+        return self.security.route_config is not None
+
+    @property
     def has_server_response(self):
         return isinstance(self.route_response, PyonirServerResponse)
 
@@ -974,8 +981,7 @@ class PyonirRequest:
         self.pyonir_app.server.request = self  # refresh request context used in template env
         await self.set_request_input(self.server_request)
         self.set_route_file()  # resolves request to file on disk if applicable
-        self.set_file_resolver()
-        self.set_file_headers()
+        self.process_file_annotations()
         await self.ctx_app.on_request(self)
 
     def refresh_route_params(self, route_config: RouteConfig = None):
@@ -989,16 +995,17 @@ class PyonirRequest:
         if self.file:
             self.file.apply_filters()
             self.file.replay_retry()
-        self.security.apply_security_configs(route_config=route_config)
+        if route_config and route_config.configs:
+            self.process_file_annotations(dict(**route_config.configs))
 
 
     def build_response(self):
         """Builds starlette Response from pyonir request"""
         from pyonir.core.schemas import Graphiti
-
+        res_params = self._file_response_params
         file = self.file
         graphiti_model = self.request_input.body.get(Graphiti.QUERY_KEY)
-        has_form_redirect = self.request_input.body.get("redirect")
+        has_form_redirect = self.request_input.body.get("redirect") or res_params.get('redirect')
         has_file_resolver = self.file_resolver is not None
         has_file_route = (
             file
@@ -1078,35 +1085,44 @@ class PyonirRequest:
                 print(f"Request has switched to {plg.name} context")
                 break
 
-    def set_file_resolver(self):
-
-        resolver_obj = self.file.data.get("@resolvers", {}) if self.file else {}
-        resolver_action = resolver_obj.get(self.method)
-        if not resolver_obj or not resolver_action:
-            return
-        resolver_path = resolver_action.pop("call", False)
-        self.file.data.pop("@resolvers")
-        resolver = None
-
-        if resolver_path:
-            resolver = self.ctx_app.reload_resolver(resolver_path)
-        self.file_resolver = resolver
-        # extract response data
-        rks = [k for k in resolver_action.keys() if not k.startswith('@')]
-        for k in rks:
-            self.file.data[k] = resolver_action.pop(k)
-        # assign annotated input data
-        self.request_input.body.update(resolver_action)
-
-    def set_file_headers(self):
+    def process_file_annotations(self, derived_data: dict = None):
+        """Extracts annotated response values from a file"""
         from .utils import get_attr
+        if not self.file and not derived_data: return
+        annotated_data = derived_data or self.file.data
 
-        file_response_headers = (
-            get_attr(self.file.data, "@response.headers") if self.file else None
-        )
-        if file_response_headers:
-            self.request_input.set_headers(file_response_headers)
-            self.file.data.pop("@response")
+        file_resolvers = get_attr(annotated_data, f"@resolvers.{self.method}")
+        file_security = annotated_data.pop("@security", {})
+        file_response = annotated_data.pop("@response", {})
+        file_json_responses = annotated_data.pop("responses", {})
+        file_headers = annotated_data.pop("headers", {})
+        # file_redirect = annotated_data.pop("redirect", None) or annotated_data.pop("redirect_to", None)
+
+
+        if file_resolvers:
+            resolver_module_path = file_resolvers.pop("call", False)
+            del annotated_data['@resolvers']
+            self.file_resolver = self.ctx_app.reload_resolver(resolver_module_path)
+            self.process_file_annotations(file_resolvers)
+            self._file_response_params.update(file_resolvers)
+            self.file.data.update(file_resolvers)
+
+        if file_response:
+            self.process_file_annotations(file_response)
+            self._file_response_params.update(file_response)
+            self.file.data.update(file_response)
+
+        if file_security:
+            self._file_security_params = file_security
+
+        if file_headers:
+            self.request_input.set_headers(file_headers)
+
+        # if file_redirect:
+        #     self.set_redirect(file_redirect)
+
+        if file_json_responses:
+            self.json_responses.add_responses(file_json_responses)
 
     def set_route_file(self) -> None:
         """

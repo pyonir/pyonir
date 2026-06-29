@@ -222,16 +222,16 @@ class Base:
         cls = getattr(mod, func.__name__, None)
         return cls or func
 
-    def reload_resolver(self, name) -> Optional[callable]:
+    def reload_resolver(self, module_path: str) -> Optional[callable]:
         """
         Instantiate the registered class.
         Reload if hot_reload is enabled and class was registered by path.
         """
         from pyonir.core.utils import get_attr
         from pyonir.core.loaders import load_resolver
-
-        cls_path, meth_name = name.rsplit(".", 1)
-        is_pyonir = name.startswith('pyonir')
+        if not module_path: return
+        cls_path, meth_name = module_path.rsplit(".", 1)
+        is_pyonir = module_path.startswith('pyonir')
         res_entry = get_attr(self._resolvers, cls_path)
 
         # access module instance
@@ -243,16 +243,16 @@ class Base:
             return getattr(new_instance, meth_name)
 
         # access constant value or methods on application instance
-        resolver = get_attr(self, name)
+        resolver = get_attr(self, module_path)
 
         # access modules from loader
         if not resolver:
             from pyonir import PYONIR_DIRPATH
-            resolver = load_resolver(name,
+            resolver = load_resolver(module_path,
                                   base_path=PYONIR_DIRPATH if is_pyonir else self.app_dirpath,
                                   from_system=is_pyonir)
         if not resolver:
-            print(f"Unable to load {name}")
+            print(f"Unable to load {module_path}")
 
         return resolver
 

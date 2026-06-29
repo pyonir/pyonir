@@ -232,14 +232,22 @@ class PyonirSecurity:
         self._security_configs: dict = None
 
     @property
+    def route_config(self):
+        return self._route_config
+
+    @property
     def is_denied(self) -> bool:
         """Checks if the user is authorized to access the route."""
         user = self.authenticated_user
-        security_configs = self._security_configs or {}
+        security_configs = self.security_configs
         requires_basic_auth = bool(security_configs and security_configs.get('type') == 'basic')
         is_denied = requires_basic_auth and (user is None)
         self._user = user
         return is_denied
+
+    @property
+    def security_configs(self):
+        return self.request._file_security_params
 
     @property
     def responses(self):
@@ -268,7 +276,7 @@ class PyonirSecurity:
 
     @property
     def redirect_to(self):
-        redirect_url = self._security_configs.get('redirect') or self._security_configs.get('redirect_to')
+        redirect_url = self.security_configs.get('redirect') or self.security_configs.get('redirect_to')
         return self.creds.body.get('redirect_to', redirect_url)
 
     @property
@@ -302,31 +310,31 @@ class PyonirSecurity:
 
         return None
 
-    def apply_security_configs(self, route_config: RouteConfig = None):
-        from .utils import get_attr
-        file = self.request.file
-        if not file and not route_config: return
-
-        file_data = file.data if file else None
-        # Router configurations
-        route_headers_configs = get_attr(route_config.configs, '@response.headers', {}) if route_config else {}
-        route_security_configs = get_attr(route_config.configs, '@security', {}) if route_config else {}
-        route_security_response = get_attr(route_config.configs, '@security.responses', {}) if route_config else {}
-
-        # File configurations
-        file_headers_configs = get_attr(file_data, '@response.headers', {})
-        file_security_configs = get_attr(file_data, '@security', {})
-        file_security_response = get_attr(file_data, '@security.responses', {})
-
-        # Consolidate configurations (file configs higher priority)
-        security_responses = {**route_security_response, **file_security_response}
-        response_headers = {**route_headers_configs, **file_headers_configs}
-        security_configs = {**route_security_configs, **file_security_configs}
-
-        self._route_config = route_config
-        self._security_configs = security_configs
-        self.request.request_input.set_headers(response_headers)
-        self.request.json_responses.add_responses(security_responses)
+    # def apply_security_configs(self, route_config: RouteConfig = None):
+    #     from .utils import get_attr
+    #     file = self.request.file
+    #     if not file and not route_config: return
+    #
+    #     file_data = file.data if file else None
+    #     # Router configurations
+    #     route_headers_configs = get_attr(route_config.configs, '@response.headers', {}) if route_config else {}
+    #     route_security_configs = get_attr(route_config.configs, '@security', {}) if route_config else {}
+    #     route_security_response = get_attr(route_config.configs, '@security.responses', {}) if route_config else {}
+    #
+    #     # File configurations
+    #     file_headers_configs = get_attr(file_data, '@response.headers', {})
+    #     file_security_configs = get_attr(file_data, '@security', {})
+    #     file_security_response = get_attr(file_data, '@security.responses', {})
+    #
+    #     # Consolidate configurations (file configs higher priority)
+    #     security_responses = {**route_security_response, **file_security_response}
+    #     response_headers = {**route_headers_configs, **file_headers_configs}
+    #     security_configs = {**route_security_configs, **file_security_configs}
+    #
+    #     self._route_config = route_config
+    #     self._security_configs = security_configs
+    #     self.request.request_input.set_headers(response_headers)
+    #     self.request.json_responses.add_responses(security_responses)
 
 
     def verify_request_access(self, request: PyonirRequest = None):

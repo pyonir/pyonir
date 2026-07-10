@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 import os
 from typing import Optional, Generator, List, Callable
 
@@ -499,10 +498,6 @@ class BaseApp(Base):
         from pyonir import __version__, PyonirServer
         DeserializeFile._routes_dirname = self.PAGES_DIRNAME
         self.VERSION = __version__
-        # self.SECRET_SAUCE = generate_id()
-        # self.SESSION_KEY = f"{self.name}_session"
-
-
         self.app_entrypoint: str = app_entrypoint # application main.py file or the initializing file
         self.app_dirpath: str = os.path.dirname(app_entrypoint) # application main.py file or the initializing file
         self.name: str = os.path.basename(self.app_dirpath) # directory name of application
@@ -657,6 +652,10 @@ class BaseApp(Base):
             self.server.add_static_route(static_route, t.static_dirpath)
 
     # RUNTIME
+    async def before_request(self, pyonir_request: 'PyonirRequest'):
+        """Request method executed before server calls"""
+        pass
+
     def add_static_path(self, url: str, directory_path: str):
         self._static_paths.add((url, directory_path))
 

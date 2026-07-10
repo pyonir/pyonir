@@ -179,11 +179,15 @@ class PyonirThemes:
         self.available_themes: Dict[str, Theme] = self.query_themes() # collection of themes available in frontend/themes directory
 
     @property
-    def active_theme(self) -> Optional[Theme]:
+    def configs(self):
         from pyonir import Site
-        from pyonir.core.utils import get_attr
-        if not Site or not self.available_themes: return None
-        site_theme = get_attr(Site.configs, 'app.theme_name')
+        configs = getattr(Site.configs, 'themes', None)
+        return configs
+
+    @property
+    def active_theme(self) -> Optional[Theme]:
+        if not self.configs or not self.available_themes: return None
+        site_theme = getattr(self.configs, 'theme')
         site_theme = self.available_themes.get(site_theme)
         return site_theme
 

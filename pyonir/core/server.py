@@ -17,7 +17,7 @@ from starlette.responses import (
     FileResponse,
     RedirectResponse,
     Response,
-    StreamingResponse,
+    StreamingResponse, HTMLResponse,
 )
 from starlette.staticfiles import StaticFiles
 
@@ -126,6 +126,7 @@ class PyonirDebugRequestMiddleware(BaseHTTPMiddleware):
         # before request
         pyonir_request = PyonirRequest(star_request)
         await pyonir_request.before_request()
+        await pyonir_request.pyonir_app.before_request(pyonir_request)
 
         # call starlette routes
         response = await call_next(star_request)
@@ -307,6 +308,9 @@ class PyonirServer(Starlette):
         self.request = None
         self.pyonir_app: BaseApp = pyonir_app
         self._installed_middleware = set()
+        self.exception_handlers = {
+            500: lambda res,ex: HTMLResponse(f"<h1>{ex}</h1>", status_code=ex.status_code)
+        }
 
     def _init_framework_middleware(self):
         from starlette.middleware.sessions import SessionMiddleware
@@ -1224,6 +1228,15 @@ class PyonirRequest:
         self, data: Any = None, status_code: int = 200, template: str = None
     ) -> PyonirServerResponse:
         return self._render(TEXT_RES, data, status_code, template)
+
+    def render(self, data: Any = None, status_code: int = 200, template: str = None, message: str = None):
+        """General response handler will return based on request parameters"""
+        if self.is_api:
+            return self.json_response(data, status_code, message)
+        elif self.is_static:
+            return self.static_response(path=data, status_code=status_code)
+        elif template:
+            return self.html_response(data, status_code, template)
 
     def static_response(self, path: str = None, status_code: int = 200):
         return self._render(STATIC_RES, path)

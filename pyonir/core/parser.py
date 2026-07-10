@@ -81,22 +81,12 @@ class DeserializeFile:
     """Flag to invalidate file cache on next access"""
     _private_prefixes: list = ['@']
 
-    # def __new__(cls, *args, **kwargs):
-    #     file_path = args[0] if args else kwargs.get('file_path')
-    #     cached = FileCache.read(file_path)
-    #     if cached:
-    #         return cached
-    #     file_ins = super().__new__(cls)
-    #     return file_ins
-
     def __init__(self,
                 file_path: str,
                 app_ctx: "AppCtx" = None,
                 model: object = None,
                 text_string: str = None):
-        # if getattr(self, "_initialized", False):
-        #     return
-        # self._initialized = True
+
         name, ext = os.path.splitext(os.path.basename(file_path))
         self.app_ctx = app_ctx
         self._blob_keys = []
@@ -152,9 +142,7 @@ class DeserializeFile:
         # Post-processing
         self.apply_filters()
         self.extend_data()
-        # if self.file_exists and self.is_page:
-        #     # Cache object
-        #     FileCache.add.add(self)
+
 
     @property
     def file_path(self):

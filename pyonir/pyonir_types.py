@@ -143,6 +143,13 @@ class AbstractFSQuery:
     sorted_files: SortedList = None
     query_fs: Any = None
 
+    def set_curr_page(self, pg: int):
+        self.curr_page = int(pg) if pg else 0
+        return self
+
+    def set_limit(self, limit: int):
+        self.limit = int(limit) if limit else 0
+        return self
 
     def set_order_by(self, *, order_by: str, order_dir: str = 'asc'):
         self.order_by = order_by
@@ -190,14 +197,16 @@ class AbstractFSQuery:
         """Paginates a list into smaller segments based on curr_pg and display limit"""
         from sortedcontainers import SortedList
         self.order_dir = 'desc' if reverse else 'asc'
-        if self.order_by:
-            self.sorted_files = SortedList(self.query_fs, self.sorting_key)
-        if self.where_key:
-            where_key = [self.parse_params(ex) for ex in self.where_key.split(',')]
-            self.sorted_files = SortedList(self.where(**where_key[0]), self.sorting_key)
+        if not self.sorted_files:
+            if self.order_by:
+                self.sorted_files = SortedList(self.query_fs, self.sorting_key)
+            if self.where_key:
+                where_key = [self.parse_params(ex) for ex in self.where_key.split(',')]
+                self.sorted_files = SortedList(self.where(**where_key[0]), self.sorting_key)
+
         force_all = not self.limit
 
-        self.max_count = len(self.sorted_files)
+        self.max_count = self.max_count or len(self.sorted_files)
         page_num = 0 if force_all else self.curr_page or 1
         start = (page_num * self.limit) - self.limit
         end = (self.limit * page_num)
@@ -251,7 +260,7 @@ class AbstractFSQuery:
             self.sorted_files = SortedList(self.query_fs, lambda x: get_attr(x, self.order_by) or x)
         target = list(self.sorted_files)
         self.max_count = sum(1 for _ in filter(match, target))
-        self.sorted_files = filter(match, target)
+        self.sorted_files = SortedList(filter(match, target))
         return self
 
     def __len__(self):

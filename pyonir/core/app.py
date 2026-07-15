@@ -329,9 +329,9 @@ class Base:
         return CollectionQuery(dir_path, app_ctx=app_ctx or self.app_ctx, model=model_type, exclude_names=None, force_all=True)
 
     @staticmethod
-    def query_files(dir_path: str, app_ctx: tuple, model_type: any = None) -> object:
+    def query_files(dir_path: str, app_ctx: tuple, model_type: any = None, index_key: str = None) -> object:
         from pyonir.core.utils import process_contents
-        return process_contents(dir_path, app_ctx, model_type)
+        return process_contents(dir_path, app_ctx, model_type, index_key=index_key)
 
 class BasePlugin(Base):
 

@@ -111,14 +111,16 @@ def parse_url_params(param_str: str) -> dict:
     parsed = parse_qs(param_str)
     return {k: v[0] if len(v) == 1 else v for k, v in parsed.items()}
 
-def process_contents(path, app_ctx=None, file_model: any = None) -> object:
+def process_contents(path, app_ctx=None, file_model: any = None, index_key: str = None) -> object:
     """Deserializes all files within the contents directory"""
     from pyonir.core.database import query_fs
+    index_key = index_key or 'file_name'
     key = os.path.basename(path)
     res = type(key, (object,), {"__name__": key})() # generic map
     pgs = query_fs(path, app_ctx=app_ctx, model=file_model)
     for pg in pgs:
-        name = getattr(pg, 'file_name')
+        name = getattr(pg, index_key, None)
+        if not name: continue
         setattr(res, name, pg.to_named_tuple() if hasattr(pg, 'to_named_tuple') else pg)
     return res
 

@@ -308,9 +308,6 @@ class PyonirServer(Starlette):
         self.request = None
         self.pyonir_app: BaseApp = pyonir_app
         self._installed_middleware = set()
-        self.exception_handlers = {
-            500: lambda res,ex: HTMLResponse(f"<h1>{ex}</h1>", status_code=ex.status_code)
-        }
 
     def _init_framework_middleware(self):
         from starlette.middleware.sessions import SessionMiddleware

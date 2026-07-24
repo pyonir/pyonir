@@ -189,18 +189,19 @@ class UnwrappedType:
             return coerced_value
 
         if self.is_iterable:
+            is_tuple = self.base is tuple
             if not ft_params and has_container_type: return value
-            if not has_container_type:
+            if not is_tuple and not has_container_type:
                 if enforce_type:
                     raise TypeError(f"Expected parameter '{self.column_name}' type {ft} for value {value}, got {type(value)}")
-                return self.default_value or None
-            coerced_value = ft()
+                return value or self.default_value
+            coerced_value = [] if is_tuple else ft()
             for v in value:
                 value_type: UnwrappedType = ft_params[0] if ft_params else any
                 _v = value_type.coerce_value(v, enforce_type=enforce_type)
                 coerced_value.append(_v)
 
-            return coerced_value
+            return ft(coerced_value) if is_tuple else coerced_value
 
 def unwrap_fn_params(func: Callable, skip_types: list = None) -> List[UnwrappedType]:
     sig = inspect.signature(func)
@@ -253,6 +254,7 @@ def unwrap_type(tp, column_name: str = None, default: Callable | Any = None, ski
         if len(union_args) == 1:
             single = union_args[0]
             single.optional = optional
+            single.union = single.args
             return single
 
         return UnwrappedType(

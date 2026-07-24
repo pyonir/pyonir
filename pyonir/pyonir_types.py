@@ -1,4 +1,3 @@
-from abc import abstractmethod
 from dataclasses import dataclass, field
 from enum import unique, Enum
 from typing import Any, Dict, Generator, Optional, Union, Callable, List, Tuple, Iterator
@@ -193,10 +192,10 @@ class AbstractFSQuery:
 
         return value if self.order_dir == "asc" else _invert(value)
 
-    def paginated_collection(self, reverse=True)-> BasePagination:
+    def paginated_collection(self, reverse_order=True)-> BasePagination:
         """Paginates a list into smaller segments based on curr_pg and display limit"""
         from sortedcontainers import SortedList
-        self.order_dir = 'desc' if reverse else 'asc'
+        self.order_dir = 'desc' if reverse_order else 'asc'
         if not self.sorted_files:
             if self.order_by:
                 self.sorted_files = SortedList(self.query_fs, self.sorting_key)
@@ -211,19 +210,19 @@ class AbstractFSQuery:
         start = (page_num * self.limit) - self.limit
         end = (self.limit * page_num)
         pg = (self.max_count // self.limit) + (self.max_count % self.limit > 0) if self.limit > 0 else 0
-        pag_data = self.paginate(start=start, end=end, reverse=reverse) if not force_all else self.sorted_files
+        pag_data = self.paginate(start=start, end=end, reverse_order=reverse_order) if not force_all else self.sorted_files
 
         return BasePagination(
             curr_page = page_num,
             page_nums = [n for n in range(1, pg + 1)] if pg else [],
             limit = self.limit,
             max_count = self.max_count,
-            items = list(pag_data)
+            items = list(reversed(pag_data)) if reverse_order and force_all else list(pag_data)
         )
 
-    def paginate(self, start: int, end: int, reverse: bool = False):
+    def paginate(self, start: int, end: int, reverse_order: bool = False):
         """Returns a slice of the items list"""
-        sl = self.sorted_files.islice(start, end, reverse=reverse) if end else self.sorted_files
+        sl = self.sorted_files.islice(start, end, reverse=reverse_order) if end else self.sorted_files
         return sl
 
     def find(self, value: any, from_attr: str = 'file_name') -> Optional[DeserializeFile]:

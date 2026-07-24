@@ -961,13 +961,13 @@ class CollectionQuery(AbstractFSQuery):
     def sorting_key(self, x: any):
         return super().sorting_key(x)
 
-    def paginated_collection(self, reverse=True)-> BasePagination:
+    def paginated_collection(self, reverse_order=True)-> BasePagination:
         """Paginates a list into smaller segments based on curr_pg and display limit"""
-        return super().paginated_collection(reverse)
+        return super().paginated_collection(reverse_order)
 
-    def paginate(self, start: int, end: int, reverse: bool = False) -> SortedList:
+    def paginate(self, start: int, end: int, reverse_order: bool = False) -> SortedList:
         """Returns a slice of the items list"""
-        return super().paginate(start, end, reverse)
+        return super().paginate(start, end, reverse_order)
 
     def find(self, value: any, from_attr: str = 'file_name'):
         """Returns the first item where attr == value"""

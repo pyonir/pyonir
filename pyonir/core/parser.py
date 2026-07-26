@@ -343,7 +343,7 @@ class DeserializeFile:
         from pyonir.core.mapper import dto_mapper
 
         page: BasePage = dto_mapper(self, BasePage)
-        Site.apply_globals({"prevNext": self.prev_next, "page": page})
+        Site.apply_globals({"prevNext": self.prev_next, "page": page, "request": req})
         html = Site.TemplateEnvironment.get_template(page.template).render()
         Site.TemplateEnvironment.block_pull_cache.clear()
         return html
@@ -354,19 +354,22 @@ class DeserializeFile:
         data = data_value or self
         return to_json(data)
 
-    def generate_static_file(self, page_request=None, rtn_results=False):
+    def generate_static_file(self, page_request: "PyonirRequest" = None, rtn_results=False):
         """Generate target file as html or json. Takes html or json content to save"""
         from pyonir import Site
         from pyonir.core.utils import create_file
-
+        from pyonir import PyonirRequest
+        page_request: PyonirRequest = page_request
         count = 0
         html_data = None
         json_data = None
         ctx_static_path = (
-            self.app_ctx[3] if self.app_ctx and len(self.app_ctx) > 3 else ""
+            self.app_ctx[3] if self.app_ctx else ""
         )
         slug = self.data.get("slug")
-
+        is_plgn_pg = self.app_ctx[1].endswith(slug.strip('/')) if self.app_ctx[1] else False
+        slug = '' if is_plgn_pg else slug
+        ctx_static_path = self.app_ctx[3] if is_plgn_pg else ctx_static_path
         def render_save():
             # -- Render Content --
             html_data = self.output_html(page_request)
@@ -384,16 +387,16 @@ class DeserializeFile:
 
         count += render_save()
 
-        if page_request:
-            for pgnum in range(1, page_request.paginate):
-                path_to_static_html = os.path.join(
-                    self.file_ssg_html_dirpath, str(pgnum + 1), "index.html"
-                )
-                path_to_static_api = os.path.join(
-                    self.file_ssg_api_dirpath, str(pgnum + 1), "index.json"
-                )
-                page_request.query_params["pg"] = pgnum + 1
-                count += render_save()
+        # if page_request:
+        #     for pgnum in range(1, page_request.paginate):
+        #         path_to_static_html = os.path.join(
+        #             self.file_ssg_html_dirpath, str(pgnum + 1), "index.html"
+        #         )
+        #         path_to_static_api = os.path.join(
+        #             self.file_ssg_api_dirpath, str(pgnum + 1), "index.json"
+        #         )
+        #         page_request.query_params["pg"] = pgnum + 1
+        #         count += render_save()
 
         # -- Return contents without saving --
         if rtn_results:

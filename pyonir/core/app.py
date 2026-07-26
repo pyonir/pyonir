@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from typing import Optional, Generator, List, Callable
+from typing import Optional, Generator, List, Callable, Tuple, Any
 
 from pyonir.core.parser import DeserializeFile
 
@@ -9,7 +9,7 @@ from pyonir.core.loaders import import_module
 from pyonir.core.utils import get_attr, load_env, merge_dict
 
 from pyonir.pyonir_types import PyonirThemes, EnvConfig, PyonirHooks, PyonirRoute, PyonirRouters, \
-    VIRTUAL_ROUTES_FILENAME, AbstractFSQuery
+    VIRTUAL_ROUTES_FILENAME, AbstractFSQuery, AppCtx, ModuleName, RoutePath, AppContentsPath, AppSSGPath
 
 
 class Base:
@@ -38,9 +38,8 @@ class Base:
     GENERATED_API_DIRNAME = "@generated" # API dirname stores generated files
 
     HIDDEN_ROUTE_FILES_PREFIX = ('_', '.')
-
     app_dirpath: str = '' # absolute path to context directory
-    name: str = ''# context name
+    name: ModuleName = ''# context name
     _configs: Optional[object] # context settings
     _resolvers = Optional[dict] # resolver registry
     _virtual_file: Optional[DeserializeFile] = None
@@ -48,7 +47,7 @@ class Base:
 
     # FIELDS
     @property
-    def app_ctx(self):
+    def app_ctx(self) -> AppCtx:
         return self.name, self.endpoint, self.contents_dirpath, self.ssg_dirpath, self.datastore_dirpath
 
     @property
@@ -57,7 +56,7 @@ class Base:
         return self._configs
 
     @property
-    def endpoint(self):
+    def endpoint(self) -> str:
         """Customer facing url address to access the store pages"""
         return self.configs.url if hasattr(self.configs, 'url') else None
 
@@ -341,9 +340,9 @@ class BasePlugin(Base):
         self.name: str = parent.__class__.__name__.lower()
 
     @property
-    def app_ctx(self):
+    def app_ctx(self) -> AppCtx:
         """plugins app context is relative to the application context"""
-        return self.name, self.endpoint, self.contents_dirpath, os.path.join(self.pyonir_app.ssg_dirpath, self.endpoint), self.pyonir_app.datastore_dirpath
+        return self.name, self.endpoint, self.contents_dirpath, self.ssg_dirpath, self.pyonir_app.datastore_dirpath
 
     @property
     def request_paths(self):
@@ -378,7 +377,7 @@ class BasePlugin(Base):
     @property
     def ssg_dirpath(self) -> str:
         """SSG Directory path for generating shop pages and routes"""
-        return os.path.join(self.pyonir_app.ssg_dirpath, self.endpoint)
+        return os.path.join(self.pyonir_app.ssg_dirpath, self.endpoint.lstrip('/'))
 
     @property
     def configs(self) -> object:
@@ -720,27 +719,29 @@ class BaseApp(Base):
             print(f"{PrntColrs.OKCYAN}3. Generating Static Pages")
 
             self.TemplateEnvironment.globals['is_ssg'] = True
-            ssg_req = PyonirRequest(None, self)
+            ssg_req = PyonirRequest()
             start_time = time.perf_counter()
-            # query all pages
-            all_pages: Generator[DeserializeFile] = query_fs(self.pages_dirpath, app_ctx=self.app_ctx, model='file', exclude_dirs=exclude_routes)
             xmls = []
+            # query all pages
+            all_ctx = [plgn for plgn in self.plugin_manager.activated_plugins if hasattr(plgn, 'app_ctx')]
+            all_ctx.append(self)
 
-            for pgfile in all_pages:
-                ssg_req.url = pgfile.data.get('url')
-                ssg_req.slug = pgfile.data.get('slug')
-                if ssg_req.slug.startswith(exclude_routes or tuple()): continue
-                virtual_file, virtual_url = ssg_req.get_virtual_route()
-                try:
-                    merge_dict(derived=virtual_file.data, src=pgfile.data)
-                    pgfile.apply_filters()
-                except Exception as e:
-                    raise
-                self.TemplateEnvironment.globals['request'] = ssg_req  # pg_req
-                count += pgfile.generate_static_file()
-                t = f"<url><loc>{self.protocol}://{self.domain}{pgfile.data.get('url')}</loc><priority>1.0</priority></url>\n"
-                xmls.append(t)
-                self.TemplateEnvironment.block_pull_cache.clear()
+            for app in all_ctx:
+                all_pages: Generator[DeserializeFile] = query_fs(app.pages_dirpath, app_ctx=app.app_ctx, model='file', exclude_dirs=exclude_routes)
+                for pgfile in all_pages:
+                    ssg_req.file = pgfile
+                    if ssg_req.slug.startswith(exclude_routes or tuple()): continue
+                    # self.TemplateEnvironment.globals['request'] = ssg_req  # pg_req
+                    virtual_file = ssg_req.get_virtual_route_data()
+                    try:
+                        merge_dict(derived=virtual_file.data, src=pgfile.data)
+                        pgfile.apply_filters()
+                    except Exception as e:
+                        raise
+                    count += pgfile.generate_static_file(ssg_req)
+                    t = f"<url><loc>{self.protocol}://{self.domain}{pgfile.data.get('url')}</loc><priority>1.0</priority></url>\n"
+                    xmls.append(t)
+                    self.TemplateEnvironment.block_pull_cache.clear()
 
             # Compile sitemap
             smap = f'<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>{self.domain}</loc><priority>1.0</priority></url> {"".join(xmls)} </urlset>'

@@ -57,10 +57,13 @@ AppContentsPath = str
 AppSSGPath = str
 """The path used for static site generation output."""
 
+AppDataStorePath = str
+"""The path used for static storage and data files"""
+
 AppContextPaths = Tuple[AppName, RoutePath, AppPaths]
 """Context binding tuple that connects an app name to a route and its associated paths."""
 
-AppCtx = Tuple[ModuleName, RoutePath, AppContentsPath, AppSSGPath]
+AppCtx = Tuple[ModuleName, RoutePath, AppContentsPath, AppSSGPath, AppDataStorePath]
 """Full application context including module reference and content/static paths."""
 
 AppRequestPaths = Tuple[RoutePath, AppPaths]

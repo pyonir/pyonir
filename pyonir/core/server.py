@@ -8,10 +8,8 @@ from dataclasses import dataclass
 from typing import Any, AsyncGenerator, Callable, Dict, List, Optional, Type, Union
 
 from starlette.applications import P, Starlette
-from starlette.exceptions import HTTPException
 from starlette.middleware import _MiddlewareFactory
 from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.requests import Request
 from starlette.requests import Request as StarletteRequest
 from starlette.responses import (
     FileResponse,
@@ -122,7 +120,7 @@ class RouteConfig:
 class PyonirDebugRequestMiddleware(BaseHTTPMiddleware):
     """Middleware to extract and attach user credentials to the request state."""
 
-    async def dispatch(self, star_request: Request, call_next):
+    async def dispatch(self, star_request: StarletteRequest, call_next):
         # before request
         pyonir_request = PyonirRequest(star_request)
         await pyonir_request.before_request()
@@ -888,7 +886,8 @@ class PyonirRequest:
 
     @property
     def path(self):
-        return self.server_request.url.path if self.server_request else "/"
+        default_path = self.file.data.get('url') if self.file else '/'
+        return self.server_request.url.path if self.server_request else default_path
 
     @property
     def url(self):

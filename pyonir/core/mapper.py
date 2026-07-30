@@ -114,12 +114,12 @@ class UnwrappedType:
 
     def verify_type(self, value: Any, enforce_type: bool = False) -> Any:
         value = self.default_value if value is None else value
+        serializable = isinstance(value, str) and value.strip().startswith(("[", "{"))
+        value = json.loads(value) if serializable else value
         err_msg = f"{self.base} Expected {self.column_name} value type of {self.base}, got {type(value)}"
         try:
             if not self.is_empty:
                 return value
-            # if self.is_required and not has_param:
-            #     raise AttributeError(err_msg)
             if not self.is_optional and value is None:
                 raise ValueError(err_msg)
             if enforce_type and not self.is_union and not isinstance(value, self.base):

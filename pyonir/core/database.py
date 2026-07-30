@@ -14,7 +14,7 @@ from pyonir.core.parser import DeserializeFile
 from pyonir.core.schemas import BaseSchema
 from pyonir.core.app import BaseApp
 from pyonir.pyonir_types import AppCtx, AbstractFSQuery, BasePagination
-from pyonir.core.utils import get_attr
+from pyonir.core.utils import get_attr, open_file
 
 
 class Driver(StrEnum):
@@ -480,12 +480,18 @@ class PyonirDatabaseService:
 
         return db_type, database, host, port, username, password
 
-    def sql_migrate(self, sql: str):
+    def sql_migrate(self, sql: str, sql_dirpath: str = None):
         self.connect()
         if not self.connection:
             raise RuntimeError("Database connection is not established.")
 
         cursor = self.connection.cursor()
+        sql_dirpath = os.path.join(self.pyonir_app.backend_dirpath, 'sqlbase') if not sql_dirpath else sql_dirpath
+        sql_file_path = os.path.join(sql_dirpath, sql)
+        disabled_sql_file_path = os.path.join(sql_dirpath, '.'+sql)
+        if os.path.exists(disabled_sql_file_path): return
+        if os.path.exists(sql_file_path):
+            sql = open_file(sql_file_path)
         try:
             cursor.executescript(sql)
         except Exception as e:
@@ -494,6 +500,7 @@ class PyonirDatabaseService:
         finally:
             cursor.close()
             self.connection.commit()
+            os.rename(sql_file_path, os.path.join(sql_dirpath, disabled_sql_file_path))
 
     def execute_sql(self, sql: str, params: tuple = None):
         """

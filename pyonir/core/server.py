@@ -1096,8 +1096,12 @@ class PyonirRequest:
         file_response = annotated_data.pop("@response", {})
         file_json_responses = annotated_data.pop("responses", {})
         file_headers = annotated_data.pop("headers", {})
+        file_security_responses = file_security.get('responses')
         # file_redirect = annotated_data.pop("redirect", None) or annotated_data.pop("redirect_to", None)
 
+        if file_security_responses:
+            # Override API response messages configured by route file
+            self.security.responses.add_responses(file_security_responses)
 
         if file_resolvers:
             resolver_module_path = file_resolvers.pop("call", False)
@@ -1113,6 +1117,7 @@ class PyonirRequest:
             self.file.data.update(file_response)
 
         if file_security:
+
             self._file_security_params = file_security
 
         if file_headers:

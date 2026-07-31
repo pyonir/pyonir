@@ -1,12 +1,18 @@
 import os, json, inspect
 from dataclasses import dataclass
 from datetime import datetime
-from enum import EnumType, Enum
+from enum import EnumType, Enum, IntEnum, StrEnum
 from types import UnionType, NoneType
 from typing import get_type_hints, Any, Tuple, List, Type, Optional
 from typing import get_origin, get_args, Union, Callable, Mapping, Iterable, Generator
 from collections.abc import Iterable as ABCIterable, Mapping as ABCMapping, Generator as ABCGenerator
-from sqlmodel import SQLModel
+
+from sqlalchemy import Integer, String, Float, Boolean, JSON
+from sqlmodel import SQLModel, text, UniqueConstraint, Boolean, Float, JSON, Table, Column, Integer, String, MetaData, ForeignKey
+
+metadata = MetaData()
+columns = []
+columns_names = []
 
 from pyonir.core.parser import DeserializeFile, parse_lookup_path
 from pyonir.core.utils import get_attr, deserialize_datestr
@@ -28,6 +34,12 @@ def is_mappable_type(tp):
 def is_scalar_type(tp):
     sclrs = (int, float, str, bool, EnumType)
     return tp in sclrs or (isinstance(tp, type) and issubclass(tp, sclrs))
+
+def is_integer_enum(enum_tp):
+    return issubclass(enum_tp, IntEnum)
+
+def is_string_enum(enum_tp):
+    return issubclass(enum_tp, StrEnum)
 
 def is_custom_class(tp):
     return isinstance(tp, type) and not tp.__module__ == "builtins"
@@ -93,6 +105,23 @@ class UnwrappedType:
         return self.kind == "scalar"
 
     @property
+    def column_type(self) -> Type[Integer | String | Float | Boolean | JSON]:
+        """Sql schema column type derived from the base class"""
+        sql_map = {
+            int: Integer,
+            str: String,
+            float: Float,
+            bool: Boolean,
+            dict: JSON,
+            list: JSON,
+        }
+        if is_integer_enum(self.base) or self.base == int:
+            return Integer
+        if is_string_enum(self.base) or self.base == str:
+            return String
+        return sql_map.get(self.base, String)
+
+    @property
     def is_datetime(self) -> bool:
         return self.kind == "datetime"
 
@@ -120,6 +149,10 @@ class UnwrappedType:
         try:
             if not self.is_empty:
                 return value
+            if is_integer_enum(self.base):
+                return int(value)
+            elif is_string_enum(self.base):
+                return str(value)
             if not self.is_optional and value is None:
                 raise ValueError(err_msg)
             if enforce_type and not self.is_union and not isinstance(value, self.base):

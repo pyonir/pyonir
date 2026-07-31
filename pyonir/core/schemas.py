@@ -473,7 +473,7 @@ def generate_sqla_table(cls) -> Optional[Table]:
         default_value = getattr(cls, name, None)
         column_type = schema_column.base or str
 
-        col_type = PY_TO_SQLA.get(column_type, String)
+        col_type = schema_column.column_type #PY_TO_SQLA.get(column_type, String)
         col_args = [] if is_fk else [col_type]
 
 

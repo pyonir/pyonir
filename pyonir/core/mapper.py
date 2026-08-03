@@ -162,10 +162,10 @@ class UnwrappedType:
             raise
 
     def coerce_value(self, value: Any, enforce_type: bool = False, skip_coerce: bool = False) -> Any:
+        value = self.verify_type(value, enforce_type=enforce_type)
         if skip_coerce: return value
         ft = self.base
         ft_params = self.args
-        value = self.verify_type(value, enforce_type=enforce_type)
 
         if is_sqlmodel_field(value):
             return value.default_factory()

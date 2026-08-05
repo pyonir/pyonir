@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from typing import Optional, Generator, List, Callable, Tuple, Any
+from typing import Optional, Generator, List, Callable, Tuple, Any, Type
 
 from pyonir.core.parser import DeserializeFile
 
@@ -78,7 +78,7 @@ class Base:
     @property
     def virtual_routes_file(self) -> Optional[DeserializeFile]:
         """Virtual route file for app or plugin app"""
-        self._virtual_file = DeserializeFile(self.virtual_routes_filepath, app_ctx=self.app_ctx)
+        self._virtual_file = DeserializeFile(self.virtual_routes_filepath or "", app_ctx=self.app_ctx)
         return self._virtual_file if self._virtual_file.file_exists else None
 
     # FILES
@@ -350,7 +350,7 @@ class BasePlugin(Base):
         return self.endpoint, {self.pages_dirpath, self.api_dirpath} if self.endpoint else None
 
     @property
-    def endpoint(self):
+    def endpoint(self) -> Optional[str]:
         """Customer facing url address to access the store pages"""
         return self.configs.url if hasattr(self.configs, 'url') else None
 
@@ -377,12 +377,12 @@ class BasePlugin(Base):
     @property
     def ssg_dirpath(self) -> str:
         """SSG Directory path for generating shop pages and routes"""
-        return os.path.join(self.pyonir_app.ssg_dirpath, self.endpoint.lstrip('/'))
+        return os.path.join(self.pyonir_app.ssg_dirpath, (self.endpoint or '').lstrip('/'))
 
     @property
     def configs(self) -> object:
         """Plugin settings are pulled from the application settings"""
-        plugin_settings = getattr(self.pyonir_app.configs, self.name)
+        plugin_settings = getattr(self.pyonir_app.configs, self.name, None)
         return plugin_settings
 
     @property
@@ -628,7 +628,11 @@ class BaseApp(Base):
         return paths.union(self._static_paths) if self._static_paths else paths
 
     # SETUP
-    def install_sys_plugins(self):
+    def install_plugin(self, plugin_cls: Type[BasePlugin]):
+        """Install custom plugin for application"""
+        self.plugin_manager.install_plugin(plugin_cls)
+
+    def _install_sys_plugins(self):
         """Install pyonir system plugins"""
         from pyonir.libs.plugins.navigation import Navigation
         self.plugin_manager.install_plugin(Navigation)
@@ -692,7 +696,7 @@ class BaseApp(Base):
         """Runs the Uvicorn webserver"""
 
         # Initialize Application settings and templates
-        self.install_sys_plugins()
+        self._install_sys_plugins()
         self.plugin_manager.activate_plugins()
 
         # Run uvicorn server
@@ -714,7 +718,7 @@ class BaseApp(Base):
         count = 0
         try:
             self.apply_globals()
-            self.install_sys_plugins()
+            self._install_sys_plugins()
             site_map_path = os.path.join(self.ssg_dirpath, 'sitemap.xml')
             print(f"{PrntColrs.OKCYAN}3. Generating Static Pages")
 

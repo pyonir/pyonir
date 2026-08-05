@@ -2,16 +2,21 @@ from __future__ import annotations
 
 import os, sys
 import shutil
+
+from pyonir.core.app import Base
 from pyonir.core.utils import copy_assets, PrntColrs
-from pyonir import PYONIR_SETUPS_DIRPATH
+from pyonir import PYONIR_SETUPS_DIRPATH, PYONIR_DOCS_DIRPATH
 
 backend_dirpath = os.path.join(PYONIR_SETUPS_DIRPATH, 'backend')
 contents_dirpath = os.path.join(PYONIR_SETUPS_DIRPATH, 'contents')
 frontend_dirpath = os.path.join(PYONIR_SETUPS_DIRPATH, 'frontend')
 entry_filepath = os.path.join(PYONIR_SETUPS_DIRPATH, 'main.py')
 theme_readme_filepath = os.path.join(PYONIR_SETUPS_DIRPATH, 'frontend', 'README.md')
-pkg_filepath = os.path.join(PYONIR_SETUPS_DIRPATH, '__init__.py')
-env_filepath = os.path.join(PYONIR_SETUPS_DIRPATH, '.env.example')
+src_docs_pages = os.path.join(PYONIR_DOCS_DIRPATH, 'content.md')
+src_docs_frontend = os.path.join(PYONIR_DOCS_DIRPATH, 'frontend.md')
+src_docs_backend = os.path.join(PYONIR_DOCS_DIRPATH, 'backend.md')
+src_init_file_path = os.path.join(PYONIR_SETUPS_DIRPATH, '__init__.py')
+src_env_file_path = os.path.join(PYONIR_SETUPS_DIRPATH, '.env.example')
 
 def pyonir_new_project(args):
 
@@ -20,13 +25,16 @@ def pyonir_new_project(args):
     project_path = os.path.join(base_path, project_name.replace(' ', '_').lower())
     if not os.path.exists(project_path):
         os.makedirs(project_path)
-        os.makedirs(os.path.join(project_path, 'frontend'))
-    copy_assets(pkg_filepath, os.path.join(project_path, '__init__.py'), False)
-    copy_assets(env_filepath, os.path.join(project_path, '.env'), False)
+        os.makedirs(os.path.join(project_path, Base.FRONTEND_DIRNAME))
+        os.makedirs(os.path.join(project_path, Base.BACKEND_DIRNAME))
+        os.makedirs(os.path.join(project_path, Base.CONTENTS_DIRNAME, Base.PAGES_DIRNAME))
+    # Copy initial application files
+    copy_assets(src_init_file_path, os.path.join(project_path, '__init__.py'), False)
+    copy_assets(src_env_file_path, os.path.join(project_path, '.env'), False)
     copy_assets(entry_filepath, os.path.join(project_path, 'main.py'), False)
-    copy_assets(theme_readme_filepath, os.path.join(project_path, 'frontend', 'README.md'), False)
-    copy_assets(backend_dirpath, os.path.join(project_path, 'backend'), False)
-    copy_assets(contents_dirpath, os.path.join(project_path, 'contents'), False)
+    copy_assets(src_docs_pages, os.path.join(project_path, Base.CONTENTS_DIRNAME, 'README.md'), False)
+    copy_assets(src_docs_frontend, os.path.join(project_path, Base.FRONTEND_DIRNAME, 'README.md'), False)
+    copy_assets(src_docs_backend, os.path.join(project_path, Base.BACKEND_DIRNAME, 'README.md'), False)
 
     summary = f'''{PrntColrs.OKGREEN}
 Project {project_name} created!
@@ -58,18 +66,21 @@ def pyonir_install(args: list):
         repo_branch = repo_branch.pop(0) if repo_branch else 'main'
         repo_owner, repo_name = repo_path.split('/')
         repo_zip = gh_zip_address.format(repo_path=repo_path, repo_branch=repo_branch)
-        temp_dst_path = os.path.join(project_base_dir,'plugins', "."+repo_name)
+        staging_dst_pth = os.path.join(project_base_dir,'plugins', "."+repo_name)
         dst_path = os.path.join(project_base_dir,'plugins', repo_name)
         print(f"pyonir is downloading {repo_zip} ...")
         response = requests.get(repo_zip)
         response.raise_for_status()
-        if not os.path.exists(temp_dst_path):
-            os.makedirs(temp_dst_path)
+        if not os.path.exists(staging_dst_pth):
+            os.makedirs(staging_dst_pth)
         with zipfile.ZipFile(io.BytesIO(response.content)) as zf:
-            zf.extractall(temp_dst_path)
-        extracted_folder = os.path.join(temp_dst_path, f"{repo_name}-{repo_branch}")
+            zf.extractall(staging_dst_pth)
+        extracted_folder = os.path.join(staging_dst_pth, f"{repo_name}-{repo_branch}")
+        if os.path.exists(dst_path):
+            print("Plugin already install..proceed to update")
+            shutil.rmtree(dst_path)
         shutil.move(extracted_folder, dst_path)
-        shutil.rmtree(temp_dst_path)
+        shutil.rmtree(staging_dst_pth)
 
 
 def pyonir_setup():
@@ -78,9 +89,8 @@ def pyonir_setup():
 
     if action == 'init':
         pyonir_new_project(contexts)
-        print('initializing...', contexts)
+        print('initializing new project...', contexts)
     elif action == 'install':
-        print('installing...', contexts)
         pyonir_install(contexts)
         pass
     elif action == 'help':

@@ -2,7 +2,7 @@
 title: Demo Pyonir page
 menu.group: primary
 menu.name: Home
-content:|
+````md html.body
 # Getting Started
 
 This is a demo page for the Pyonir web framework.
@@ -26,8 +26,5 @@ You can edit this page by modifying the `contents/pages/index.md` file.
 - Check out the `frontend` and `backend` directories for customizing your site's appearance and functionality.
 - Visit the [Pyonir documentation](https://pyonir.dev/) for more information on how to use and extend Pyonir.
 
+````
 
-**Happy coding!**
-
-![circuts](/static/images/circuits.jpg)
-![circuts](/public/test_image.png)

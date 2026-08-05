@@ -222,75 +222,6 @@ class PyonirServerResponse:
         response.status_code = sc
         return response
 
-    def xbuild_response(self, pyonir_request: PyonirRequest) -> Response:
-        """Builds the Starlette server response object"""
-        file = pyonir_request.file
-        is_static = pyonir_request.is_static
-        has_file_resolver = pyonir_request.file_resolver is not None
-        has_form_redirect = pyonir_request.request_input.body.get("redirect")
-        has_router_response = pyonir_request.route_response is not None
-        has_file_route = file and file.file_exists and not file.is_virtual_route
-        has_vfile_route = file and file.is_virtual_route
-        is_404 = not has_router_response and not is_static and not has_file_route
-        content = None
-        server_res = None
-
-        if has_router_response and (
-            has_file_route or has_vfile_route
-        ):  # File Resolver flow
-            self.set_json(file.data) if pyonir_request.is_api else self.set_html(
-                file.output_html(pyonir_request)
-            )
-
-        if not has_router_response and has_file_route or has_vfile_route:
-            self.set_json(file.data) if pyonir_request.is_api else self.set_html(
-                file.output_html(pyonir_request)
-            )
-
-        if (
-            not pyonir_request.has_server_response
-            and pyonir_request.is_api
-            and pyonir_request.method != "GET"
-        ):
-            self.set_json(pyonir_request.route_response)
-
-        if not self._redirect and has_form_redirect:
-            self.set_redirect(has_form_redirect)
-        if self._redirect:
-            server_res = self._redirect
-        elif self.media_type == STATIC_RES or is_static:
-            server_res = pyonir_request.route_response or Response(status_code=404)
-        elif self.media_type == EVENT_RES:
-            server_res = StreamingResponse(content=self._stream, media_type=EVENT_RES)
-        elif self.media_type == JSON_RES:
-            from pyonir.core.schemas import Graphiti
-
-            graphiti_model = pyonir_request.request_input.body.get(Graphiti.QUERY_KEY)
-            if graphiti_model:
-                g = Graphiti(graphiti_model, self._json_value).value()
-                self.set_json(g)
-            content = self._json
-        elif self.media_type == TEXT_RES:
-            self.status_code = self.status_code or (
-                200 if file.file_exists and not file.is_virtual_route else 404
-            )
-            content = self._html
-
-        if content:
-            server_res = Response(
-                content=content,
-                media_type=self.media_type,
-                status_code=self.status_code,
-            )
-
-        return server_res
-
-    @staticmethod
-    def build_error_page(request: PyonirRequest):
-        """Creates a error page"""
-        f = DeserializeFile("")
-        f.data.update({"url": request.url, "slug": request.slug})
-        return f
 
 
 class PyonirServer(Starlette):
@@ -449,7 +380,7 @@ class PyonirServer(Starlette):
         self.route_map[name] = RouteConfig(path=path)
 
     def init_default_static_routes(self):
-        if self.pyonir_app.use_themes and self.pyonir_app.themes.active_theme:
+        if self.pyonir_app.use_themes and self.pyonir_app.themes and self.pyonir_app.themes.active_theme:
             self.add_static_route(
                 self.pyonir_app.frontend_assets_route,
                 self.pyonir_app.themes.active_theme.static_dirpath,
@@ -1019,7 +950,8 @@ class PyonirRequest:
 
         # Normalize response type
         res = self.route_response if self.has_server_response else PyonirServerResponse(status_code=status_code)
-        if not self.has_server_response:
+        self.ctx_app.apply_globals({"status_code": status_code})
+        if not self.has_server_response and not self.is_static:
             if has_form_redirect:
                 res.set_redirect(url=has_form_redirect)
             elif is_json_res:
@@ -1040,6 +972,7 @@ class PyonirRequest:
             else:
                 # 404 page
                 res.status_code = 404
+                file.data.update({"url": self.url, "slug": self.slug, "content": "<h1>Oops. Page not found.</h1><a href='/'>Return home</a>"})
                 res.set_html(file.output_html(self))
 
         # Finalize server response type
@@ -1059,7 +992,7 @@ class PyonirRequest:
     async def apply_route(self, route_config: RouteConfig = None):
         """Sets route response from call to resolver or route function"""
         router_func = self.file_resolver if not route_config else route_config.func
-        if not router_func or self.security.is_denied:
+        if not router_func or self.security.is_denied or (self.is_static and not router_func):
             return
         is_async = inspect.iscoroutinefunction(router_func)
         if callable(self.file_resolver) and self.pyonir_app.is_dev:
@@ -1078,7 +1011,7 @@ class PyonirRequest:
 
         path_str = self.path.replace(self.pyonir_app.API_ROUTE, "")
         for plg in self.pyonir_app.activated_plugins:
-            if not hasattr(plg, "endpoint"):
+            if not hasattr(plg, "endpoint") or plg.endpoint is None:
                 continue
             if path_str.startswith(plg.endpoint):
                 self.ctx_app = plg
@@ -1185,7 +1118,7 @@ class PyonirRequest:
                         merge_dict(derived=virtual_route_file.data, src=file_res.data)
                     break
 
-        self.file = file_res or virtual_route_file
+        self.file = file_res or virtual_route_file or DeserializeFile('404', app_ctx=self.ctx_app.app_ctx)
 
     def set_redirect(self, redirect_url: str):
         """Sets redirect url on request input"""
@@ -1236,8 +1169,7 @@ class PyonirRequest:
             return self.json_response(data, status_code, message)
         elif self.is_static:
             return self.static_response(path=data, status_code=status_code)
-        elif template:
-            return self.html_response(data, status_code, template)
+        return self.html_response(data, status_code, template)
 
     def static_response(self, path: str = None, status_code: int = 200):
         return self._render(STATIC_RES, path)
@@ -1266,7 +1198,7 @@ class PyonirRequest:
                 data["template"] = template
                 self.file.data.update(data)
                 self.file.apply_filters()
-            html = self.file.output_html(self) if media_type == TEXT_RES else None
+            html = self.file.output_html(self) if self.file and media_type == TEXT_RES else None
             res.set_html(html)
         elif media_type == JSON_RES:
             json_data = data or self.file.data

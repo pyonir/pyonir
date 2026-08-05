@@ -1,15 +1,414 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Pyonir Demo Page</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Python Application - Hello World</title>
+  <style>
+    /* CSS Reset & Variable Definitions */
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    :root {
+      --bg-main: #f8fafc;
+      --bg-card: #ffffff;
+      --bg-terminal: #0f172a;
+      --border-subtle: #e2e8f0;
+      --border-focus: #cbd5e1;
+      --text-main: #0f172a;
+      --text-muted: #475569;
+      --text-light: #94a3b8;
+      --accent-python-blue: #2563eb;
+      --accent-python-blue-light: #eff6ff;
+      --accent-python-gold: #d97706;
+      --accent-python-gold-light: #fffbeb;
+      --radius-container: 16px;
+      --radius-card: 12px;
+      --radius-pill: 9999px;
+      --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+      --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.07), 0 2px 4px -2px rgba(0, 0, 0, 0.05);
+      --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.08), 0 4px 6px -4px rgba(0, 0, 0, 0.04);
+      --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    }
+
+    body {
+      font-family: var(--font-sans);
+      background-color: var(--bg-main);
+      color: var(--text-main);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    main {
+        margin: 0 auto;
+        max-width: 28rem;
+        display: grid;
+        gap: 2.5rem;
+        align-items: center;
+        background-color: var(--bg-card);
+        border: 1px solid var(--border-subtle);
+        border-radius: var(--radius-container);
+        padding: 3rem 2.5rem;
+        box-shadow: var(--shadow-sm);
+    }
+    code {
+        padding: 0.5rem;
+        background: #fcf08b;
+        border-radius: .2rem;
+        border: 1px solid #FFC107;
+        color: #8c6b07;
+        margin: 4px 0px;
+        display: block;
+    }
+    /* Layout Wrapper */
+    .page-wrapper {
+      max-width: 1080px;
+      margin: 0 auto;
+      padding: 2.5rem 1.5rem;
+      width: 100%;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 3.5rem;
+    }
+
+    /* Header Navigation Bar */
+    .navbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding-bottom: 1.25rem;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      text-decoration: none;
+      color: var(--text-main);
+      font-weight: 700;
+      font-size: 1.125rem;
+    }
+
+    .python-logo {
+      width: 32px;
+      height: 32px;
+      flex-shrink: 0;
+    }
+
+    .badge-status {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      background-color: var(--accent-python-blue-light);
+      color: var(--accent-python-blue);
+      border: 1px solid #bfdbfe;
+      padding: 0.35rem 0.85rem;
+      border-radius: var(--radius-pill);
+      font-size: 0.8125rem;
+      font-weight: 600;
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      background-color: #22c55e;
+      border-radius: 50%;
+    }
+
+    /* Hero Section */
+    .hero {
+
+    }
+
+    .hero-content {
+      display: flex;
+      flex-direction: column;
+      gap: 1.25rem;
+    }
+
+    .hero-eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 0.875rem;
+      font-weight: 600;
+      color: var(--accent-python-gold);
+      background-color: var(--accent-python-gold-light);
+      border: 1px solid #fde68a;
+      padding: 0.25rem 0.75rem;
+      border-radius: var(--radius-pill);
+      width: fit-content;
+    }
+
+    .hero-title {
+      font-size: 2.75rem;
+      font-weight: 800;
+      line-height: 1.15;
+      letter-spacing: -0.02em;
+      color: var(--text-main);
+    }
+
+    .hero-welcome {
+      font-size: 1.125rem;
+      color: var(--text-muted);
+      line-height: 1.6;
+    }
+
+    .hero-meta {
+      display: flex;
+      gap: 1.5rem;
+      margin-top: 0.5rem;
+      padding-top: 1rem;
+      border-top: 1px solid var(--border-subtle);
+      font-size: 0.875rem;
+      color: var(--text-muted);
+    }
+
+    .meta-item {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+
+    /* Terminal Code Display */
+    .terminal-card {
+      background-color: var(--bg-terminal);
+      border-radius: var(--radius-card);
+      box-shadow: var(--shadow-lg);
+      overflow: hidden;
+      border: 1px solid #1e293b;
+    }
+
+    .terminal-header {
+      background-color: #1e293b;
+      padding: 0.75rem 1rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .terminal-buttons {
+      display: flex;
+      gap: 0.4rem;
+    }
+
+    .btn-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+    }
+
+    .dot-close { background-color: #ef4444; }
+    .dot-minimize { background-color: #f59e0b; }
+    .dot-expand { background-color: #10b981; }
+
+    .terminal-filename {
+      font-family: var(--font-mono);
+      font-size: 0.8125rem;
+      color: var(--text-light);
+    }
+
+    .terminal-body {
+      padding: 1.25rem 1.5rem;
+      font-family: var(--font-mono);
+      font-size: 0.875rem;
+      line-height: 1.7;
+      color: #f8fafc;
+      overflow-x: auto;
+    }
+
+    .token-keyword { color: #f472b6; }
+    .token-function { color: #38bdf8; }
+    .token-string { color: #4ade80; }
+    .token-comment { color: #64748b; font-style: italic; }
+    .token-output { color: #fbbf24; }
+
+    /* Features Grid Section */
+    .features-section {
+      display: flex;
+      flex-direction: column;
+      gap: 1.5rem;
+    }
+
+    .section-header {
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+    }
+
+    .section-title {
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: var(--text-main);
+      letter-spacing: -0.01em;
+    }
+
+    .section-subtitle {
+      font-size: 0.95rem;
+      color: var(--text-muted);
+    }
+
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1.5rem;
+    }
+
+    /* Individual Card Design */
+    .card {
+      background-color: var(--bg-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-card);
+      padding: 1.75rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+      box-shadow: var(--shadow-sm);
+      transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+    }
+
+    .card:hover {
+      transform: translateY(-2px);
+      box-shadow: var(--shadow-md);
+      border-color: var(--border-focus);
+    }
+
+    .card-icon-wrapper {
+      width: 44px;
+      height: 44px;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .icon-blue {
+      background-color: #eff6ff;
+      color: #2563eb;
+    }
+
+    .icon-gold {
+      background-color: #fffbeb;
+      color: #d97706;
+    }
+
+    .icon-green {
+      background-color: #f0fdf4;
+      color: #16a34a;
+    }
+
+    .card-title {
+      font-size: 1.125rem;
+      font-weight: 700;
+      color: var(--text-main);
+    }
+
+    .card-description {
+      font-size: 0.9375rem;
+      color: var(--text-muted);
+      line-height: 1.55;
+      flex: 1;
+    }
+
+    .card-tag {
+      display: inline-block;
+      align-self: flex-start;
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      padding: 0.25rem 0.6rem;
+      border-radius: 6px;
+      background-color: #f1f5f9;
+      color: #475569;
+    }
+
+    /* Footer */
+    .footer {
+      border-top: 1px solid var(--border-subtle);
+      padding-top: 1.5rem;
+      margin-top: auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 0.875rem;
+      color: var(--text-muted);
+    }
+
+    /* Responsive Media Queries */
+    @media (max-width: 900px) {
+      .hero {
+        grid-template-columns: 1fr;
+        padding: 2rem 1.5rem;
+      }
+      .features-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+    }
+
+    @media (max-width: 640px) {
+      .page-wrapper {
+        padding: 1.5rem 1rem;
+        gap: 2.5rem;
+      }
+      .hero-title {
+        font-size: 2.125rem;
+      }
+      .features-grid {
+        grid-template-columns: 1fr;
+      }
+      .footer {
+        flex-direction: column;
+        gap: 0.75rem;
+        text-align: center;
+      }
+    }
+  </style>
 </head>
 <body>
-<div style="text-align: center;">
-    <h1>Pyonir Starter Page!</h1>
-    <p>{{ page.title }}</p>
-    <em>Seeing this system page means your application doesn't have a pages.html template.</em>
-</div>
+
+  <div class="page-wrapper">
+    <!-- Hero Section -->
+    <main>
+    <header class="navbar">
+      <a href="#" class="brand" aria-label="Python Application Home">
+        <span>{{ page.title or 'Pyonir v'+site.VERSION }}</span>
+      </a>
+
+      <div class="badge-status">
+        <span class="status-dot"></span>
+        <span>{{ status_code }} {{ request.method }}• {{ request.path }} </span>
+      </div>
+    </header>
+    <article class="hero-content">
+
+      <h1 class="hero-title">Hello, World!</h1>
+      <p class="hero-welcome">
+          Seeing this default template means your pyonir application does not have a <code>frontend/templates/pages.html</code>
+      </p>
+
+      <div class="hero-meta">
+        <div class="meta-item">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M14.8284 12L16.2426 13.4142L19.071 10.5858C20.6331 9.02365 20.6331 6.49099 19.071 4.9289C17.509 3.3668 14.9763 3.3668 13.4142 4.9289L10.5858 7.75732L12 9.17154L14.8284 6.34311C15.6095 5.56206 16.8758 5.56206 17.6568 6.34311C18.4379 7.12416 18.4379 8.39049 17.6568 9.17154L14.8284 12Z" fill="currentColor"/><path d="M12 14.8285L13.4142 16.2427L10.5858 19.0711C9.02372 20.6332 6.49106 20.6332 4.92896 19.0711C3.36686 17.509 3.36686 14.9764 4.92896 13.4143L7.75739 10.5858L9.1716 12L6.34317 14.8285C5.56212 15.6095 5.56212 16.8758 6.34317 17.6569C7.12422 18.4379 8.39055 18.4379 9.1716 17.6569L12 14.8285Z" fill="currentColor"/><path d="M14.8285 10.5857C15.219 10.1952 15.219 9.56199 14.8285 9.17147C14.4379 8.78094 13.8048 8.78094 13.4142 9.17147L9.1716 13.4141C8.78107 13.8046 8.78107 14.4378 9.1716 14.8283C9.56212 15.2188 10.1953 15.2188 10.5858 14.8283L14.8285 10.5857Z" fill="currentColor"/></svg>
+            <a href="http://pyonir.dev">Pyonir Docs</a>
+        </div>
+          <div class="meta-item">
+            <span >{{ site.name }}</span>
+        </div>
+      </div>
+    </article>
+    </main>
+
+  </div>
+
 </body>
 </html>

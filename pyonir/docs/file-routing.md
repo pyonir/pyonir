@@ -1,3 +1,20 @@
+# Pages
+
+The `contents/pages` directory contains the Markdown files that make up your website's pages.
+
+Each file represents a route that is automatically discovered and served by Pyonir. No route registration is required.
+
+## URL Mapping
+
+Pyonir maps file paths directly to URLs.
+
+| File                 | URL                |
+| -------------------- | ------------------ |
+| `index.md`           | `/`                |
+| `about.md`           | `/about`           |
+| `contact.md`         | `/contact`         |
+| `blog/first-post.md` | `/blog/first-post` |
+
 ## File based Routes (Optional) 
 
 **Virtual routes `.virtual_routes.md`**

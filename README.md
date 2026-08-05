@@ -1,248 +1,142 @@
-# Pyonir Web Framework
+# Pyonir
+[![PyPI Version](https://img.shields.io/pypi/v/pyonir)](https://pypi.org/project/pyonir/)
+[![Python Version](https://img.shields.io/pypi/pyversions/pyonir)](https://pypi.org/project/pyonir/)
+[![License](https://img.shields.io/github/license/pyonir/pyonir)](https://github.com/pyonir/pyonir/blob/main/LICENSE)
+[![GitHub Stars](https://img.shields.io/github/stars/pyonir/pyonir?style=social)](https://github.com/pyonir/pyonir)
 
-Pyonir is a static site generator and flat file web framework written in Python. It allows you to create dynamic websites using simple markdown files and a powerful plugin architecture.
+> A modern Python flat-file web framework with static site generation, file-based routing, and an AI-friendly project structure.
 
-## Install Pyonir
 
-Run the following command to install Pyonir via pip:
+[Documentation](https://pyonir.dev) • [GitHub](https://github.com/pyonir/pyonir) • [PyPI](https://pypi.org/project/pyonir/)
 
-- Python 3.9 or higher is required.
+---
 
-```bash 
+## Why Pyonir?
+
+Pyonir combines the simplicity of flat-file CMSs with the flexibility of a modern Python web framework.
+
+* 📄 Markdown-first content
+* 📁 File-based routing
+* ⚡ Static site generation
+* 🎨 Jinja2 templates
+* 🔌 Plugin architecture
+* 🎭 Theme support
+* 🌐 API endpoints
+* 🚀 No database required
+
+
+---
+
+## Installation
+
+**Requirements**
+
+* Python 3.9+
+
+Install Pyonir:
+
+```bash
 > pip install pyonir
 ```
 
-## Create a new project (manual setup)
+---
 
-Manually create a `main.py` file from an empty directory with the following values.
+## Create a Project
 
-**Example**
-```markdown
-your_project/
-    |─ __init__.py # makes this project a package
-    └─ main.py     # entry point to your application
-```
-
-**Example main.py file**
-
-1. Open the `main.py` file and add the following code:
-```python
-from pyonir import Pyonir
-app = Pyonir(__file__)
-
-# Run the web server
-app.run()
-```
-2. Customize your application by adding content files, themes, and plugins as needed.
-
-- Create a `contents/pages` directory to store your markdown files.
-  - Next, create a sample `index.md` file in the `contents/pages` directory with the following content:
-    ```markdown
-    title: Home Page
-    description: Welcome to my Pyonir web application!
-    ===
-    # Hello, Pyonir!
-    
-    This is my first page using the Pyonir web framework.
-    ```
-- Create a `frontend/templates` directory to store your html markup.
-  - Next, create a sample `pages.html` file in the `frontend/templates` directory with the following content:
-    ```html
-    <h1>{{ page.title }}</h1>
-    <p>{{ page.description }}</p>
-    ```
-
-3. Run your application:
-```bash
-> python main.py
-```
-
-## Create a new project (optional auto setup)
-
-**Scaffold a demo web application from the cli:**
+1. Generate a starter application:
 
 ```bash
 > pyonir init
 ```
 
-This will generate the following directory structure
-
-```md
-your_project/
-    ├─ backend/
-    |  └─ README.md
-    |  └─ __init__.py
-    ├─ contents/
-    |  ├─ pages/
-    |     └─ index.md
-    ├─ frontend/
-    |  └─ README.md
-    |  └─ pages.html
-    └─ main.py
-    └─ __init__.py
-```
-
-**Install plugins from the pyonir plugins registry on github**
+2. Start the development server:
 
 ```bash
-> pyonir install plugin:<repo_owner>/<repo_name>#<repo_branch>
+> python main.py
 ```
 
-**Install themes from the pyonir theme registry on github**
+3. Open your browser:
 
-```bash
-> pyonir install theme:<repo_owner>/<repo_name>#<repo_branch>
+```
+http://localhost:5000
 ```
 
-### Configure Contents
+---
 
-Site content is stored in special markdown files within the contents directory. 
-Each sub directory within the `contents` folder represents the `content type` for any contained markdown files.
+## Manual Setup
 
-### Content Types
-
-Organizes a collection of files by specified type in a directory. Type directory can be named anything you want.
-`pages`, `api`, and `configs` are reserved directory name used by the system but can override.
-
-**Config Type: `contents/configs`**
-
-Represents mutable site configurations that can change while app is running.
-Override this directory name by setting `your_app.CONFIGS_DIRNAME`
-
-**Page Type: `contents/pages`** 
-
-Represents routes accessible from a URL. A file from `contents/pages/about.md` can be accessed from a URL of `https:0.0.0.0/about`
-All pages files are served as `text/html` resources. You can configure your pages to be serverd from a different directory by overriding the `Site.PAGES_DIRNAME` default value.
-
-Override this directory name by setting `your_app.PAGES_DIRNAME`
-
-**API Type: `contents/api`**
-
-Files within this folder represents API endpoints. Files here can define the response of the request and call python functions.
-A file from `contents/api/new_post.md` can be accessed from a URL of `https:0.0.0.0/api/new_post`.
-You can configure your api pages to be serverd from a different directory by overriding the `Site.API_DIRNAME` default value.
-
-Override this directory name by setting `your_app.API_DIRNAME`
-
-## Generate static site
-
-```python
-from pyonir import Pyonir
-app = Pyonir(__file__)
-
-app.generate_static_website()
-```
-
-## Configure Route Controllers
-
-Configuration based routing defined at startup. All routes live in one place — easier for introspection or auto-generation.
-This allows flexibility for functions to be access from virtual routes and registered at startup.
-
-```python
-def demo_route(user_id: int = 5):
-    # perform logic using the typed arguments passed to this function on request
-    return f"user id is {user_id}"
-
-routes: list['PyonirRoute'] = [
-    ['/user/{user_id:int}', demo_route, ["GET"]],
-]
-
-# Define an endpoint routers
-router: 'PyonirRouters' = [
-    ('/api/demo', routes)
-]
-```
-
-## Run Web server
-
-Pyonir uses the starlette webserver by default to process web request. Below is an example of how to install a route
-handler.
+1. Create a `main.py` file:
 
 ```python
 from pyonir import Pyonir
 
-def demo_route(user_id: int = 5):
-    # perform logic using the typed arguments passed to this function on request
-    return f"user id is {user_id}"
-
-routes: list['PyonirRoute'] = [
-    ['/user/{user_id:int}', demo_route, ["GET"]],
-]
-
-# Define an endpoint routers
-router: 'PyonirRouters' = [
-    ('/api/demo', routes)
-]
-
 app = Pyonir(__file__)
 
-app.run(routes=router)
+app.run()
 ```
 
-## Spec based Routes (Optional) 
+2. Create your first page:
 
-**Virtual routes `.routes.md`**
-
-A virtual route generates a page from aggregated data sources, giving you greater control over the request and response.
-Just add `.routes.md` file in the `contents/pages` directory.
-
-**JSON response** 
-
-any pattern that begins with the default API name are automatically returning JSON.
-
-```md
-/api/some_data/{data_id:str}: 
-    GET.response: application/json
-    data: hello {request.path_param.data_id} world
+```
+contents/
+└── pages/
+    └── index.md
 ```
 
-results from request `http:0.0.0.0/api/some_data/a3b3c3`
+```markdown
+title: Home
+description: Welcome to Pyonir!
+===
 
-```json
-{
-  "data": "hello a3b3c3 world"
-}
+# Hello, Pyonir!
+
+Your website is running.
 ```
 
-**HTML response**
+Create a template:
 
-The `page` attribute value will be passed into the page request. The page url and slug are auto set from the request.
-Any scalar values will be passed as the page contents value. Only GET requests permitted by default.
-
-```md
-/products/{tag:str}:
-    title: Products grouped by tag.
-    contents: Listing of all products grouped by tags.
-    template: product-tags.html
-    entries: $dir/../products?groupby={request.path_params[tag])}
+```
+frontend/
+└── templates/
+    └── pages.html
 ```
 
-**Server-sent events**
+```html
+<h1>{{ page.title }}</h1>
 
-```md
-/api/sse/user/notifications:
-    GET.call: reference.path.to.sse.notifications.controller
-    GET.headers.accept: text/event-stream
+{{ page.contents }}
 ```
 
-**Websockets**
+Run the server:
 
-```md
-/api/ws/user/chat:
-    GET.call: path.to.websocket.module
-    GET.headers.accept: text/event-stream
+```bash
+> python main.py
 ```
 
+---
 
+## Installing Plugins
 
+```bash
+> pyonir install plugin:<owner>/<repository>#<branch>
+```
 
-### Configure Frontend
+Example:
 
-The `frontend` directory organizes your application themes. Each theme uses jinja template logic to generate data into
-HTML. Theme templates are stored in `frontend/themes/{THEME_NAME}/layouts` directory.
+```bash
+> pyonir install plugin:example/comments#main
+```
 
-### Configure Static Assets
-...
+---
 
-### Configure Plugins
-...
+## Installing Themes
+
+```bash
+pyonir install theme:<owner>/<repository>#<branch>
+```
+
+Example:
+
+```bash
+pyonir install theme:example/blog-theme#main
+```

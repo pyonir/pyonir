@@ -14,6 +14,7 @@ from importlib.metadata import metadata
 # Pyonir settings
 PYONIR_DIRPATH = os.path.abspath(os.path.dirname(__file__))
 PYONIR_TOML_FILE = os.path.join(os.path.dirname(PYONIR_DIRPATH), "pyproject.toml")
+PYONIR_DOCS_DIRPATH = os.path.join(PYONIR_DIRPATH, "docs")
 PYONIR_LIBS_DIRPATH = os.path.join(PYONIR_DIRPATH, "libs")
 PYONIR_PLUGINS_DIRPATH = os.path.join(PYONIR_LIBS_DIRPATH, 'plugins')
 PYONIR_SETUPS_DIRPATH = os.path.join(PYONIR_LIBS_DIRPATH, 'app_setup')

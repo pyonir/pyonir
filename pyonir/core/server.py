@@ -950,7 +950,7 @@ class PyonirRequest:
 
         # Normalize response type
         res = self.route_response if self.has_server_response else PyonirServerResponse(status_code=status_code)
-        self.ctx_app.apply_globals({"status_code": status_code})
+        self.pyonir_app.apply_globals({"status_code": status_code})
         if not self.has_server_response and not self.is_static:
             if has_form_redirect:
                 res.set_redirect(url=has_form_redirect)

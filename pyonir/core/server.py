@@ -247,7 +247,7 @@ class PyonirServer(Starlette):
         self.add_middleware(PyonirDebugRequestMiddleware)
         self.add_middleware(
             SessionMiddleware,
-            https_only=not self.pyonir_app.is_dev,
+            https_only=self.pyonir_app.use_ssl,
             secret_key=self.pyonir_app.salt,
             session_cookie=self.pyonir_app.session_key,
             max_age=3600,

@@ -310,33 +310,6 @@ class PyonirSecurity:
 
         return None
 
-    # def apply_security_configs(self, route_config: RouteConfig = None):
-    #     from .utils import get_attr
-    #     file = self.request.file
-    #     if not file and not route_config: return
-    #
-    #     file_data = file.data if file else None
-    #     # Router configurations
-    #     route_headers_configs = get_attr(route_config.configs, '@response.headers', {}) if route_config else {}
-    #     route_security_configs = get_attr(route_config.configs, '@security', {}) if route_config else {}
-    #     route_security_response = get_attr(route_config.configs, '@security.responses', {}) if route_config else {}
-    #
-    #     # File configurations
-    #     file_headers_configs = get_attr(file_data, '@response.headers', {})
-    #     file_security_configs = get_attr(file_data, '@security', {})
-    #     file_security_response = get_attr(file_data, '@security.responses', {})
-    #
-    #     # Consolidate configurations (file configs higher priority)
-    #     security_responses = {**route_security_response, **file_security_response}
-    #     response_headers = {**route_headers_configs, **file_headers_configs}
-    #     security_configs = {**route_security_configs, **file_security_configs}
-    #
-    #     self._route_config = route_config
-    #     self._security_configs = security_configs
-    #     self.request.request_input.set_headers(response_headers)
-    #     self.request.json_responses.add_responses(security_responses)
-
-
     def verify_request_access(self, request: PyonirRequest = None):
         req = request or self.request
         # user = self.authenticated_user
@@ -521,11 +494,11 @@ def check_pass(protected_hash: str, password_str: str) -> bool:
 def decode_jwt(jwt_token: str, salt: str)-> Optional[dict]:
     """Returns decoded jwt object"""
     import jwt
-    from jwt import ExpiredSignatureError
+    from jwt import ExpiredSignatureError, DecodeError
     try:
         return jwt.decode(jwt_token, salt, algorithms=['HS256'])
-    except ExpiredSignatureError as ee:
-        print(f"JWT token expired: {ee}")
+    except (ExpiredSignatureError, DecodeError) as ee:
+        print(f"JWT token expired or invalid: {jwt_token}: {ee}")
     except Exception as e:
         print(f"{__name__} method - {str(e)}: {type(e).__name__}")
 

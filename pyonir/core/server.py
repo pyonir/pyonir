@@ -1072,7 +1072,7 @@ class PyonirRequest:
         """
 
         from pyonir.core.parser import DeserializeFile
-
+        if self.is_static: return
         path_str = self.path
         is_api = self.parts and self.parts[0] == self.ctx_app.API_DIRNAME
         ctx_route, ctx_paths = self.ctx_app.request_paths or ("", [])

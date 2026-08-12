@@ -629,7 +629,7 @@ class PyonirDatabaseService:
         return entity.__primary_key_value__
 
     @abstractmethod
-    def find(self, entity: Type[BaseSchema], options: dict = None) -> Any:
+    def find(self, entity: Type[BaseSchema], options: dict = None) -> Iterator[Any]:
         """Find entity rows using entity's table name and options."""
         if not options:
             options = {}

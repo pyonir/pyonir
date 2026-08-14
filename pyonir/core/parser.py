@@ -30,33 +30,6 @@ VIRTUAL_ROUTES_FILENAME: str = '.virtual_routes'
 NS: List[str] = []
 RETRY_MAP: Dict = {}
 
-class FileCache:
-    cache = {}
-
-    @classmethod
-    def read(cls, path: str):
-
-        fp = Path(path)
-        if not fp.exists():
-            return None
-        mtime = fp.stat().st_mtime
-        cached = cls.cache.get(path)
-        if cached and cached["mtime"] == mtime:
-            return cached["content"]
-        return None
-
-    def add(file: 'DeserializeFile'):
-
-        fp = Path(file.file_path)
-        if not fp.exists():
-            return None
-        mtime = fp.stat().st_mtime
-
-        FileCache.cache[file.file_path] = {
-            "mtime": mtime,
-            "content": file
-        }
-
 
 class FileStatuses(str):
     UNKNOWN = "unknown"
@@ -86,7 +59,7 @@ class DeserializeFile:
                 app_ctx: "AppCtx" = None,
                 model: object = None,
                 text_string: str = None):
-
+        from pyonir.core.app import file_cache
         name, ext = os.path.splitext(os.path.basename(file_path))
         self.app_ctx = app_ctx
         self._blob_keys = []
@@ -142,7 +115,17 @@ class DeserializeFile:
         # Post-processing
         self.apply_filters()
         self.extend_data()
+        file_cache.add(self)
 
+    @classmethod
+    def from_cache(cls, file_path: str, app_ctx: "AppCtx" = None,
+                model: object = None,
+                text_string: str = None):
+        from pyonir.core.app import file_cache
+        cache_file = file_cache.read(file_path)
+        if cache_file and model:
+            cache_file.schema = model
+        return cache_file or cls(file_path=file_path, app_ctx=app_ctx, model=model, text_string=text_string)
 
     @property
     def file_path(self):

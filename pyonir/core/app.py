@@ -11,6 +11,33 @@ from pyonir.core.utils import get_attr, load_env, merge_dict
 from pyonir.pyonir_types import PyonirThemes, EnvConfig, PyonirHooks, PyonirRoute, PyonirRouters, \
     VIRTUAL_ROUTES_FILENAME, AbstractFSQuery, AppCtx, ModuleName, RoutePath, AppContentsPath, AppSSGPath
 
+class FileCache:
+    def __init__(self):
+        self.cache = {}
+
+    def read(self, path: str):
+        from pathlib import Path
+
+        fp = Path(path)
+        if fp.exists():
+            mtime = fp.stat().st_mtime
+            cached = self.cache.get(path)
+            if cached and cached["mtime"] == mtime:
+                return cached["content"]
+        return None
+
+    def add(self, file: DeserializeFile):
+        from pathlib import Path
+        if not file.file_exists: return
+        fp = Path(file.file_path)
+        mtime = fp.stat().st_mtime
+
+        self.cache[file.file_path] = {
+            "mtime": mtime,
+            "content": file
+        }
+
+file_cache: FileCache = FileCache()
 
 class Base:
     SSG_IN_PROGRESS: bool = False  # toggle when static site generator is running
@@ -520,7 +547,6 @@ class BaseApp(Base):
             'pyformat': self.TemplateEnvironment.render_pystring,
             'md': parse_markdown
         }
-        # self.apply_globals()
 
     @property
     def active_theme(self):

@@ -418,7 +418,7 @@ def lookup_fk(value: str, data_dir: str, app_ctx: list, ignore_attr_path: bool =
     lookup_path, query_params, has_attr_path, is_caller = parse_lookup_path(value, base_path=data_dir)
     if lookup_path:
         is_file_path = os.path.exists(lookup_path)
-        value = DeserializeFile(lookup_path, app_ctx=app_ctx) if is_file_path else value
+        value = DeserializeFile.from_cache(lookup_path, app_ctx=app_ctx) if is_file_path else value
         if has_attr_path and not ignore_attr_path:
             value = get_attr(value, has_attr_path)
     if is_json:

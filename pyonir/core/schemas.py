@@ -208,9 +208,8 @@ class BaseSchema(BaseModel):
     def from_file(cls: Type[T], file_path: str, app_ctx=None) -> T:
         """Create an instance from a file path."""
         from pyonir.core.parser import DeserializeFile
-        from pyonir.core.mapper import dto_mapper
-        prsfile = DeserializeFile(file_path, app_ctx=app_ctx)
-        return dto_mapper(prsfile, cls)
+        dsr_file = DeserializeFile(file_path, app_ctx=app_ctx)
+        return dsr_file.to_schema(cls)
 
     @classmethod
     def sql_after_create(cls, dbc: 'PyonirDatabaseService'):

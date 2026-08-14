@@ -30,6 +30,7 @@ TEXT_RES: str = "text/html"
 JSON_RES: str = "application/json"
 EVENT_RES: str = "text/event-stream"
 STATIC_RES: str = "static"
+FORBIDDEN: str = "Forbidden"
 REDIRECT_RES: str = "redirect"
 
 # Environments
@@ -71,9 +72,12 @@ def generate_nginx_conf(app: BaseApp) -> bool:
 
 async def route_handler(pyonir_request, route_config: RouteConfig = None):
     # Normalize file data and values from request
-    pyonir_request.refresh_route_params(route_config=route_config)
+    if pyonir_request.has_server_response: return # Custom routes already processed
+    await pyonir_request.set_request_input(pyonir_request.server_request)
+    pyonir_request.set_route_file()
+    await pyonir_request.ctx_app.before_request(pyonir_request) # before request handler
 
-    # Security check
+    # Security check request and access to static resource
     pyonir_request.security.verify_request_access()
 
     # Execute route
@@ -86,7 +90,8 @@ def route_wrapper(route_config: RouteConfig, **kwargs):
     async def dec_wrapper(star_req):
         """Wrapper function for handling incoming requests, performing security checks, and building responses"""
         pyonir_request: PyonirRequest = star_req.app.pyonir_app.server.request
-        pyonir_request.server_request = star_req  # Must refresh server request object
+        pyonir_request.server_request = star_req  # Must refresh stale server request object
+        pyonir_request.security._route_config = route_config
         await route_handler(pyonir_request, route_config=route_config)
         return pyonir_request.build_response()
 
@@ -121,15 +126,14 @@ class PyonirDebugRequestMiddleware(BaseHTTPMiddleware):
     """Middleware to extract and attach user credentials to the request state."""
 
     async def dispatch(self, star_request: StarletteRequest, call_next):
-        # before request
+        # Create Pyonir request object before every request
         pyonir_request = PyonirRequest(star_request)
-        await pyonir_request.before_request()
-        await pyonir_request.pyonir_app.before_request(pyonir_request)
+        pyonir_request.pyonir_app.server.request = pyonir_request
 
-        # call starlette routes
+        # Execute Starlette routing to hydrate path parameters, calls pyonir dec_wrapper
         response = await call_next(star_request)
 
-        if not pyonir_request.has_router_config and not pyonir_request.is_static:
+        if not pyonir_request.is_static:
             await route_handler(pyonir_request)
             _response = pyonir_request.build_response()
             if _response:
@@ -450,8 +454,7 @@ class PyonirServer(Starlette):
             - NGINX config: {self.pyonir_app.nginx_config_filepath}
             - System Version: {sys.version_info}
         """)
-        print(uvicorn_options)
-        print(self.pyonir_app.domain)
+
         self.init_default_static_routes()
         self.init_routes()
         self.is_active = True
@@ -902,18 +905,10 @@ class PyonirRequest:
 
     async def after_request(self, server_res: Response):
         # apply file headers
-        if self.request_input.headers and server_res.headers:
+        if self.request_input and self.request_input.headers and server_res.headers:
             for key, value in self.request_input.headers.items():
                 server_res.headers[key] = str(value)
         pass
-
-    async def before_request(self):
-        # Aggregate all ingress data and form messages
-        self.pyonir_app.server.request = self  # refresh request context used in template env
-        await self.set_request_input(self.server_request)
-        self.set_route_file()  # resolves request to file on disk if applicable
-        self.process_file_annotations()
-        await self.ctx_app.on_request(self)
 
     def refresh_route_params(self, route_config: RouteConfig = None):
         # Normalize file data and values from request
@@ -950,7 +945,7 @@ class PyonirRequest:
 
         # Normalize response type
         res = self.route_response if self.has_server_response else PyonirServerResponse(status_code=status_code)
-        self.pyonir_app.apply_globals({"status_code": status_code})
+        self.pyonir_app.apply_globals({"status_code": res.status_code})
         if not self.has_server_response and not self.is_static:
             if has_form_redirect:
                 res.set_redirect(url=has_form_redirect)
@@ -1120,6 +1115,11 @@ class PyonirRequest:
 
         self.file = file_res or virtual_route_file or DeserializeFile('404', app_ctx=self.ctx_app.app_ctx)
 
+        self.file.apply_filters()
+        self.file.replay_retry()
+        self.process_file_annotations() # applies annotated file configs into request configs
+
+
     def set_redirect(self, redirect_url: str):
         """Sets redirect url on request input"""
         self.request_input.body["redirect"] = redirect_url
@@ -1174,9 +1174,14 @@ class PyonirRequest:
     def static_response(self, path: str = None, status_code: int = 200):
         return self._render(STATIC_RES, path)
 
+    def forbidden_response(self, msg: str) -> PyonirServerResponse:
+        res = PyonirServerResponse(status_code=403, media_type=FORBIDDEN)
+        res.set_json({},message=msg)
+        return res
+
     def _render(
         self,
-        media_type: Union[TEXT_RES, JSON_RES, EVENT_RES] = None,
+        media_type: Union[TEXT_RES, JSON_RES, EVENT_RES, FORBIDDEN] = None,
         data: Any = None,
         status_code: int = 200,
         template: str = None,

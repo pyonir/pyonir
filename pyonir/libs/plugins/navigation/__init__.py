@@ -43,7 +43,7 @@ class Navigation(PyonirPlugin):
     def after_init(self, data: any):
         self.build_plugins_navigation(self.pyonir_app)
 
-    async def on_request(self, request: PyonirRequest):
+    async def before_request(self, request: PyonirRequest):
         """Executes task on web request"""
         refresh_nav = bool(getattr(request.request_input.body,'rnav', None))
         curr_nav = self.pyonir_app.TemplateEnvironment.globals.get('navigation')

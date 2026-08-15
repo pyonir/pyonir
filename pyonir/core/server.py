@@ -47,7 +47,7 @@ def generate_nginx_conf(app: BaseApp) -> bool:
     nginx_conf = app.TemplateEnvironment.get_template("nginx.jinja.conf").render(
         app_name=app.name,
         app_name_id=app.name.replace(" ", "_").lower(),
-        domain=app.domain_name,
+        domain=app.domain,
         is_dev=app.is_dev,
         is_secure=app.is_secure,
         ssl_cert_file=app.ssl_cert_file,
@@ -444,7 +444,6 @@ class PyonirServer(Starlette):
             - App env: {env}:{self.pyonir_app.VERSION}
             - App name: {self.pyonir_app.name}
             - App domain: {self.pyonir_app.domain}
-            - App domain_name: {self.pyonir_app.domain_name}
             - App host: {self.pyonir_app.host}
             - App port: {self.pyonir_app.port}
             - App sock: {self.pyonir_app.unix_socket_filepath}

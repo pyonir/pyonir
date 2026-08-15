@@ -572,7 +572,7 @@ class BaseApp(Base):
 
     @property
     def host(self) -> str:
-        dev_host = get_attr(self.env, 'app.localdomain', f"localhost")
+        dev_host = get_attr(self.env, 'app.host', f"localhost")
         return dev_host if self.is_dev else '0.0.0.0'
 
     @property
@@ -588,14 +588,15 @@ class BaseApp(Base):
         has_ssl_files = os.path.exists(self.ssl_cert_file) and os.path.exists(self.ssl_key_file)
         return has_ssl_files and self.use_ssl
 
-    @property
-    def domain_name(self) -> str: return get_attr(self.env, 'app.domain', self.host) # if self.configs else self.host
+    # @property
+    # def domain_name(self) -> str: return get_attr(self.env, 'app.domain', self.host) # if self.configs else self.host
 
     @property
     def domain(self) -> str:
         if self.is_dev:
             return self.host
-        return f"{self.protocol}://{self.domain_name}"
+        domain_name = get_attr(self.env, 'app.domain', self.host)
+        return f"{self.protocol}://{domain_name}"
 
     @property
     def activated_plugins(self) -> frozenset[BasePlugin]:

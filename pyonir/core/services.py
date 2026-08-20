@@ -57,6 +57,18 @@ class PyonirAuthService:
     Abstract base class defining authentication and authorization route resolvers,
     including role and permission checks.
     """
+    def __init__(self, app: BaseApp):
+        self._app = app
+
+    @property
+    def pyonir_app(self) -> BaseApp:
+        """Main pyonir application"""
+        from pyonir import Site
+        return self._app or Site
+
+    @property
+    def env_configs(self):
+        return self.pyonir_app.env
 
     @staticmethod
     def save_image_from_url(url: str, directory: str) -> str:

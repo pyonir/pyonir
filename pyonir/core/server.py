@@ -899,8 +899,16 @@ class PyonirRequest:
     @property
     def pyonir_app(self) -> Optional[BaseApp]:
         from pyonir import Site
-
         return Site
+
+    @property
+    def csrf_token(self):
+        """Csrf token from starlette server"""
+        from starlette_wtf import csrf_token
+        if not self.server_request: return None
+        if not hasattr(self.server_request.state, 'csrf_token'):
+            return csrf_token(self.server_request)
+        return self.server_request.state.csrf_token
 
     async def after_request(self, server_res: Response):
         # apply file headers

@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Optional, Tuple, Union, Dict, List, Any
 
+from starlette_wtf import csrf_token
 
 from pyonir.core.server import RouteConfig
 from pyonir import PyonirRequest, BaseApp
@@ -291,6 +292,8 @@ class PyonirSecurity:
             _user: PyonirUser = self.get_user_profile(creds.email)
             requires_sso = _user and _user.auth_provider != AuthProvider.LOCAL
             if not _user: return None
+            if _user.auth_token is None:
+                _user.auth_token = self.request.csrf_token
             if requires_sso: return _user
             requested_passw = self.harden_password(self.pyonir_app.salt, creds.password, _user.auth_token)
             has_valid_creds = check_pass(_user.password, requested_passw)

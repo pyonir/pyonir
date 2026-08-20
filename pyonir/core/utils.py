@@ -137,89 +137,89 @@ def json_serial(obj, with_props: list[str] = None):
 def to_json(data: Union[dict, 'DeserializeFile']) -> str:
     return json.dumps(data, default=json_serial)
 
-def _deserialize_datestr(
-    datestr: Union[str, datetime],
-    fmt: str = "%Y-%m-%d %I:%M:%S",   # %I for 12-hour format
-    zone: str = "US/Eastern",
-    auto_correct: bool = True
-) -> Optional[datetime]:
-    """
-    Convert a date string into a timezone-aware datetime.
-
-    Args:
-        datestr: Input string or datetime.
-        fmt: Expected datetime format (default "%Y-%m-%d %I:%M:%S %p").
-        zone: Timezone name (default "US/Eastern").
-        auto_correct: Whether to attempt corrections for sloppy inputs.
-
-    Returns:
-        Timezone-aware datetime (in UTC), or None if parsing fails.
-    """
-    import pytz
-
-    if isinstance(datestr, datetime):
-        return pytz.utc.localize(datestr) if datestr.tzinfo is None else datestr.astimezone(pytz.utc)
-    if not isinstance(datestr, str):
-        return None
-
-    tz = pytz.timezone(zone)
-
-    def correct_format(raw: str, dfmt: str) -> tuple[str, str]:
-        """Try to normalize sloppy date strings like 2025/8/9 13:00."""
-        try:
-            raw = raw.strip().lstrip('"').rstrip('"').replace("/", "-")
-            if 'T' in raw:
-                date_part, _, time_part = raw.partition('T')
-            else:
-                date_part, _, time_part = raw.partition(" ")
-
-            # Use fallback timestr if missing
-            if '+' in time_part:
-                time_part,_,utc_offset = time_part.partition('+')
-            hr,*minsec = time_part.split(':')
-            mins, sec = minsec
-            sec, _, micro = sec.partition('.')
-            time_part = f"{hr}:{mins}:{sec}" or "12:00:00.0000"
-            has_miltary_fmt = "%H" in dfmt
-            is_military_tme = (int(hr) > 12 or int(hr) < 1)
-            dfmt = dfmt.replace("%I", "%H") if is_military_tme else fmt
-
-            parts = date_part.split("-")
-            if len(parts) != 3:
-                return raw, dfmt
-
-            y, m, d = parts
-            # Pad month/day
-            m, d = f"{int(m):02d}", f"{int(d):02d}"
-
-            # Basic sanity check: if year looks like day
-            if int(y) < int(d):
-                # Swap year/day (common human error)
-                y, d = d, y
-                print(f"⚠️  Corrected malformed date string: {raw} → {y}-{m}-{d}")
-
-            return f"{y}-{m}-{d} {time_part}", dfmt
-        except Exception as e:
-            return raw, dfmt
-
-    try:
-        # Try direct parse first
-        dt = datetime.strptime(datestr, fmt)
-    except ValueError as ve:
-        print(ve)
-        if not auto_correct:
-            return None
-        corrected, fmt = correct_format(datestr, fmt)
-        if not corrected:
-            return None
-        return deserialize_datestr(corrected, fmt)
-        # try:
-        #     dt = datetime.strptime(corrected, fmt)
-        # except ValueError:
-        #     return None
-
-    # Localize to input zone, then convert to UTC
-    return tz.localize(dt).astimezone(pytz.utc)
+# def _deserialize_datestr(
+#     datestr: Union[str, datetime],
+#     fmt: str = "%Y-%m-%d %I:%M:%S",   # %I for 12-hour format
+#     zone: str = "US/Eastern",
+#     auto_correct: bool = True
+# ) -> Optional[datetime]:
+#     """
+#     Convert a date string into a timezone-aware datetime.
+#
+#     Args:
+#         datestr: Input string or datetime.
+#         fmt: Expected datetime format (default "%Y-%m-%d %I:%M:%S %p").
+#         zone: Timezone name (default "US/Eastern").
+#         auto_correct: Whether to attempt corrections for sloppy inputs.
+#
+#     Returns:
+#         Timezone-aware datetime (in UTC), or None if parsing fails.
+#     """
+#     import pytz
+#
+#     if isinstance(datestr, datetime):
+#         return pytz.utc.localize(datestr) if datestr.tzinfo is None else datestr.astimezone(pytz.utc)
+#     if not isinstance(datestr, str):
+#         return None
+#
+#     tz = pytz.timezone(zone)
+#
+#     def correct_format(raw: str, dfmt: str) -> tuple[str, str]:
+#         """Try to normalize sloppy date strings like 2025/8/9 13:00."""
+#         try:
+#             raw = raw.strip().lstrip('"').rstrip('"').replace("/", "-")
+#             if 'T' in raw:
+#                 date_part, _, time_part = raw.partition('T')
+#             else:
+#                 date_part, _, time_part = raw.partition(" ")
+#
+#             # Use fallback timestr if missing
+#             if '+' in time_part:
+#                 time_part,_,utc_offset = time_part.partition('+')
+#             hr,*minsec = time_part.split(':')
+#             mins, sec = minsec
+#             sec, _, micro = sec.partition('.')
+#             time_part = f"{hr}:{mins}:{sec}" or "12:00:00.0000"
+#             has_miltary_fmt = "%H" in dfmt
+#             is_military_tme = (int(hr) > 12 or int(hr) < 1)
+#             dfmt = dfmt.replace("%I", "%H") if is_military_tme else fmt
+#
+#             parts = date_part.split("-")
+#             if len(parts) != 3:
+#                 return raw, dfmt
+#
+#             y, m, d = parts
+#             # Pad month/day
+#             m, d = f"{int(m):02d}", f"{int(d):02d}"
+#
+#             # Basic sanity check: if year looks like day
+#             if int(y) < int(d):
+#                 # Swap year/day (common human error)
+#                 y, d = d, y
+#                 print(f"⚠️  Corrected malformed date string: {raw} → {y}-{m}-{d}")
+#
+#             return f"{y}-{m}-{d} {time_part}", dfmt
+#         except Exception as e:
+#             return raw, dfmt
+#
+#     try:
+#         # Try direct parse first
+#         dt = datetime.strptime(datestr, fmt)
+#     except ValueError as ve:
+#         print(ve)
+#         if not auto_correct:
+#             return None
+#         corrected, fmt = correct_format(datestr, fmt)
+#         if not corrected:
+#             return None
+#         return deserialize_datestr(corrected, fmt)
+#         # try:
+#         #     dt = datetime.strptime(corrected, fmt)
+#         # except ValueError:
+#         #     return None
+#
+#     # Localize to input zone, then convert to UTC
+#     return tz.localize(dt).astimezone(pytz.utc)
 
 def set_deep_attr(target: any, path: str, value: any):
     """Sets value in nested object using dot-separated path."""

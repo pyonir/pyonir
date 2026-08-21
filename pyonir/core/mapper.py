@@ -141,6 +141,10 @@ class UnwrappedType:
     def is_union(self) -> bool:
         return self.kind == "union"
 
+    @property
+    def is_nullable(self) -> bool:
+        return self.is_optional
+
     def verify_type(self, value: Any, enforce_type: bool = False) -> Any:
         value = self.default_value if value is None else value
         serializable = isinstance(value, str) and value.strip().startswith(("[", "{"))
@@ -153,7 +157,7 @@ class UnwrappedType:
                 return int(value)
             elif is_string_enum(self.base):
                 return str(value)
-            if not self.is_optional and value is None:
+            if enforce_type and not self.is_optional and value is None:
                 raise ValueError(err_msg)
             if enforce_type and not self.is_union and not isinstance(value, self.base):
                 raise TypeError(err_msg)
@@ -277,7 +281,8 @@ def unwrap_type(tp, column_name: str = None, default: Callable | Any = None, ski
         default = default.default_factory
     default_fn = inspect.Parameter.empty if is_empty else default if callable(default) else None
     _default_value = inspect.Parameter.empty if is_empty else default if not default_fn else None
-    optional = is_optional_type(tp) or NoneType in args or any((_default_value, default_fn))
+    has_defaults = not is_empty #or default_fn is not None or _default_value is not None
+    optional = is_optional_type(tp) or NoneType in args or has_defaults
 
     # --- Union / Optional ---
     if is_union:

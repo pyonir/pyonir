@@ -8,7 +8,7 @@ from sqlalchemy import Table
 
 from pyonir.core.parser import LOOKUP_DATA_PREFIX
 
-from pyonir.core.utils import json_serial, get_attr, generate_uuid
+from pyonir.core.utils import json_serial, get_attr, generate_uuid, create_file
 
 T = TypeVar("T")
 SYSTEM_COLUMNS = ('created_on', 'created_by')
@@ -63,7 +63,6 @@ def process_schema(schema_cls: Type[T],
             is_singleton: bool = False,
             **kwargs):
     """Process the schema class to extract fields, primary keys, foreign keys, and generate SQL statements."""
-    # from .schemas import SYSTEM_COLUMNS, get_active_user, BaseSchema, generate_sqla, generate_sqla_table
     from .mapper import normalize_types, unwrap_type, UnwrappedType
     from .utils import generate_date
     fields = normalize_types(schema_cls)
@@ -71,7 +70,7 @@ def process_schema(schema_cls: Type[T],
     if not table_name: return
 
     foreign_keys = foreign_keys or set()
-    unique_keys = unique_keys or []
+    unique_keys = list(unique_keys or [])
     nullable_keys = set()
     foreign_fields = set()
     foreign_field_names = set()
@@ -106,16 +105,11 @@ def process_schema(schema_cls: Type[T],
             has_sys_cols.append(norm_field_type.column_name)
 
         is_pk = primary_key == norm_field_type.column_name
-        is_unique_column = _all_unique and norm_field_type.column_name not in SYSTEM_COLUMNS
         is_fk_column = is_fk(norm_field_type.base) or norm_field_type.column_name in foreign_field_names
 
         norm_field_type.is_pk = is_pk
         norm_field_type.is_lookup = lookup_table_key and norm_field_type.column_name == lookup_table_key
-        norm_field_type.is_unique = is_unique_column
         norm_field_type.is_fk = is_fk_column
-
-        if is_unique_column:
-            unique_keys.append(norm_field_type.column_name)
 
     for syscol in SYSTEM_COLUMNS:
         if syscol in has_sys_cols: continue
@@ -252,7 +246,7 @@ class BaseSchema(BaseModel):
         return f"{LOOKUP_DATA_PREFIX}/{self.table_name}/{file_name}#data{with_attr_path}"
 
     @property
-    def table_name(self):
+    def table_name(self) -> str:
         return self.__table_name__
 
     @property
@@ -308,6 +302,11 @@ class BaseSchema(BaseModel):
     def remove_file(self):
         if hasattr(self, 'file_path'):
             os.remove(self.file_path)
+
+    @classmethod
+    def save_sql(cls, sql: str, file_name_suffix: str, dir_path: str = None):
+        default_path = dir_path
+        create_file(os.path.join(default_path, f"{cls.__table_name__}_{file_name_suffix}.sql".lower()), sql)
 
     def save_to_file(self, file_path: str = None, with_props: list = None):
         from pyonir.core.utils import create_file
@@ -466,7 +465,7 @@ def generate_sqla_table(cls) -> Optional[Table]:
         name = schema_column.column_name
         is_pk = schema_column.is_pk
         is_fk = schema_column.is_fk
-        is_nullable = schema_column.is_optional
+        is_nullable = schema_column.is_nullable
         is_unique = schema_column.is_unique
         use_auto_timestamp = name in cls._timestamp_keys and not is_pk and not is_fk
         default_value = getattr(cls, name, None)
@@ -476,7 +475,7 @@ def generate_sqla_table(cls) -> Optional[Table]:
         col_args = [] if is_fk else [col_type]
 
 
-        kwargs = {"primary_key": is_pk, "nullable": is_nullable, "default": default_value}
+        kwargs = {"primary_key": is_pk,"unique": is_unique, "nullable": is_nullable, "default": default_value}
 
         # if this field is registered as a foreign key, add ForeignKey constraint
         if is_fk:
@@ -595,7 +594,9 @@ def generate_sqla(
         else:
             stmt = stmt.returning(*[table.c[c] for c in pk_columns])
         if constraint_cols:
-            stmt = stmt.on_conflict_do_nothing()
+            stmt = stmt.on_conflict_do_nothing(
+                # index_elements=[table.c[c] for c in constraint_cols]
+            )
         return str(
             stmt.compile(
                 dialect=dialect_obj,

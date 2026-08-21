@@ -1,3 +1,4 @@
+import logging
 import os
 import sqlite3
 from abc import abstractmethod, ABC
@@ -14,7 +15,7 @@ from pyonir.core.parser import DeserializeFile
 from pyonir.core.schemas import BaseSchema
 from pyonir.core.app import BaseApp
 from pyonir.pyonir_types import AppCtx, AbstractFSQuery, BasePagination
-from pyonir.core.utils import get_attr, open_file
+from pyonir.core.utils import get_attr, open_file, create_file
 
 
 class Driver(StrEnum):
@@ -144,15 +145,16 @@ class PyonirDBQuery:
 
     def join_all(self, kind="INNER"):
         fks = self._model.fks()
+        root_table_alias = self._model_aliases[self._model]
         for fk_type in fks:
             fk_name = fk_type.column_name
             fk_model = fk_type.base #fk_type if isinstance(fk_type, type) and issubclass(fk_type, BaseSchema) else None
             if not fk_model: continue
             fk_columns = [col.column_name for col in fk_model.schema_columns()]
-            table_alias = fk_model.__table_name__[0]
+            fk_alias = f"{root_table_alias}_{fk_model.__table_name__[0]}"
             fk_pk = get_attr(fk_model,'__primary_key__') or 'id'
-            on_expr = f"{self._model_aliases[self._model]}.{fk_name} = {table_alias}.{fk_pk}"
-            self.join(fk_model, on=on_expr, json_object=(fk_name,) + tuple(fk_columns), alias=table_alias, kind=kind)
+            on_expr = f"{root_table_alias}.{fk_name} = {fk_alias}.{fk_pk}"
+            self.join(fk_model, on=on_expr, json_object=(fk_name,) + tuple(fk_columns), alias=fk_alias, kind=kind)
         return self
 
     def join(self, model: type[BaseSchema], on: str, kind="INNER", alias: str = None, json_object: tuple[str] = None):
@@ -369,6 +371,13 @@ class PyonirDatabaseService:
         self.disconnect()
         return self
 
+    def save_schemas_sql(self, dir_path: str):
+        if not self.pyonir_app.is_dev: return
+        for model in self._schemas:
+            model.save_sql(model._sql_create_table, "create", dir_path=dir_path)
+            model.save_sql(model._sql_upsert, "upsert", dir_path=dir_path)
+            model.save_sql(model._sql_insert, "insert", dir_path=dir_path)
+
     def build_fs_dirs_from_model(self, model: Type[BaseSchema]):
         # if getattr(model, '_lookup_table', False):
         #     model.init_lookup_table(self)
@@ -480,6 +489,24 @@ class PyonirDatabaseService:
 
         return db_type, database, host, port, username, password
 
+    def migrate(self):
+        """Executes all sql files within the sqlbase directory or custom directory"""
+        sql_files = query_fs(os.path.join(self.pyonir_app.backend_dirpath, 'sqlbase'),
+                             model='path',
+                             name_pattern="*.sql",
+                             exclude_dirs=('@migrated',))
+        for sql_file in sql_files:
+            self.sql_migrate(os.path.basename(sql_file), os.path.dirname(sql_file))
+        pass
+
+    def seed(self, entity: Type[BaseSchema]):
+        """Gathers entity json from storage and seeds into local database"""
+        json_data_path = os.path.join(str(self.pyonir_app.datastore_dirpath), entity.__table_name__)
+        models: Iterator[BaseSchema] = query_fs(str(json_data_path), name_pattern="*.json", model=entity)
+        for json_model in models:
+            self.upsert(json_model)
+        pass
+
     def sql_migrate(self, sql: str, sql_dirpath: str = None):
         """Executes a sql file and creates a migrated directory of executed sql file names"""
         self.connect()
@@ -487,25 +514,25 @@ class PyonirDatabaseService:
             raise RuntimeError("Database connection is not established.")
 
         cursor = self.connection.cursor()
-        Path(os.path.join(sql_dirpath, '@migrated')).mkdir(exist_ok=True)
         sql_dirpath = os.path.join(self.pyonir_app.backend_dirpath, 'sqlbase') if not sql_dirpath else sql_dirpath
+        os.makedirs(os.path.join(sql_dirpath, '@migrated'), exist_ok=True)
         sql_file_path = os.path.join(sql_dirpath, sql)
         disabled_sql_file_path = os.path.join(sql_dirpath, '@migrated', sql)
-
-        if os.path.exists(disabled_sql_file_path): return
+        if os.path.exists(disabled_sql_file_path) or not os.path.exists(sql_file_path): return
         if os.path.exists(sql_file_path):
             sql = open_file(sql_file_path)
         try:
             cursor.executescript(sql)
         except Exception as e:
             self.connection.rollback()
-            raise e
+            logging.error(e)
+            # raise e
         finally:
             cursor.close()
             self.connection.commit()
             open(disabled_sql_file_path, "w").close()
 
-    def execute_sql(self, sql: str, params: tuple = None):
+    def execute_sql(self, sql: str, params: tuple = None, fetch_one: bool = False, fetch_all: bool = False):
         """
         Execute a raw SQL query safely against the SQLite database.
         Does not return results; ensures the cursor is closed for the next execution.
@@ -517,13 +544,23 @@ class PyonirDatabaseService:
         cursor = self.connection.cursor()
         try:
             cursor.execute(sql, params or ())
-            cursor.executescript(sql)
+
+            result = None
+            if fetch_one:
+                result = cursor.fetchone()
+            elif fetch_all:
+                result = cursor.fetchall()
+            else:
+                result = cursor.rowcount
+
+            self.connection.commit()
+            return result
+
         except Exception as e:
             self.connection.rollback()
             raise e
         finally:
             cursor.close()
-            self.connection.commit()
 
     def destroy(self):
         """Destroy the database or datastore."""
@@ -1064,15 +1101,16 @@ def query_fs(abs_dirpath: str,
     def skip_file(file_path: Path) -> bool:
         """Checks if the file should be skipped based on exclude_dirs and exclude_file"""
         is_hidden_dir = file_path.parent.name.startswith(hidden_file_prefixes)
+        is_excluded_file_dir = any(part in exclude_dirs for part in file_path.parent.parts) if exclude_dirs else False
+        if is_excluded_file_dir:
+            # logging.info("[DEBUG] Skipping file in excluded directory:", file_path)
+            return True
         if is_hidden_dir:
             return True
         is_private_file = file_path.name.startswith(hidden_file_prefixes)
         is_excluded_file = exclude_names and file_path.name in exclude_names
         is_included_file = include_names and file_path.name in include_names
         is_allowed_file = file_path.suffix[1:] in allowed_content_extensions
-        # is_excluded_file_dir = any(part in exclude_dirs for part in file_path.parent.parts) if exclude_dirs else False
-        # if is_excluded_file_dir:
-        #     print("[DEBUG] Skipping file in excluded directory:", file_path)
         if is_included_file: return False
         if include_names and not is_included_file: return True
         if not is_private_file and force_all: return False

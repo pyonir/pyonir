@@ -1,4 +1,4 @@
-import os, re, json
+import os, re, logging
 from typing import Tuple, Dict, List, Any, Optional, Union
 
 from pyonir.core.utils import get_file_created, open_file, get_attr
@@ -288,35 +288,6 @@ class DeserializeFile:
 
     def to_dict(self, **kwargs):
         """Returns a dictionary representation of the file data"""
-        # from datetime import datetime
-        # from enum import Enum
-        # obfuscate = kwargs.get('obfuscate', True)
-        # with_props = kwargs.get('with_props')
-        # is_property = lambda attr: isinstance(getattr(self.__class__, attr, None), property)
-        # obfuscated = lambda attr: obfuscate and getattr(self,'_private_keys', None) and attr in (self._private_keys or [])
-        # is_ignored = lambda attr: attr in ('file_path','file_dirpath') or attr.startswith("_") or is_property(attr) or callable(getattr(self, attr)) or obfuscated(attr)
-        #
-        # def process_value(key, value):
-        #     if hasattr(value, 'to_dict'):
-        #         return value.to_dict(obfuscate=obfuscate, with_props=with_props)
-        #     if isinstance(value, property):
-        #         return getattr(self, key)
-        #     if isinstance(value, (tuple, list, set)):
-        #         return [process_value(key, v) for v in value]
-        #     if isinstance(value, datetime):
-        #         return value.isoformat()
-        #     if isinstance(value, Enum):
-        #         return value.value
-        #     return value
-        #
-        # res = {key.column_name: process_value(key, get_attr(self.data, key)) for key in self.data.keys() if not is_ignored(key)}
-        # # save primary key value under a special key for lookup when reconstructing from file
-        # if with_props:
-        #     for prop in with_props:
-        #         if not hasattr(self, prop): continue
-        #         if not obfuscated(prop):
-        #             res[prop] = process_value(prop, getattr(self, prop))
-        # return res
         return {k: v for k,v in self.data.items() if not k.startswith('@')} if self.file_exists else self.data
 
     def output_html(self, req: "PyonirRequest") -> str:
@@ -641,7 +612,7 @@ def process_lookups(value_str: str, file_ctx: DeserializeFile = None) -> Optiona
             return data
 
         if not os.path.exists(lookup_fpath):
-            print(f"[DEBUG] FileNotFoundError: {lookup_fpath}")
+            logging.info(f"FileNotFoundError: {lookup_fpath}")
             if file_ctx.is_virtual_route:
                 track_retry(file_ctx.file_path, (lookup_fpath, file_name, app_ctx, has_attr_path, query_params))
             return None

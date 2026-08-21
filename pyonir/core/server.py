@@ -167,10 +167,10 @@ class PyonirServerResponse:
             self._static or self._stream or self._redirect or self._json or self._html
         )
 
-    def set_json(self, json_data: dict, message: str = None):
+    def set_json(self, json_data: dict = None, message: str = None, status_code: int = 200):
         self._reset_all()
         self.media_type = JSON_RES
-        self.status_code = self.status_code or 200
+        self.status_code = status_code
         self._json_value = json_data
         if isinstance(json_data, dict):
             message = json_data.pop("message") if json_data.get("message") else message
@@ -199,8 +199,10 @@ class PyonirServerResponse:
 
     def set_static(self, path: str):
         self._reset_all()
+        if not os.path.exists(path):
+            return self.set_json(message="File not found", status_code=404)
         self.media_type = STATIC_RES
-        self.status_code = 200 if os.path.exists(path) else 404
+        self.status_code = 200
         self._static = path
 
     def set_redirect(self, url: str, code: int = 302):
@@ -408,57 +410,9 @@ class PyonirServer(Starlette):
             self.mount_pyonir_route_config(route)
 
     def run_uvicorn_server(self, uvicorn_options: dict = None):
-        """Starts the uvicorn web service"""
-        from pathlib import Path
-
+        """Starts the uvicorn web server"""
         import uvicorn
-
-        # """Uvicorn web server configurations"""
-        # Uvicorn’s config only allows one binding method at a time:
-        # TCP socket → use host + port (+ optional SSL)
-        # Unix domain socket → use uds (+ optional SSL)
         uvicorn_options = uvicorn_options or {}
-        if not uvicorn_options:
-            if self.pyonir_app.is_dev:
-                uvicorn_options.update(
-                    {
-                        "port": self.pyonir_app.port,
-                        "host": self.pyonir_app.host,
-                    }
-                )
-            else:
-                uvicorn_options = {"uds": self.pyonir_app.unix_socket_filepath}
-
-            if self.pyonir_app.is_secure:
-                uvicorn_options["ssl_keyfile"] = self.pyonir_app.ssl_key_file
-                uvicorn_options["ssl_certfile"] = self.pyonir_app.ssl_cert_file
-
-        # Setup logs
-        Path(self.pyonir_app.logs_dirpath).mkdir(parents=True, exist_ok=True)
-        mode = "http" if self.pyonir_app.is_dev else "sock"
-        env = "DEV" if self.pyonir_app.is_dev else "PROD"
-
-        print(f"""
-        /************** ASGI APP SERVER RUNNING on {mode} ****************/
-
-            - App env: {env}:{self.pyonir_app.VERSION}
-            - App name: {self.pyonir_app.name}
-            - App domain: {self.pyonir_app.domain}
-            - App host: {self.pyonir_app.host}
-            - App port: {self.pyonir_app.port}
-            - App sock: {self.pyonir_app.unix_socket_filepath}
-            - App ssl_key: {self.pyonir_app.ssl_key_file}
-            - App ssl_cert: {self.pyonir_app.ssl_cert_file}
-            - App Server: Uvicorn
-            - NGINX config: {self.pyonir_app.nginx_config_filepath}
-            - System Version: {sys.version_info}
-        """)
-
-        self.init_default_static_routes()
-        self.init_routes()
-        self.is_active = True
-        self.pyonir_app.plugin_manager.run_plugins(PyonirHooks.AFTER_INIT)
-
         uvicorn.run(self, **uvicorn_options)
 
     @staticmethod

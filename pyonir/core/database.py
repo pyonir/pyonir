@@ -600,14 +600,28 @@ class PyonirDatabaseService:
             self.connection = None
         return self
 
-    def save_to_file_system(self, entity: BaseSchema, filepath: Optional[str] = None, update: bool = False) -> str:
-        if not isinstance(entity, BaseSchema) and not filepath:
-            raise TypeError(f"entity must be BaseSchema: {type(entity)}: {entity} was provided. Try providing a file path instead.")
-        default_filename = "" if filepath else entity.generate_uuid() + '.json'
-        default_directory = "" if filepath else entity.file_dirpath or os.path.join(self.datastore_path, entity.__table_name__)
-        fullpath = filepath or os.path.join(default_directory, default_filename)
-        if not update and os.path.exists(fullpath):
-            raise FileExistsError(f"{default_filename} exists")
+    def save_to_file_system(
+        self,
+        entity: BaseSchema,
+        filepath: Optional[str] = None,
+        update: bool = False,
+    ) -> str:
+
+        if not isinstance(entity, BaseSchema):
+            raise TypeError(
+                f"entity must be BaseSchema, got "
+                f"{type(entity).__name__}: {entity}"
+            )
+
+        fullpath = filepath or entity.file_path
+
+        if not fullpath:
+            directory = (entity.file_dirpath or os.path.join(self.datastore_path, entity.__table_name__))
+            fullpath = os.path.join(directory, f"{entity.generate_uuid()}.json")
+
+        if os.path.exists(fullpath) and not update:
+            raise FileExistsError(f"File already exists: {fullpath}")
+
         return entity.save_to_file(fullpath)
 
     def schema_params(self, entity: BaseSchema, as_upsert: bool = False):

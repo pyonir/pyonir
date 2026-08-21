@@ -308,7 +308,6 @@ class AbstractFSQuery:
         prv = None
         nxt = None
         _collection: Generator[DeserializeFile] = query_fs(input_file.file_dirpath)
-        # _collection = iter(bfsquery.query_fs)
         for cfile in _collection:
             if cfile.file_status == 'hidden': continue
             if cfile.file_path == input_file.file_path:

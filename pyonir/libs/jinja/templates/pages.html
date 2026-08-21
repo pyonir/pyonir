@@ -66,6 +66,42 @@
         margin: 4px 0px;
         display: block;
     }
+
+    table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+
+    th,
+    td {
+        padding: 10px;
+        border-bottom: 1px solid #ddd;
+        text-align: right;
+    }
+
+    th:first-child,
+    td:first-child {
+        text-align: left;
+    }
+
+    th {
+        background: #f0f0f0;
+    }
+
+    label {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        font-weight: 600;
+    }
+
+    input,
+    select {
+        padding: 10px;
+        font-size: 16px;
+        border: 1px solid #ccc;
+        border-radius: 6px;
+    }
     /* Layout Wrapper */
     .page-wrapper {
       max-width: 1080px;
@@ -395,6 +431,7 @@
       <p class="hero-welcome">
           Seeing this default template means your pyonir application does not have a <code>frontend/templates/pages.html</code>
       </p>
+        {{ page.content|safe }}
 
       <div class="hero-meta">
         <div class="meta-item">

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import sys
+from pathlib import Path
 from typing import Optional, Generator, List, Callable, Tuple, Any, Type
 
 from pyonir.core.parser import DeserializeFile
@@ -731,6 +733,44 @@ class BaseApp(Base):
         # Initialize Server instance
         if not self.salt:
             raise ValueError(f"You are attempting to run the application without proper configurations. .env file must include app.salt to protect the application.")
+        uvicorn_options = uvicorn_options or {}
+        use_uds = get_attr(self.env, 'app.use_uds')
+        if self.is_dev:
+            uvicorn_options.update(
+                {
+                    "port": self.port,
+                    "host": self.host,
+                }
+            )
+        if use_uds and not self.is_dev:
+            uvicorn_options = {"uds": self.unix_socket_filepath}
+
+        if self.is_secure:
+            uvicorn_options["ssl_keyfile"] = self.ssl_key_file
+            uvicorn_options["ssl_certfile"] = self.ssl_cert_file
+        self.server.init_default_static_routes()
+        self.server.init_routes()
+        self.server.is_active = True
+        self.server.pyonir_app.plugin_manager.run_plugins(PyonirHooks.AFTER_INIT)
+        # Setup logs
+        Path(self.logs_dirpath).mkdir(parents=True, exist_ok=True)
+        mode = "http" if self.is_dev else "sock"
+        env = "DEV" if self.is_dev else "PROD"
+
+        print(f"""
+        /************** ASGI APP SERVER RUNNING on {mode} ****************/
+            - App env: {env}:{self.VERSION}
+            - App name: {self.name}
+            - App domain: {self.domain}
+            - App host: {self.host}
+            - App port: {self.port}
+            - App sock: {self.unix_socket_filepath}
+            - App ssl_key: {self.ssl_key_file}
+            - App ssl_cert: {self.ssl_cert_file}
+            - App Server: Uvicorn
+            - NGINX config: {self.nginx_config_filepath}
+            - System Version: {sys.version_info}
+        """)
 
         self.server.run_uvicorn_server(uvicorn_options=uvicorn_options)
 

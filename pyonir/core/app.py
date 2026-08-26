@@ -597,8 +597,8 @@ class BaseApp(Base):
     def domain(self) -> str:
         if self.is_dev:
             return self.host
-        domain_name = get_attr(self.env, 'app.domain', self.host)
-        return f"{self.protocol}://{domain_name}"
+        domain_address = get_attr(self.env, 'app.domain', self.host)
+        return domain_address
 
     @property
     def activated_plugins(self) -> frozenset[BasePlugin]:

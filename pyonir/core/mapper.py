@@ -7,8 +7,7 @@ from typing import get_type_hints, Any, Tuple, List, Type, Optional
 from typing import get_origin, get_args, Union, Callable, Mapping, Iterable, Generator
 from collections.abc import Iterable as ABCIterable, Mapping as ABCMapping, Generator as ABCGenerator
 
-from sqlalchemy import Integer, String, Float, Boolean, JSON
-from sqlmodel import SQLModel, text, UniqueConstraint, Boolean, Float, JSON, Table, Column, Integer, String, MetaData, ForeignKey
+from sqlmodel import SQLModel, text, UniqueConstraint,Date, Boolean, Float, JSON, Table, Column, Integer, String, MetaData, ForeignKey
 
 metadata = MetaData()
 columns = []
@@ -114,6 +113,7 @@ class UnwrappedType:
             bool: Boolean,
             dict: JSON,
             list: JSON,
+            datetime: Date
         }
         if is_integer_enum(self.base) or self.base == int:
             return Integer

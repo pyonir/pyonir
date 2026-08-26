@@ -412,10 +412,6 @@ class BaseSchema(BaseModel):
         import json
         return json.dumps(self.to_dict(obfuscate))
 
-    def generate_uuid(self) -> str:
-        from_unique_keys = "".join([getattr(self, k, None) for k in self._unique_keys]) if self._unique_keys else None
-        return generate_uuid(from_string=from_unique_keys)
-
     @staticmethod
     def generate_uuid(from_string: str = None) -> str:
         return generate_uuid(from_string=from_string)

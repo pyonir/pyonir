@@ -502,7 +502,7 @@ class PyonirDatabaseService:
     def seed(self, entity: Type[BaseSchema]):
         """Gathers entity json from storage and seeds into local database"""
         json_data_path = os.path.join(str(self.pyonir_app.datastore_dirpath), entity.__table_name__)
-        models: Iterator[BaseSchema] = query_fs(str(json_data_path), name_pattern="*.json", model=entity)
+        models: Iterator[BaseSchema] = query_fs(str(json_data_path), name_pattern=entity._file_name or "*.json", model=entity)
         for json_model in models:
             self.upsert(json_model)
         pass

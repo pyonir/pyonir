@@ -1,6 +1,7 @@
 import os, json, pytz
 from datetime import datetime
 from collections.abc import Generator
+from pathlib import Path
 from typing import Optional, Union, Callable, Any, Dict
 
 import re
@@ -351,13 +352,14 @@ def load_modules_from(pkg_dirpath, as_list: bool = False, only_packages:bool = F
 
     return loaded_funcs
 
-def create_file(file_abspath: str, data: any = None, is_json: bool = False, mode='w') -> bool:
+def create_file(file_abspath: str, data: any = None, is_json: bool = False, mode: str = 'w', use_atomic:bool=False) -> bool:
     """Creates a new file based on provided data
     Args:
         file_abspath: str = path to proposed file
         data: any = contents to write into file
         is_json: bool = strict json file
         mode: str = write mode for file w|w+|a
+        use_atomic: bool = write to tmp file to avoid failures
     Returns:
         bool: The return value if file was created successfully
     """
@@ -373,7 +375,13 @@ def create_file(file_abspath: str, data: any = None, is_json: bool = False, mode
         os.makedirs(os.path.dirname(file_abspath))
     try:
         is_json = is_json or file_abspath.endswith('.json')
-        write_file(file_abspath, data, is_json=is_json, mode=mode)
+        if not use_atomic:
+            write_file(file_abspath, data, is_json=is_json, mode=mode)
+        else:
+            p = Path(file_abspath)
+            tmp_filepath = os.path.join(p.parent, f".tmp_{p.name}")
+            write_file(tmp_filepath, data, is_json=is_json, mode=mode)
+            os.replace(tmp_filepath, file_abspath)
         return True
     except Exception as e:
         print(f"Error create_file method: {str(e)}")

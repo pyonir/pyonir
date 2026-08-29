@@ -135,7 +135,7 @@ def process_schema(schema_cls: Type[T],
     setattr(schema_cls, "_nullable_keys", nullable_keys)
     setattr(schema_cls, "_timestamp_keys", timestamps_keys)
     setattr(schema_cls, "_lookup_table", lookup_table_key)
-    setattr(schema_cls, "_file_name", file_name or schema_cls.__name__.lower())
+    setattr(schema_cls, "_file_name", file_name or None)
     setattr(schema_cls, "_file_path", None)
     setattr(schema_cls, "_is_singleton", is_singleton)
 

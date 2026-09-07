@@ -2,11 +2,45 @@ import os, json, pytz
 from datetime import datetime
 from collections.abc import Generator
 from pathlib import Path
-from typing import Optional, Union, Callable, Any, Dict
+from typing import Optional, Any, Callable, Dict, Union
 
 import re
 import unicodedata
 DEFAULT_DATE_FORMAT = "%Y-%m-%d %I:%M:%S"
+
+class DynamicDictObject:
+    """Base object that converts dictionary keys into accessible attributes."""
+
+    def __init__(self, data: Dict[str, Any], deep: bool = True):
+        self._deep = deep
+        self.update(data)
+
+    # def add(self, key: str, value: Any, is_nested: bool = False) -> None:
+    #     """Adds a configuration value to the environment settings."""
+    #     set_deep_attr(self, key, value)
+
+    def update(self, data: Dict[str, Any]) -> "DynamicDictObject":
+        """Update existing attributes or add new ones from a dictionary."""
+        for key, value in data.items():
+            if isinstance(value, dict):
+                # Reuse current attribute if it's already an instance, otherwise create a new one
+                existing = getattr(self, key, None)
+                if isinstance(existing, DynamicDictObject):
+                    existing.update(value)
+                else:
+                    setattr(self, key, dict_to_class(value))
+            else:
+                setattr(self, key, value)
+        return self
+
+    def __getattr__(self, name: str) -> None:
+        """Fallback for missing attributes to prevent AttributeError."""
+        return None
+
+    def __repr__(self) -> str:
+        attrs = ", ".join(f"{k}={v!r}" for k, v in self.__dict__.items() if not k.startswith("_"))
+        return f"{self.__class__.__name__}({attrs})"
+
 
 def generate_uuid(from_string: str = None) -> str:
     import uuid, base64, hashlib
@@ -137,90 +171,6 @@ def json_serial(obj, with_props: list[str] = None):
 
 def to_json(data: Union[dict, 'DeserializeFile']) -> str:
     return json.dumps(data, default=json_serial)
-
-# def _deserialize_datestr(
-#     datestr: Union[str, datetime],
-#     fmt: str = "%Y-%m-%d %I:%M:%S",   # %I for 12-hour format
-#     zone: str = "US/Eastern",
-#     auto_correct: bool = True
-# ) -> Optional[datetime]:
-#     """
-#     Convert a date string into a timezone-aware datetime.
-#
-#     Args:
-#         datestr: Input string or datetime.
-#         fmt: Expected datetime format (default "%Y-%m-%d %I:%M:%S %p").
-#         zone: Timezone name (default "US/Eastern").
-#         auto_correct: Whether to attempt corrections for sloppy inputs.
-#
-#     Returns:
-#         Timezone-aware datetime (in UTC), or None if parsing fails.
-#     """
-#     import pytz
-#
-#     if isinstance(datestr, datetime):
-#         return pytz.utc.localize(datestr) if datestr.tzinfo is None else datestr.astimezone(pytz.utc)
-#     if not isinstance(datestr, str):
-#         return None
-#
-#     tz = pytz.timezone(zone)
-#
-#     def correct_format(raw: str, dfmt: str) -> tuple[str, str]:
-#         """Try to normalize sloppy date strings like 2025/8/9 13:00."""
-#         try:
-#             raw = raw.strip().lstrip('"').rstrip('"').replace("/", "-")
-#             if 'T' in raw:
-#                 date_part, _, time_part = raw.partition('T')
-#             else:
-#                 date_part, _, time_part = raw.partition(" ")
-#
-#             # Use fallback timestr if missing
-#             if '+' in time_part:
-#                 time_part,_,utc_offset = time_part.partition('+')
-#             hr,*minsec = time_part.split(':')
-#             mins, sec = minsec
-#             sec, _, micro = sec.partition('.')
-#             time_part = f"{hr}:{mins}:{sec}" or "12:00:00.0000"
-#             has_miltary_fmt = "%H" in dfmt
-#             is_military_tme = (int(hr) > 12 or int(hr) < 1)
-#             dfmt = dfmt.replace("%I", "%H") if is_military_tme else fmt
-#
-#             parts = date_part.split("-")
-#             if len(parts) != 3:
-#                 return raw, dfmt
-#
-#             y, m, d = parts
-#             # Pad month/day
-#             m, d = f"{int(m):02d}", f"{int(d):02d}"
-#
-#             # Basic sanity check: if year looks like day
-#             if int(y) < int(d):
-#                 # Swap year/day (common human error)
-#                 y, d = d, y
-#                 print(f"⚠️  Corrected malformed date string: {raw} → {y}-{m}-{d}")
-#
-#             return f"{y}-{m}-{d} {time_part}", dfmt
-#         except Exception as e:
-#             return raw, dfmt
-#
-#     try:
-#         # Try direct parse first
-#         dt = datetime.strptime(datestr, fmt)
-#     except ValueError as ve:
-#         print(ve)
-#         if not auto_correct:
-#             return None
-#         corrected, fmt = correct_format(datestr, fmt)
-#         if not corrected:
-#             return None
-#         return deserialize_datestr(corrected, fmt)
-#         # try:
-#         #     dt = datetime.strptime(corrected, fmt)
-#         # except ValueError:
-#         #     return None
-#
-#     # Localize to input zone, then convert to UTC
-#     return tz.localize(dt).astimezone(pytz.utc)
 
 def set_deep_attr(target: any, path: str, value: any):
     """Sets value in nested object using dot-separated path."""
@@ -403,32 +353,11 @@ def copy_assets(src: str, dst: str, purge: bool = True, ignore: list[str] = None
     except Exception as e:
         raise
 
-def dict_to_class(data: dict, name: Union[str, callable] = None, deep: bool = True) -> object:
-    """
-    Converts a dictionary into a class object with the given name.
-
-    Args:
-        data (dict): The dictionary to convert.
-        name (str): The name of the class.
-        deep (bool): If True, convert all dictionaries recursively.
-    Returns:
-        object: An instance of the dynamically created class with attributes from the dictionary.
-    """
-    # Dynamically create a new class
-    cls = type(name or 'T', (object,), {}) if not callable(name) and deep!='update' else name
-
-    # Create an instance of the class
-    instance = cls() if deep!='update' else cls
-    setattr(instance, 'update', lambda d: dict_to_class(d, instance, 'update') )
-    # Assign dictionary keys as attributes of the instance
-    for key, value in data.items():
-        if isinstance(getattr(cls, key, None), property): continue
-        if deep and isinstance(value, dict):
-            value = dict_to_class(value, key)
-        setattr(instance, key, value)
-
-    return instance
-
+def dict_to_class(data: Dict[str, Any], callable_type: Callable = None) -> DynamicDictObject:
+    """Converts a dictionary into a dynamic class instance with attribute access."""
+    cls_types = (DynamicDictObject, callable_type,) if callable(callable_type) else (DynamicDictObject,)
+    cls = type('DynamicDictObject', cls_types, {})
+    return cls(data)
 
 def merge_dict(derived: Dict, src: Dict) -> None:
     """

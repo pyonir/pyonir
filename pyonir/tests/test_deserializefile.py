@@ -20,7 +20,7 @@ def test_slug(mock_file: DeserializeFile):
 
 
 def test_inline_list_of_scalrs_types(mock_file: DeserializeFile):
-    obj = [1, true, "hello", 3.14, 1, true, "hello", 3.14]
+    obj = [1, True, 'hello', 3.14]
     assert obj == mock_file.data.get('inline_list_of_scalrs_types')
 
 
@@ -62,6 +62,10 @@ def test_dynamic_list_blocks(mock_file: DeserializeFile):
 def test_inline_list_of_maps(mock_file: DeserializeFile):
     obj = [{"one": 1}, {"two": true}, {"three": "hello"}]
     assert obj == mock_file.data.get('inline_list_of_maps')
+
+def test_list_of_maps(mock_file: DeserializeFile):
+    obj = {'hidden': 'value', 'list_of_maps': [{'age': 3, 'name': 'foo'}, {'age': 4, 'name': 'bar'}]}
+    assert obj == mock_file.data.get('embedded')
 
 
 def test_inline_dict_value(mock_file: DeserializeFile):

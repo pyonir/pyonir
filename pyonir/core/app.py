@@ -802,7 +802,6 @@ class BaseApp(Base):
                 for pgfile in all_pages:
                     ssg_req.file = pgfile
                     if ssg_req.slug.startswith(exclude_routes or tuple()): continue
-                    # self.TemplateEnvironment.globals['request'] = ssg_req  # pg_req
                     virtual_file = ssg_req.get_virtual_route_data()
                     try:
                         merge_dict(derived=virtual_file.data, src=pgfile.data)
@@ -812,7 +811,6 @@ class BaseApp(Base):
                     count += pgfile.generate_static_file(ssg_req)
                     t = f"<url><loc>{self.protocol}://{self.domain}{pgfile.data.get('url')}</loc><priority>1.0</priority></url>\n"
                     xmls.append(t)
-                    self.TemplateEnvironment.block_pull_cache.clear()
 
             # Compile sitemap
             smap = f'<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>{self.domain}</loc><priority>1.0</priority></url> {"".join(xmls)} </urlset>'

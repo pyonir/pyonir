@@ -4,7 +4,7 @@ from typing import Any, Dict, Generator, Optional, Union, Callable, List, Tuple,
 
 from pyonir.core.parser import DeserializeFile, VIRTUAL_ROUTES_FILENAME
 from pyonir.core.templating import TemplateEnvironment, PyonirThemes, Theme
-from pyonir.core.utils import get_attr, set_attr
+from pyonir.core.utils import get_attr, set_attr, DynamicDictObject
 from datetime import datetime
 
 from sortedcontainers import SortedList

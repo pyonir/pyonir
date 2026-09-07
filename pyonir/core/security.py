@@ -147,8 +147,8 @@ class PyonirUser(BaseSchema, table_name='users'):
     auth_provider: AuthProvider = AuthProvider.LOCAL
     """Authentication provider type used during account creation"""
 
-    auth_token: Optional[str] = None
-    """Authentication token used during user sign-in"""
+    # auth_token: Optional[str] = None
+    # """Authentication token used during user sign-in"""
 
     role: Optional[Role] = ''
     """User role that determines permissions and access levels"""
@@ -292,11 +292,9 @@ class PyonirSecurity:
             _user: PyonirUser = self.get_user_profile(creds.email)
             requires_sso = _user and _user.auth_provider != AuthProvider.LOCAL
             if not _user: return None
-            if _user.auth_token is None:
-                _user.auth_token = self.request.csrf_token
             if requires_sso: return _user
-            requested_passw = self.harden_password(self.pyonir_app.salt, creds.password, _user.auth_token)
-            has_valid_creds = check_pass(_user.password, requested_passw)
+            peppered_password = self.pepper_password(creds.password, pepper=self.pyonir_app.salt)
+            has_valid_creds = check_pass(_user.password, peppered_password)
             return _user if has_valid_creds else None
 
         elif flow == AuthMethod.SESSION:
@@ -323,28 +321,45 @@ class PyonirSecurity:
         # 2. check for user access to route
         # 3. check for proper
 
-    def secure_credentials(self, password: str) -> Tuple[str, str]:
+    def secure_credentials(self, password: str) -> str:
         """Generates a new auth token and hashes the password."""
-        from starlette_wtf import csrf_token
-        auth_token = csrf_token(self.request.server_request)
-        hashed_password = hash_password(self.harden_password(self.pyonir_app.salt, password, token=auth_token))
-        return auth_token, hashed_password
+        hashed_password = hash_password(self.pepper_password(password, pepper=self.pyonir_app.salt))
+        return hashed_password
 
-    def _create_jwt(self, user_id: str = None, user_role: str = '', exp_time=None):
-        """Returns session jwt object based on profile info"""
+    def _create_jwt(self, payload: dict = None, sub: str = None, exp_time: int = None, **extra_claims) -> str:
+        """Generates a signed JWT supporting standard and custom payload claims.
+
+        :param payload: Dict of custom claims to include in the token payload.
+        :param sub: Subject identifier (e.g., user ID, client ID, or token subject).
+        :param exp_time: Expiration time in minutes (defaults to self.MAX_LOCKOUT_TIME).
+        :param extra_claims: Additional key-value pairs to add directly to the payload.
+        """
         import datetime
-        exp_time = exp_time or self.MAX_LOCKOUT_TIME
-        exp_in = (datetime.datetime.now() + datetime.timedelta(minutes=exp_time)).timestamp()
-        user_jwt = {
-            "sub": user_id,
-            "role": user_role,
-            "remember_for": exp_time,
-            "iat": datetime.datetime.now(),
+        now = datetime.datetime.now(datetime.timezone.utc)
+        exp_time = exp_time if exp_time is not None else self.MAX_LOCKOUT_TIME
+
+        # Calculate expiration timestamp
+        exp_timestamp = (now + datetime.timedelta(minutes=exp_time)).timestamp()
+
+        # Base standard JWT registered claims
+        jwt_claims = {
             "iss": self.pyonir_app.domain,
-            "exp": exp_in
-            }
-        jwt_token = _encode_jwt(user_jwt, self.pyonir_app.salt)
-        return jwt_token
+            "iat": now.timestamp(),
+            "exp": exp_timestamp,
+            "remember_for": exp_time,
+        }
+
+        # Include subject claim if provided
+        if sub is not None:
+            jwt_claims["sub"] = sub
+
+        # Merge custom payload dictionaries and keyword claims
+        if payload:
+            jwt_claims.update(payload)
+        if extra_claims:
+            jwt_claims.update(extra_claims)
+
+        return _encode_jwt(jwt_claims, self.pyonir_app.salt)
 
     def get_user_profile(self, user_email: str = None) -> Optional[PyonirUser]:
         """Pyonir queries the file system for user account based on the provided credentials"""
@@ -372,12 +387,20 @@ class PyonirSecurity:
             self._reset_signin_attempts()
         pass
 
+    def create_jwt(self, **kwargs):
+        """Generates a jwt"""
+        return self._create_jwt(**kwargs)
 
-    def create_session(self, user: PyonirUser):
+    def create_session(self, session_key: str, **kwargs) -> str:
+        """Creates a jwt session value"""
+        session_jwt = self._create_jwt(**kwargs)
+        self.request.session[session_key] = session_jwt
+        return session_jwt
+
+    def create_user_session(self, user: PyonirUser):
         """Creates a user session for the authenticated user."""
-        user_jwt = self._create_jwt(user_id=user.uid, user_role=user.role.name, exp_time=1440 if self.creds.remember_me else 60)
-        self.request.session[self.pyonir_app.session_key] = user_jwt
-        print("SESSION:", self.request.session)
+        user_expr = 1440 if self.creds.remember_me else 60
+        self.create_session(self.pyonir_app.session_key, sub=user.uid, role=user.role.name, exp_time=user_expr)
 
     def has_signin_exceeded(self) -> bool:
         """Checks if the maximum sign-in attempts have been exceeded."""
@@ -428,11 +451,13 @@ class PyonirSecurity:
                 del self.session['signin_locked_until']
 
     @staticmethod
-    def harden_password(site_salt: str, password: str, token: str):
+    def decode_jwt(token: str, salt: str) -> dict:
+        return decode_jwt(token, salt)
+
+    @staticmethod
+    def pepper_password(password: str, pepper: str = '') -> str:
         """Strengthen all passwords by adding a site salt and token."""
-        if not site_salt or not password or not token:
-            raise ValueError("site_salt, password, and token must be provided")
-        return f"{site_salt}${password}${token}"
+        return f"{pepper}${password}"
 
     @classmethod
     def set_user_model(cls, model):

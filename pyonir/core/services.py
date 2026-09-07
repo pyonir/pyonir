@@ -186,7 +186,7 @@ class PyonirAuthService:
                 elif _user and _user.auth_provider != AuthProvider.LOCAL:
                     server_response = security.responses.SSO_REQUIRED
                 else:
-                    security.create_session(_user)
+                    security.create_user_session(_user)
                     server_response = security.responses.SUCCESS
                     security.reset_signin_attempts()
 

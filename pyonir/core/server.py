@@ -428,42 +428,51 @@ class PyonirServer(Starlette):
         """Generates a NGINX conf file based on App configurations"""
         return generate_nginx_conf(app)
 
-
 class PyonirJSONResponse:
-    def __init__(self, message: str = None, status_code: int = None, **kwargs: dict):
-        self.status_code: int = status_code or 000
-        """HTTP status code of the response, e.g., 200 for success, 404 for not found."""
 
-        self.message: str = message
-        """Response message, typically a string describing the result of the request."""
+    def __init__(self, message: str = None, status_code: int = None, data: dict = None, **kwargs: dict):
+        self._status_code: int = status_code or 0
+        self._message: str = message
+        self._data: dict = {**(data or {}), **kwargs}
 
-        self.data: dict = kwargs or {}
+    @property
+    def data(self):
         """Response data, typically a dictionary containing the response payload."""
+        return self._data
+
+    @property
+    def status_code(self):
+        """HTTP status code of the response, e.g., 200 for success, 404 for not found."""
+        return self._status_code
+
+    @property
+    def message(self):
+        """Response message, typically a string describing the result of the request."""
+        return self._message
 
     @property
     def is_ok(self) -> bool:
         """Indicates if the response status code represents a successful request."""
         return 200 <= self.status_code < 300
 
-    def response(self, message: str = None, status_code: int = None, data: dict = None):
-        self.message = message or self.message
-        self.status_code = status_code or self.status_code
-        self.data = data or self.data
-        return self
+    def response(self, message: str = None, status_code: int = None, data: dict = None, **kwargs):
+        new_message = message if message is not None else self.message
+        new_status_code = status_code if status_code is not None else self.status_code
+        base_data = data if data is not None else self.data
+        new_data = {**base_data, **kwargs} if kwargs else base_data
+        return PyonirJSONResponse(message=new_message, status_code=new_status_code, **new_data)
 
     def to_dict(self, with_props: dict = None) -> dict:
         """Converts the response to a dictionary."""
         from pyonir import Site
+        tmpl_msg = Site.TemplateEnvironment.render_python_string(self.message or "")
 
         return {
             "status_code": self.status_code,
-            "message": Site.TemplateEnvironment.render_python_string(
-                self.message or ""
-            ),
+            "message": tmpl_msg,
             "data": self.data,
             **(with_props or {}),
         }
-
 
 class PyonirJSONResponses:
     """Enum-like class that provides standardized authentication responses."""
@@ -825,9 +834,7 @@ class PyonirRequest:
         """Returns the path parameters from the server request"""
         if not self._path_params:
             self._path_params = dict_to_class(
-                self.server_request.path_params if self.server_request else {},
-                "path_params",
-                True,
+                self.server_request.path_params if self.server_request else {}
             )
         return self._path_params if self.server_request else None
 
@@ -836,9 +843,7 @@ class PyonirRequest:
         """Returns the query parameters from the server request"""
         if not self._query_params:
             self._query_params = dict_to_class(
-                self.server_request.query_params if self.server_request else {},
-                "query_params",
-                True,
+                self.server_request.query_params if self.server_request else {}
             )
         return self._query_params if self.server_request else None
 

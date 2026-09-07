@@ -28,6 +28,19 @@ dynamic_list_blocks:-
     this:
         age: 3
         key: some value
+list_of_maps:-
+    name: foo
+    age: 3
+    -
+    name: bar
+    age: 4
+embedded.hidden: value
+embedded.list_of_maps:-
+    name: foo
+    age: 3
+    -
+    name: bar
+    age: 4
 inline_list_of_scalrs_types:- 1, true, hello, 3.14
 inline_list_of_maps:- one: 1, two: true, three: hello
 inline_dict_value: my_lnkey: my_lnvalue, another_lnkey: another_lnvalue

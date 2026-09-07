@@ -299,7 +299,6 @@ class DeserializeFile:
         page: BasePage = dto_mapper(self, BasePage)
         Site.apply_globals({"prevNext": self.prev_next, "page": page, "request": req})
         html = Site.TemplateEnvironment.get_template(page.template).render()
-        Site.TemplateEnvironment.block_pull_cache.clear()
         return html
 
     def output_json(self, data_value: any = None) -> str:
@@ -395,6 +394,8 @@ def update_nested(attr_path, data_src: dict, data_merge=None, data_update=None, 
     from .utils import merge_dict
     def update_value(target, val):
         """Mutates target with val depending on type compatibility."""
+        if target == val:
+            return target
         if isinstance(target, list):
             if isinstance(val, list):
                 target.extend(val)

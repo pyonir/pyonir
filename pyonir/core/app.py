@@ -574,31 +574,25 @@ class BaseApp(Base):
 
     @property
     def host(self) -> str:
-        dev_host = get_attr(self.env, 'app.host', f"localhost")
-        return dev_host if self.is_dev else '0.0.0.0'
+        return f'localhost' if self.is_dev else '0.0.0.0'
 
     @property
     def port(self) -> int:
-        return int(get_attr(self.env, 'app.port', 5000)) #if self.configs else 5000
+        return int(get_attr(self.env, 'app.port', 5000))
 
     @property
     def protocol(self) -> str: return 'https' if self.use_ssl else 'http'
+
+    @property
+    def domain(self) -> str:
+        domain_address = f"{self.host}:{self.port}" if self.is_dev else get_attr(self.env, 'app.domain', self.host)
+        return f"{self.protocol}://{domain_address}"
 
     @property
     def is_secure(self) -> bool:
         """Check if the application is configured to use SSL"""
         has_ssl_files = os.path.exists(self.ssl_cert_file) and os.path.exists(self.ssl_key_file)
         return has_ssl_files and self.use_ssl
-
-    # @property
-    # def domain_name(self) -> str: return get_attr(self.env, 'app.domain', self.host) # if self.configs else self.host
-
-    @property
-    def domain(self) -> str:
-        if self.is_dev:
-            return self.host
-        domain_address = get_attr(self.env, 'app.domain', self.host)
-        return domain_address
 
     @property
     def activated_plugins(self) -> frozenset[BasePlugin]:

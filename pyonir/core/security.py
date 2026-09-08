@@ -293,8 +293,7 @@ class PyonirSecurity:
             requires_sso = _user and _user.auth_provider != AuthProvider.LOCAL
             if not _user: return None
             if requires_sso: return _user
-            peppered_password = self.pepper_password(creds.password, pepper=self.pyonir_app.salt)
-            has_valid_creds = check_pass(_user.password, peppered_password)
+            has_valid_creds = self.verify_password(creds.password, _user.password)
             return _user if has_valid_creds else None
 
         elif flow == AuthMethod.SESSION:
@@ -320,6 +319,11 @@ class PyonirSecurity:
         # 1. check route requires authenticated user
         # 2. check for user access to route
         # 3. check for proper
+
+    def verify_password(self, input_password: str, user_password: str, pepper: str = None) -> bool:
+        peppered_password = self.pepper_password(input_password, pepper=(pepper or self.pyonir_app.salt))
+        has_valid_creds = check_pass(user_password, peppered_password)
+        return has_valid_creds
 
     def secure_credentials(self, password: str) -> str:
         """Generates a new auth token and hashes the password."""

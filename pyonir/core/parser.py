@@ -21,6 +21,7 @@ MULTI_LN_COMMENT = '#|'
 # LOOKUP_EMBED_PREFIX = '$'
 LOOKUP_DIR_PREFIX = '$dir'
 LOOKUP_DATA_PREFIX = '$data'
+LOOKUP_FILE_PREFIX = '$file' # when self referencing
 LOOKUP_CALLER_PREFIX = '$call'
 FILTER_KEY = '@filter'
 DIRECTIVE_PREFIX = '$'
@@ -618,6 +619,9 @@ def process_lookups(value_str: str, file_ctx: DeserializeFile = None) -> Optiona
                 track_retry(file_ctx.file_path, (lookup_fpath, file_name, app_ctx, has_attr_path, query_params))
             return None
         return parse_ref_to_files(lookup_fpath, file_name, app_ctx, attr_path=has_attr_path, query_params=query_params)
+    elif value_str.startswith(LOOKUP_FILE_PREFIX):
+        val_path = value_str.split(LOOKUP_FILE_PREFIX).pop()[1:]
+        return get_attr(file_ctx, val_path) or value_str
     return value_str
 
 def deserialize_line(line_value: str, container_type: Any = None, file_ctx: DeserializeFile = None) -> Any:
@@ -651,7 +655,7 @@ def deserialize_line(line_value: str, container_type: Any = None, file_ctx: Dese
         return True
     elif isinstance(container_type, list):
         return [deserialize_line(v, file_ctx=file_ctx)  for v in line_value.split(', ')]
-    elif line_value.startswith((LOOKUP_DIR_PREFIX, LOOKUP_DATA_PREFIX, LOOKUP_CALLER_PREFIX)):
+    elif line_value.startswith((LOOKUP_DIR_PREFIX, LOOKUP_DATA_PREFIX, LOOKUP_CALLER_PREFIX, LOOKUP_FILE_PREFIX)):
         return process_lookups(line_value, file_ctx=file_ctx)
     if line_value.startswith('$'): # Line has python template string
         line_value = file_ctx.process_site_filter("pyformat", line_value[1:], file_ctx.__dict__)

@@ -66,7 +66,7 @@ def generate_nginx_conf(app: BaseApp) -> bool:
         custom_nginx_locations=get_attr(app.configs, "nginx.locations"),
         **app.TemplateEnvironment.context,
     )
-
+    if not os.path.exists(app.nginx_config_filepath): return False
     return create_file(app.nginx_config_filepath, nginx_conf, False)
 
 

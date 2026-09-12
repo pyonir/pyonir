@@ -729,14 +729,11 @@ class BaseApp(Base):
             raise ValueError(f"You are attempting to run the application without proper configurations. .env file must include app.salt to protect the application.")
         uvicorn_options = uvicorn_options or {}
         use_uds = get_attr(self.env, 'app.use_uds')
-        if self.is_dev:
-            uvicorn_options.update(
-                {
-                    "port": self.port,
-                    "host": self.host,
-                }
-            )
-        if use_uds and not self.is_dev:
+        uvicorn_options.update({
+                "port": self.port,
+                "host": self.host,
+            })
+        if use_uds:
             uvicorn_options = {"uds": self.unix_socket_filepath}
 
         if self.is_secure:

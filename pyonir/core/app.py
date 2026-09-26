@@ -574,7 +574,7 @@ class BaseApp(Base):
 
     @property
     def host(self) -> str:
-        return f'localhost' if self.is_dev else '0.0.0.0'
+        return '0.0.0.0'
 
     @property
     def port(self) -> int:
@@ -585,7 +585,7 @@ class BaseApp(Base):
 
     @property
     def domain(self) -> str:
-        domain_address = f"{self.host}:{self.port}" if self.is_dev else get_attr(self.env, 'app.domain', self.host)
+        domain_address = get_attr(self.env, 'app.domain', self.host) or f"{self.host}:{self.port}"
         return f"{self.protocol}://{domain_address}"
 
     @property

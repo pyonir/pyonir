@@ -132,8 +132,9 @@ class PyonirDebugRequestMiddleware(BaseHTTPMiddleware):
 
         # Execute Starlette routing to hydrate path parameters, calls pyonir dec_wrapper
         response = await call_next(star_request)
+        not_redirecting = response.status_code not in (302, 301)
 
-        if not pyonir_request.is_static:
+        if not pyonir_request.is_static and not_redirecting:
             await route_handler(pyonir_request)
             _response = pyonir_request.build_response()
             if _response:

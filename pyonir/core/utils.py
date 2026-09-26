@@ -452,9 +452,7 @@ def load_env(path=".env") -> 'EnvConfig':
     with open(path) as f:
         for line in f:
             line = line.strip()
-            if not line or line.startswith("#"):
-                continue
-            if "=" not in line:
+            if not line or line.startswith(("#",";")) or "=" not in line:
                 continue
 
             key, value = line.split("=", 1)

@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from enum import unique, Enum
-from typing import Any, Dict, Generator, Optional, Union, Callable, List, Tuple, Iterator
+from typing import Any, Dict, Generator, Optional, Union, Callable, List, Tuple, Iterator, TypeVar, Generic
 
 from pyonir.core.parser import DeserializeFile, VIRTUAL_ROUTES_FILENAME
 from pyonir.core.templating import TemplateEnvironment, PyonirThemes, Theme
@@ -9,7 +9,7 @@ from datetime import datetime
 
 from sortedcontainers import SortedList
 
-
+T = TypeVar("T")
 TEXT_RES: str = 'text/html'
 JSON_RES: str = 'application/json'
 EVENT_RES: str = 'text/event-stream'
@@ -86,6 +86,10 @@ class EnvConfig:
         """Adds a configuration value to the environment settings."""
         set_attr(self, key, value)
 
+    @classmethod
+    def from_path(cls, path=".env") -> 'DynamicDictObject':
+        from pyonir.core.utils import load_env
+        return load_env(path)
 
 class PyonirHooks(str):
     AFTER_INIT = 'AFTER_INIT'
@@ -127,6 +131,10 @@ class BasePagination:
             "page_nums": self.page_nums,
             "items": [json_serial(item) for item in self.items]
         }
+
+@dataclass
+class PyonirPagination(BasePagination, Generic[T]):
+    items: Iterator[T] = field(default_factory=iter)
 
 class AbstractFSQuery:
     """

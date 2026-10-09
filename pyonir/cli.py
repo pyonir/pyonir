@@ -4,7 +4,7 @@ import os, sys
 import shutil
 
 from pyonir.core.app import Base
-from pyonir.core.utils import copy_assets, PrntColrs
+from pyonir.core.utils import copy_assets, PrntColrs, create_file
 from pyonir import PYONIR_SETUPS_DIRPATH, PYONIR_DOCS_DIRPATH
 
 backend_dirpath = os.path.join(PYONIR_SETUPS_DIRPATH, 'backend')
@@ -23,11 +23,14 @@ def pyonir_new_project(args):
     base_path = os.getcwd()
     project_name = input(f"Whats your project name?").strip()
     project_path = os.path.join(base_path, project_name.replace(' ', '_').lower())
+    pyproject_path = os.path.join(project_path, 'pyproject.toml')
+
     if not os.path.exists(project_path):
         os.makedirs(project_path)
         os.makedirs(os.path.join(project_path, Base.FRONTEND_DIRNAME))
         os.makedirs(os.path.join(project_path, Base.BACKEND_DIRNAME))
         os.makedirs(os.path.join(project_path, Base.CONTENTS_DIRNAME, Base.PAGES_DIRNAME))
+
     # Copy initial application files
     copy_assets(src_init_file_path, os.path.join(project_path, '__init__.py'), False)
     copy_assets(src_env_file_path, os.path.join(project_path, '.env'), False)
@@ -35,6 +38,7 @@ def pyonir_new_project(args):
     copy_assets(src_docs_pages, os.path.join(project_path, Base.CONTENTS_DIRNAME, 'README.md'), False)
     copy_assets(src_docs_frontend, os.path.join(project_path, Base.FRONTEND_DIRNAME, 'README.md'), False)
     copy_assets(src_docs_backend, os.path.join(project_path, Base.BACKEND_DIRNAME, 'README.md'), False)
+    create_file(pyproject_path, data=PYPROJ.format(project_name=project_name))
 
     summary = f'''{PrntColrs.OKGREEN}
 Project {project_name} created!
@@ -114,5 +118,27 @@ Examples:
     else:
         print(f"Pyonir expects arguments of: init (creating a new site), install (installing plugins or themes)")
 
+PYPROJ = """
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "{project_name}"
+version = "0.1.0"
+description = "A Pyonir application"
+requires-python = ">=3.9"
+dependencies = [
+    "pyonir",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+"""
 if __name__ == '__main__':
     pyonir_setup()

@@ -1,3 +1,4 @@
+import mimetypes
 import shutil
 from abc import ABC
 from typing import Optional
@@ -128,6 +129,125 @@ def pytest_configure(config):
     config.option.asyncio_mode = "auto"
 
 async def mock_request(
+    test_app,
+    method: str = "GET",
+    path: str = "/",
+    headers: dict | None = None,
+    query: dict | None = None,
+    body: dict | bytes | None = None,
+    files: dict | None = None,
+    session: dict | bytes | None = None,
+) -> PyonirRequest:
+    from starlette.requests import Request as StarletteRequest
+    import json
+    import uuid
+    from urllib.parse import urlencode
+
+    csrf_config = {
+        "csrf_secret": "test_secret",
+        "csrf_field_name": "csrf_token",
+    }
+
+    request_headers = {
+        k.lower(): v
+        for k, v in (headers or {}).items()
+    }
+
+    # Build request body
+    if files:
+        boundary = f"----mock-request-{uuid.uuid4().hex}"
+        body_parts = []
+
+        # Regular form fields
+        if isinstance(body, dict):
+            for name, value in body.items():
+                body_parts.extend([
+                    f"--{boundary}\r\n".encode(),
+                    (
+                        f'Content-Disposition: form-data; '
+                        f'name="{name}"\r\n\r\n'
+                    ).encode(),
+                    str(value).encode(),
+                    b"\r\n",
+                ])
+
+        # Uploaded files
+        for file_name, file_content, content_type in files:
+            derived_content_type, _ = mimetypes.guess_type(file_name)
+            content_type = content_type or derived_content_type or "application/octet-stream"
+
+            if isinstance(file_content, str):
+                file_content = file_content.encode()
+
+            body_parts.extend([
+                f"--{boundary}\r\n".encode(),
+                (
+                    f'Content-Disposition: form-data; '
+                    f'name="file_{file_name}"; '
+                    f'filename="{file_name}"\r\n'
+                ).encode(),
+                f"Content-Type: {content_type}\r\n\r\n".encode(),
+                file_content,
+                b"\r\n",
+            ])
+
+        body_parts.append(f"--{boundary}--\r\n".encode())
+        body_bytes = b"".join(body_parts)
+
+        request_headers["content-type"] = (
+            f"multipart/form-data; boundary={boundary}"
+        )
+
+    elif isinstance(body, dict):
+        body_bytes = json.dumps(body).encode()
+
+        request_headers.setdefault(
+            "content-type",
+            "application/json",
+        )
+
+    elif isinstance(body, bytes):
+        body_bytes = body
+
+    else:
+        body_bytes = b""
+
+    request_headers["content-length"] = str(len(body_bytes))
+
+    async def receive():
+        return {
+            "type": "http.request",
+            "body": body_bytes,
+            "more_body": False,
+        }
+
+    scope = {
+        "type": "http",
+        "http_version": "1.1",
+        "method": method,
+        "path": path,
+        "scheme": "http",
+        "client": ("testclient", 50000),
+        "server": ("testserver", 80),
+        "headers": [
+            (k.encode(), v.encode())
+            for k, v in request_headers.items()
+        ],
+        "state": {
+            "csrf_config": csrf_config,
+        },
+        "query_string": urlencode(query or {}).encode(),
+        "session": session or {},
+    }
+
+    star_req = StarletteRequest(scope, receive)
+    req = PyonirRequest(star_req)
+
+    await req.set_request_input(star_req)
+
+    return req
+
+async def _mock_request(
     test_app,
     method: str = "GET",
     path: str = "/",

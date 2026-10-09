@@ -310,6 +310,11 @@ class PyonirSecurity:
 
         return None
 
+    def set_user(self, user: PyonirUser):
+        """Sets authenticated user"""
+        if self.pyonir_app.server.is_active: return
+        self._user = user
+
     def verify_request_access(self, request: PyonirRequest = None):
         req = request or self.request
         # user = self.authenticated_user

@@ -1,4 +1,5 @@
 import os, json, pytz
+from dataclasses import is_dataclass, asdict
 from datetime import datetime
 from collections.abc import Generator
 from pathlib import Path
@@ -168,6 +169,8 @@ def json_serial(obj, with_props: list[str] = None):
         return list(obj)
     elif hasattr(obj, 'to_dict'):
         return obj.to_dict(with_props=with_props)
+    elif is_dataclass(obj):
+        return asdict(obj)
 
 def to_json(data: Union[dict, 'DeserializeFile']) -> str:
     return json.dumps(data, default=json_serial)

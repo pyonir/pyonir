@@ -631,12 +631,13 @@ class PyonirDatabaseService:
 
         def process_column(field: UnwrappedType):
             col = field.column_name
-            v = get_attr(entity, col)
-            is_nullable = field.is_optional and v is None
-            if field in fkeys and v is not None:
-                v.created_by = entity.created_by
-                return self.insert(v, as_upsert) if not is_nullable else None
-            v = json.dumps(v, default=json_serial) if isinstance(v,(BaseSchema, datetime, dict, list, tuple, set)) else v
+            _v = get_attr(entity, col)
+            is_nullable = field.is_optional and _v is None
+            if field in fkeys and _v is not None:
+                _v.created_by = entity.created_by
+                return self.insert(_v, as_upsert) if not is_nullable else None
+            is_scalr = _v is None or isinstance(_v, (str, int, float, bool))
+            v = json.dumps(_v, default=json_serial) if not is_scalr else _v #if isinstance(_v,(BaseSchema, datetime, dict, list, tuple, set)) else _v
             return v
 
         fkeys = entity.fks()
@@ -677,7 +678,7 @@ class PyonirDatabaseService:
         finally:
             cursor.close()
             self.connection.commit()
-        return entity.__primary_key_value__
+        return entity.__pk__
 
     @abstractmethod
     def find(self, entity: Type[BaseSchema], options: dict = None) -> Iterator[Any]:

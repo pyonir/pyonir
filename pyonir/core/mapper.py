@@ -1,13 +1,14 @@
 import os, json, inspect
 from dataclasses import dataclass
 from datetime import datetime
-from enum import EnumType, Enum, IntEnum, StrEnum
+from enum import EnumType, IntEnum, StrEnum
 from types import UnionType, NoneType
-from typing import get_type_hints, Any, Tuple, List, Type, Optional
-from typing import get_origin, get_args, Union, Callable, Mapping, Iterable, Generator
+from typing import get_type_hints, Any, Tuple, List, Type, Optional, get_origin, get_args, Union, Callable
 from collections.abc import Iterable as ABCIterable, Mapping as ABCMapping, Generator as ABCGenerator
 
-from sqlmodel import SQLModel, text, UniqueConstraint,Date, Boolean, Float, JSON, Table, Column, Integer, String, MetaData, ForeignKey
+from sqlmodel import SQLModel, Date, Boolean, Float, JSON, Integer, String, MetaData
+
+from pyonir.core.schemas import PK_ATTR
 
 metadata = MetaData()
 columns = []
@@ -457,7 +458,7 @@ def dto_mapper(input_value: Union[Any, DeserializeFile], cls: Union['BaseSchema'
         is_frozen = unwrapped_type.base.__frozen__ if hasattr(unwrapped_type.base, '__frozen__') else False
 
         # normalize data source
-        file_pkv = get_attr(input_value, 'data.__primary_key_value__') or None
+        file_pkv = get_attr(input_value, f'data.{PK_ATTR}') or None
         nested_key = getattr(cls, '__nested_field__', None)
         nested_data = get_attr(input_value, nested_key) if nested_key else {}
         data = get_attr(input_value, 'data') or {}

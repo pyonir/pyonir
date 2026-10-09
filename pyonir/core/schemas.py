@@ -2,6 +2,7 @@ import json, os, uuid
 import re
 from datetime import datetime
 from enum import StrEnum, IntEnum, Enum
+from pathlib import Path
 from typing import Type, Tuple, TypeVar, Any, Optional, List, Set, Dict
 
 from sqlalchemy import Table
@@ -13,6 +14,7 @@ from pyonir.core.utils import json_serial, get_attr, generate_uuid, create_file
 T = TypeVar("T")
 SYSTEM_COLUMNS = ('created_on', 'created_by')
 SYSTEM_COLUMN_TYPES = (('created_on', datetime), ('created_by', str))
+PK_ATTR: str = "__pk__"
 
 def sanitize(value: Any) -> Any:
     """
@@ -110,6 +112,7 @@ def process_schema(schema_cls: Type[T],
         norm_field_type.is_pk = is_pk
         norm_field_type.is_lookup = lookup_table_key and norm_field_type.column_name == lookup_table_key
         norm_field_type.is_fk = is_fk_column
+        norm_field_type.is_unique = norm_field_type.column_name in unique_keys
 
     for syscol in SYSTEM_COLUMNS:
         if syscol in has_sys_cols: continue
@@ -125,7 +128,7 @@ def process_schema(schema_cls: Type[T],
     setattr(schema_cls, "__table_name__", table_name)
 
     setattr(schema_cls, "__primary_key__", primary_key)
-    setattr(schema_cls, "__primary_key_value__", None)
+    setattr(schema_cls, PK_ATTR, None)
     setattr(schema_cls, "__foreign_keys__", foreign_fields)
     setattr(schema_cls, "__fk_options__", foreign_key_options)
     setattr(schema_cls, "_private_keys", private_keys)
@@ -157,7 +160,7 @@ class BaseSchema(BaseModel):
     _file_name: str = None
     __table_name__: str = ""
     __table_columns__: list[str] = None
-    __primary_key_value__: int
+    __pk__: int
     _unique_keys: list[str] = None
     _lookup_table: str = None
     _sql_create_table: str = None
@@ -172,7 +175,7 @@ class BaseSchema(BaseModel):
     def __init__(self, _disable_type_checker: bool = False, **data):
         from pyonir.core.mapper import UnwrappedType
 
-        pkv = data.get('__primary_key_value__', None)
+        pkv = data.get(PK_ATTR, None)
 
         for field_type in self.schema_columns():
             field_type: UnwrappedType = field_type
@@ -187,7 +190,7 @@ class BaseSchema(BaseModel):
         self._after_init()
 
     def set_primary_key(self, value: any):
-        self.__primary_key_value__ = value
+        self.__pk__ = value
 
     def add_error(self, column_name: str, error_msg: str):
         self._errors.append(error_msg)
@@ -212,7 +215,7 @@ class BaseSchema(BaseModel):
 
     @property
     def id(self):
-        return self.__primary_key_value__ if hasattr(self, '__primary_key_value__') else None
+        return self.__pk__ if hasattr(self, PK_ATTR) else None
 
     @classmethod
     def fks(cls):
@@ -311,18 +314,19 @@ class BaseSchema(BaseModel):
     def save_to_file(self, file_path: str = None, with_props: list = None):
         from pyonir.core.utils import create_file
         from pyonir.core.parser import LOOKUP_DATA_PREFIX
-        from pyonir import Site
         from pyonir.core.security import PyonirUser, PyonirUserMeta
         from pyonir.core.mapper import UnwrappedType
+        default_filename = "".join([getattr(self, k) for k in self._unique_keys]) or self.__pk__
+        default_path = Path(self.pyonir_app.datastore_dirpath) / self.table_name / f"{default_filename}.json"
 
         if not file_path:
-            file_path = self.file_path if self.file_path else f"{self.__class__.__name__.lower()}.json"
+            file_path = self.file_path if self.file_path else default_path
         _filename = os.path.basename(file_path).split('.')[0]
         file_data = self.to_dict(obfuscate=False, with_props=with_props)
-        active_user_id = get_attr(Site.server.request, 'security.user.uid') or self.created_by
+        active_user_id = get_attr(self.pyonir_app.server.request, 'security.user.uid') or self.created_by
         use_filename_as_pk = active_user_id if isinstance(self, (PyonirUser, PyonirUserMeta)) else _filename
         _pk_value = get_attr(self, getattr(self, '__primary_key__')) or use_filename_as_pk
-        _datastore = Site.datastore_dirpath if Site else os.path.dirname(file_path)
+        _datastore = self.pyonir_app.datastore_dirpath if self.pyonir_app else os.path.dirname(file_path)
 
         if not self.file_path:
             self._file_path = file_path
@@ -350,7 +354,7 @@ class BaseSchema(BaseModel):
                 # set relationship path on parent schema
                 file_data[k] = fk_lookup_path
 
-        return create_file(file_path, file_data)
+        return create_file(str(file_path), file_data)
 
     def is_valid(self) -> bool:
         """Returns True if there are no validation errors."""
@@ -403,8 +407,8 @@ class BaseSchema(BaseModel):
                 if not hasattr(self, prop): continue
                 if not obfuscated(prop):
                     res[prop] = process_value(prop, getattr(self, prop))
-        if hasattr(self, '__primary_key_value__'):
-            res["__primary_key_value__"] = self.id
+        if hasattr(self, PK_ATTR):
+            res[PK_ATTR] = self.id
         return res
 
     def to_json(self, obfuscate = True) -> str:

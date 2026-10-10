@@ -324,9 +324,9 @@ def create_file(file_abspath: str, data: any = None, is_json: bool = False, mode
             else:
                 f.write(data)
 
-    if not os.path.exists(os.path.dirname(file_abspath)):
-        os.makedirs(os.path.dirname(file_abspath))
     try:
+        if not os.path.exists(os.path.dirname(file_abspath)):
+            os.makedirs(os.path.dirname(file_abspath))
         is_json = is_json or file_abspath.endswith('.json')
         if not use_atomic:
             write_file(file_abspath, data, is_json=is_json, mode=mode)
@@ -337,8 +337,7 @@ def create_file(file_abspath: str, data: any = None, is_json: bool = False, mode
             os.replace(tmp_filepath, file_abspath)
         return True
     except Exception as e:
-        print(f"Error create_file method: {str(e)}")
-        return False
+        raise e
 
 def copy_assets(src: str, dst: str, purge: bool = True, ignore: list[str] = None) -> None:
     """Copies files from a source directory into a destination directory with option to purge destination"""

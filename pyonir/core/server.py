@@ -42,8 +42,10 @@ PROD_ENV: str = "PROD"
 def generate_nginx_conf(app: BaseApp) -> bool:
     """Generates a NGINX conf file based on App configurations"""
     from pyonir.core.utils import create_file, get_attr
+    from datetime import datetime, timezone
 
     nginx_conf = app.TemplateEnvironment.get_template("nginx.jinja.conf").render(
+        generated_at=datetime.now(timezone.utc).isoformat(),
         app_name=app.name,
         app_name_id=app.name.replace(" ", "_").lower(),
         domain=app.domain,

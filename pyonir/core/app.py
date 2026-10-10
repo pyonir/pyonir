@@ -585,8 +585,13 @@ class BaseApp(Base):
 
     @property
     def domain(self) -> str:
-        domain_address = get_attr(self.env, 'app.domain', self.host) or f"{self.host}:{self.port}"
-        return f"{self.protocol}://{domain_address}"
+        """Returns the application's domain or host address."""
+        return get_attr(self.env, 'app.domain', self.host) or f"{self.host}:{self.port}"
+
+    @property
+    def domain_url(self) -> str:
+        """Returns the application's fully qualified URL."""
+        return f"{self.protocol}://{self.domain}"
 
     @property
     def is_secure(self) -> bool:
@@ -710,10 +715,10 @@ class BaseApp(Base):
         if not global_vars: global_vars = {}
         self.TemplateEnvironment.globals.update({**self.TemplateEnvironment.context, **global_vars})
 
-    def generate_nginx_config_file(self, template_path: str = None, context: dict = None):
+    def generate_nginx_config_file(self, template_path: str = None, context: dict = None) -> bool:
         """Generates Nginx configuration file for the application"""
         from pyonir.core.server import generate_nginx_conf
-        generate_nginx_conf(self)
+        return generate_nginx_conf(self)
 
     def run(self, uvicorn_options: dict = None):
         """Runs the Uvicorn webserver"""

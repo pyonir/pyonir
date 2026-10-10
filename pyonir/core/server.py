@@ -43,7 +43,6 @@ def generate_nginx_conf(app: BaseApp) -> bool:
     """Generates a NGINX conf file based on App configurations"""
     from pyonir.core.utils import create_file, get_attr
 
-    nginx_app_baseurl = get_attr(app.env, "nginx.baseurl")
     nginx_conf = app.TemplateEnvironment.get_template("nginx.jinja.conf").render(
         app_name=app.name,
         app_name_id=app.name.replace(" ", "_").lower(),
@@ -66,7 +65,6 @@ def generate_nginx_conf(app: BaseApp) -> bool:
         custom_nginx_locations=get_attr(app.configs, "nginx.locations"),
         **app.TemplateEnvironment.context,
     )
-    if not os.path.exists(app.nginx_config_filepath): return False
     return create_file(app.nginx_config_filepath, nginx_conf, False)
 
 

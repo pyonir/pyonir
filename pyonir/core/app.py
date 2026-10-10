@@ -586,7 +586,8 @@ class BaseApp(Base):
     @property
     def domain(self) -> str:
         """Returns the application's domain or host address."""
-        return get_attr(self.env, 'app.domain', self.host) or f"{self.host}:{self.port}"
+        default_domain = self.host if get_attr(self.env, 'app.use_uds', None) else f"{self.host}:{self.port}"
+        return get_attr(self.env, 'app.domain', default_domain)
 
     @property
     def domain_url(self) -> str:

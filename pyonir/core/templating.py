@@ -28,13 +28,6 @@ class TemplateEnvironment(Environment):
         app_filters = {**sys_filters, **app_filters}
         self.filters.update(**app_filters)
 
-        # Include globals
-        # self.globals['url_for'] = self.url_for
-        # self.globals['request'] = None
-        # self.globals['user'] = None
-        # self.globals['get_request'] = lambda: app.server.request
-        # self.globals["render_component"] = self.render_component
-
     @property
     def context(self):
         """General context used for templating engine"""

@@ -305,10 +305,10 @@ class PyonirServer(Starlette):
         is_static_path = (
             os.path.exists(route_func) if isinstance(route_func, str) else False
         )
-        route_name = params.get("name", route_func.__name__ if route_func else "")
+        route_name = params.get("name", route_func.__name__ if route_func and not is_static_path else "")
         docs = route_func.__doc__ if route_func else None
         base_endpoint, _, endpoint_path = (path[1:]).partition("/")
-        is_index_path = path == "/" or _ == ""
+        is_index_path = path == "/" or _ == "" and not is_static_path
         if endpoint_path:
             endpoint_path = endpoint_path.split("/{")[0]
         _path = "/" if is_index_path else f"/{base_endpoint}/{endpoint_path}"
@@ -339,13 +339,14 @@ class PyonirServer(Starlette):
             }
         )
 
+        self.route_map[route_name] = new_route
         if is_static_path:
             self.static_map[_path] = new_route
             return new_route
         # Add route path into categories
         self.endpoints.add(f"{base_endpoint}{_path}")
         self.url_map[path] = new_route
-        self.route_map[route_name] = new_route
+        # self.route_map[route_name] = new_route
 
     def mount_pyonir_route_config(self, new_route: RouteConfig):
         if not isinstance(new_route, RouteConfig):
@@ -376,11 +377,10 @@ class PyonirServer(Starlette):
                 params=args,
             )
 
-    def add_static_route(self, url: str, directory_path: str):
+    def add_static_route(self, url: str, directory_path: str, name: str = None):
         if not os.path.exists(directory_path):
-            print(f"Unable to mount '{url}' static files at {directory_path}")
-            return
-        self.pyonir_app.add_static_path(url, directory_path)
+            raise NotADirectoryError(f"Unable to mount '{url}' static files at {directory_path}")
+        self.register_route(path=url, route_func=directory_path, params={"name": name})
         self.mount(url, StaticFiles(directory=directory_path))
 
     def add_url_route(self, name: str, path: str):

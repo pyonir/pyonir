@@ -688,7 +688,7 @@ class BaseApp(Base):
         """Request method executed before server calls"""
         pass
 
-    def add_static_path(self, url: str, directory_path: str):
+    def add_static_path(self, url: str, directory_path: str, route_name: str):
         self._static_paths.add((url, directory_path))
 
     def load_env(self, env_path: str):

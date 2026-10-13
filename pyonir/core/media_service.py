@@ -5,6 +5,8 @@ from pathlib import Path
 from typing import Any, Optional, Union, Iterable, TypeVar, Generic
 from io import BytesIO
 
+from pyonir.core.app import BaseApp
+
 from pyonir import CollectionQuery, PyonirRequest
 from pyonir.pyonir_types import BaseEnum
 from PIL import Image
@@ -100,10 +102,13 @@ class MediaType(str):
 @dataclass
 class Media:
     file_path: Path
-    id: str = None
-    content_type: str = None
     size: int = None
     _metadata: ImageMetadata | AudioMetadata | VideoMetadata | None = None
+
+    @property
+    def pyonir_app(self) -> BaseApp:
+        from pyonir import Site
+        return Site
 
     @property
     def metadata(self) -> ImageMetadata | AudioMetadata | VideoMetadata:
@@ -115,6 +120,11 @@ class Media:
     def file_name(self) -> str:
         """File name with extension from file path"""
         return self.file_path.name
+
+    @property
+    def slug(self) -> Path:
+        """relative directory path to file"""
+        return Path(self.file_path.parent.name) / self.file_name
 
     @property
     def extension(self) -> str:
@@ -130,6 +140,15 @@ class Media:
         elif ext in (f.value for f in ImageFormat):
             return MediaType.IMAGE
         return MediaType.DOCUMENT
+
+    @classmethod
+    def from_path(cls, path: Path):
+        return cls(file_path=path)
+
+    def mime_type(self) -> str:
+        import mimetypes
+        mt, encoding = mimetypes.guess_type(self.slug)
+        return mt
 
     def compress(self, quality: int = 85, output_path: str = None) -> None:
         """
@@ -183,10 +202,8 @@ class MediaService:
             VideoFormat.MP4,
             AudioFormat.MP3,
         }
-        self._storage_dirpath: str = os.path.join(
-            self.pyonir_app.contents_dirpath, self.default_media_dirname
-        )
-        """Location on fs to save file uploads"""
+        self._storage_dirpath: Path = Path(self.pyonir_app.uploads_dirpath)
+        """Location on fs to save file uploads. defaults to app uploads_dirpath"""
 
     @property
     def pyonir_app(self):
@@ -289,7 +306,7 @@ class MediaService:
             media_file_path: Path = _save_img_file(file, output_path) if from_base64 else await self._upload_bytes(file, file_path=output_path)
 
             if media_file_path.exists():
-                file_media = model.from_path(file_path=media_file_path) if model else Media(file_path=media_file_path)
+                file_media = model.from_path(path=media_file_path) if model else Media(file_path=media_file_path)
                 file_media.compress(quality=compress_quality)
                 resource_files.append(file_media)
 

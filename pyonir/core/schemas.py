@@ -112,7 +112,7 @@ def process_schema(schema_cls: Type[T],
         norm_field_type.is_pk = is_pk
         norm_field_type.is_lookup = lookup_table_key and norm_field_type.column_name == lookup_table_key
         norm_field_type.is_fk = is_fk_column
-        norm_field_type.is_unique = norm_field_type.column_name in unique_keys
+        # norm_field_type.is_unique = norm_field_type.column_name in unique_keys
 
     for syscol in SYSTEM_COLUMNS:
         if syscol in has_sys_cols: continue
@@ -144,9 +144,14 @@ def process_schema(schema_cls: Type[T],
 
     sqla_table = generate_sqla_table(schema_cls)
     setattr(schema_cls, "_sqla_table", sqla_table)
-    setattr(schema_cls, "_sql_create_table", generate_sqla(sqla_table, True))
-    setattr(schema_cls, "_sql_insert", generate_sqla(sqla_table, is_insert=True, returning_cols=returning_cols, update_cols=mutable_columns))
-    setattr(schema_cls, "_sql_upsert", generate_sqla(sqla_table, returning_cols=returning_cols, update_cols=mutable_columns))
+    if getattr(schema_cls, "_sql_create_table", None) is None:
+        setattr(schema_cls, "_sql_create_table", generate_sqla(sqla_table, True))
+
+    if getattr(schema_cls, "_sql_insert", None) is None:
+        setattr(schema_cls, "_sql_insert", generate_sqla(sqla_table, is_insert=True, returning_cols=returning_cols, update_cols=mutable_columns))
+
+    if getattr(schema_cls, "_sql_upsert", None) is None:
+        setattr(schema_cls, "_sql_upsert", generate_sqla(sqla_table, returning_cols=returning_cols, update_cols=mutable_columns))
 
 class BaseModel:
     __params__: list[T] = None
@@ -453,10 +458,22 @@ def generate_sqla_table(cls) -> Optional[Table]:
     }
 
     primary_key = getattr(cls, "__primary_key__", None)
-    unq_set = getattr(cls, "_unique_keys", list())
-    # fk_set = getattr(cls, "__foreign_keys__", set())
-    # mutable_columns = getattr(cls, "_mutable_columns", list())
-    # is_lookup = getattr(cls, "_lookup_table", False)
+    # unq_set = getattr(cls, "_unique_keys", list())
+    unq_set = getattr(cls, "_unique_keys", set())
+    unq_columns_set = set()
+    unique_constraints = []
+
+    for key in unq_set:
+        key_columns = (key,) if isinstance(key, str) else tuple(key)
+
+        constraint_name = f"uq_{table_name}_{'_'.join(key_columns)}"
+
+        if len(key_columns) == 1:
+            unq_columns_set.add(key_columns[0])
+        else:
+            unique_constraints.append(
+                UniqueConstraint(*key_columns, name=constraint_name)
+            )
 
     for schema_column in cls.schema_columns():
         # determine SQL column type
@@ -466,23 +483,22 @@ def generate_sqla_table(cls) -> Optional[Table]:
         is_pk = schema_column.is_pk
         is_fk = schema_column.is_fk
         is_nullable = schema_column.is_nullable
-        is_unique = schema_column.is_unique
         use_auto_timestamp = name in cls._timestamp_keys and not is_pk and not is_fk
         default_value = getattr(cls, name, None)
         column_type = schema_column.base or str
 
-        col_type = schema_column.column_type #PY_TO_SQLA.get(column_type, String)
+        col_type = schema_column.column_type
         col_args = [] if is_fk else [col_type]
+        is_unique_column = name in unq_columns_set
 
 
-        kwargs = {"primary_key": is_pk,"unique": is_unique, "nullable": is_nullable, "default": default_value}
+        kwargs = {"primary_key": is_pk,"unique": is_unique_column, "nullable": is_nullable, "default": default_value}
 
         # if this field is registered as a foreign key, add ForeignKey constraint
         if is_fk:
             column_type: BaseSchema = column_type
             fk_options = cls.__fk_options__.get(name, {})
             fk_table_name = column_type.__table_name__
-            # fk_pks = column_type.__primary_keys__
             fk_pk, fk_pk_type = ('id', PY_TO_SQLA.get(int))
             fk_pk_type = PY_TO_SQLA.get(int)
             col_args.append(ForeignKey(f"{fk_table_name}.{fk_pk}", **fk_options))
@@ -498,9 +514,11 @@ def generate_sqla_table(cls) -> Optional[Table]:
         # Ensure at least one primary key
         cls.__primary_key__ = 'id'
         columns.insert(0, Column("id", Integer, primary_key=True, autoincrement=True))
-    if unq_set:
-        constraint_name = f"uq_{table_name}_{'_'.join(unq_set)}"
-        columns.append(UniqueConstraint(*unq_set, name=constraint_name))
+    if unique_constraints:
+        columns.extend(unique_constraints)
+    # if unq_set:
+    #     constraint_name = f"uq_{table_name}_{'_'.join(unq_set)}"
+    #     columns.append(UniqueConstraint(*unq_set, name=constraint_name))
     # Create main table with the same metadata so FK resolution works
     table = Table(table_name, metadata, *columns)
     return table
@@ -580,6 +598,8 @@ def generate_sqla(
 
     if not constraint_cols and pk_columns:
         constraint_cols = pk_columns
+
+
     # ---------------------------
     # Base INSERT
     # ---------------------------

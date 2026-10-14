@@ -390,7 +390,6 @@ class PyonirDatabaseService:
         self.connect()
         for model in models:
             self.build_table_from_model(model)
-            self.build_fs_dirs_from_model(model)
         self.disconnect()
         return self
 
@@ -399,11 +398,6 @@ class PyonirDatabaseService:
             model.save_sql(model._sql_create_table, "create", dir_path=dir_path)
             model.save_sql(model._sql_upsert, "upsert", dir_path=dir_path)
             model.save_sql(model._sql_insert, "insert", dir_path=dir_path)
-
-    def build_fs_dirs_from_model(self, model: Type[BaseSchema]):
-        # if getattr(model, '_lookup_table', False):
-        #     model.init_lookup_table(self)
-        return self
 
     def build_table_from_model(self, model: Type[BaseSchema]):
         """Create a table in the database."""

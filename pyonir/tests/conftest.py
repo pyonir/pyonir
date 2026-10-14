@@ -304,7 +304,6 @@ def test_pyonir_db(test_app) -> PyonirMockDataBaseService:
     """
     db = (PyonirMockDataBaseService(test_app)
           .set_driver("sqlite").set_dbname("test_pyonir"))
-    db.build_fs_dirs_from_model(PyonirMockRole)
     yield db
 
     db.destroy()

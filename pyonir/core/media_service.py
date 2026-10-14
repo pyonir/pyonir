@@ -1,3 +1,4 @@
+import json
 import os, re, base64
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -83,6 +84,7 @@ class VideoMetadata:
     height: int
     duration: float | None
     codec: str | None
+    size: int
 
 
 @dataclass
@@ -90,6 +92,7 @@ class AudioMetadata:
     duration: float | None
     codec: str | None
     channels: int | None
+    size: int
 
 
 class MediaType(str):
@@ -102,7 +105,6 @@ class MediaType(str):
 @dataclass
 class Media:
     file_path: Path
-    size: int = None
     _metadata: ImageMetadata | AudioMetadata | VideoMetadata | None = None
 
     @property
@@ -111,8 +113,12 @@ class Media:
         return Site
 
     @property
+    def size(self) -> int | None:
+        return self.metadata.size or None
+
+    @property
     def metadata(self) -> ImageMetadata | AudioMetadata | VideoMetadata:
-        if not self.metadata:
+        if not self._metadata:
             self._metadata = inspect_media(self.file_path)
         return self._metadata
 
@@ -178,6 +184,14 @@ class Media:
         else:
             # Default fallback → save in original format
             img.save(output_path, format=fmt)
+
+    def to_dict(self, with_props = None):
+        return {
+            "name": self.file_name
+        }
+
+    def as_json(self, with_props = None):
+        return json.dumps(self.to_dict(with_props=with_props))
 
 T = TypeVar("T", bound=Media)
 
@@ -457,7 +471,7 @@ def inspect_media(media_file_path: Path) -> ImageMetadata | AudioMetadata | Vide
                 "duration":_duration,
                 "width": track.width,
                 "height": track.height,
-                "frame_rate": track.frame_rate,
-                "bit_rate": track.bit_rate,
+                # "frame_rate": track.frame_rate,
+                # "bit_rate": track.bit_rate,
                 "size": media_track_file.file_size,
             })

@@ -342,6 +342,29 @@ class PyonirDatabaseService:
         dbc._parent_db = self
         return dbc
 
+    def enable_wal(self):
+        """Enable WAL (Write-Ahead Logging) for concurrent reads and writes"""
+        self.connection.execute("PRAGMA journal_mode=WAL;")
+        self.connection.close()
+        return self
+
+    def enable_sync(self):
+        """Optimize disk synchronization (safe and much faster when combined with WAL)"""
+        self.connection.execute("PRAGMA synchronous=NORMAL;")
+        self.connection.close()
+        return self
+
+    def enable_fks_constraints(self):
+        """foreign key constraints are enforced (disabled by default in SQLite)"""
+        self.connection.execute("PRAGMA foreign_keys=ON;")
+        self.connection.close()
+        return self
+
+    def enable_timeout(self):
+        """Wait up to 5 seconds (5000ms) for write locks to clear before raising an error"""
+        self.connection.execute("PRAGMA busy_timeout=5000;")
+        return self
+
     def set_driver(self, driver: str) -> "PyonirDatabaseService":
         self._dbconfig.driver = Driver(driver)
         return self
@@ -372,7 +395,6 @@ class PyonirDatabaseService:
         return self
 
     def save_schemas_sql(self, dir_path: str):
-        if not self.pyonir_app.is_dev: return
         for model in self._schemas:
             model.save_sql(model._sql_create_table, "create", dir_path=dir_path)
             model.save_sql(model._sql_upsert, "upsert", dir_path=dir_path)
@@ -494,7 +516,7 @@ class PyonirDatabaseService:
         sql_files = query_fs(os.path.join(self.pyonir_app.backend_dirpath, 'sqlbase'),
                              model='path',
                              name_pattern="*.sql",
-                             exclude_dirs=('@migrated',))
+                             exclude_dirs=('@migrated','@schemas'))
         for sql_file in sql_files:
             self.sql_migrate(os.path.basename(sql_file), os.path.dirname(sql_file))
         pass
